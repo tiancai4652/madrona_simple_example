@@ -1,10 +1,18 @@
 set(SIMULATOR_SRCS
-    types.hpp sim.hpp sim.cpp
+    types.hpp sim.hpp build_topo.hpp sim.cpp fib_nexthop_init.hpp build_topo.cpp myQueue.cpp
 )
+
+# set(BUILD_TOPO_SRCS   
+#     build_topo.hpp build_topo.cpp 
+# )
 
 add_library(madrona_simple_ex_cpu_impl STATIC
     ${SIMULATOR_SRCS}
 )
+
+# add_library(madrona_simple_ex_cpu_impl STATIC
+#     ${BUILD_TOPO_SRCS}
+# )
 
 target_link_libraries(madrona_simple_ex_cpu_impl
     PUBLIC

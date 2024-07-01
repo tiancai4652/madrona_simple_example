@@ -1,0 +1,310 @@
+#include "sim.hpp"
+
+#include <madrona/mw_gpu_entry.hpp> 
+
+#include <madrona/taskgraph_builder.hpp>
+#include <madrona/math.hpp>
+#include <madrona/custom_context.hpp>
+
+#include "types.hpp"
+#include "init.hpp"
+
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+// #include <cstdio>
+// #include <cstring>
+// #include <cstdlib>
+
+using namespace madrona;
+using namespace madrona::math;
+
+namespace madsimple {
+
+// Archtype: Switch
+// SwitchType::edge
+// SwitchType
+// FIBTable
+// calc_next_hop()
+const int32_t k_ary = 4; 
+const int32_t num_switch = k_ary*k_ary*5/4;
+const int32_t num_host = k_ary*k_ary*k_ary/4;
+
+const int32_t central_fib_table[num_switch][num_host][k_ary] = ;
+
+void generate_switch(Engine &ctx, CountT k_ary)
+{
+    CountT num_edge_switch = k_ary*k_ary/2;
+    CountT num_aggr_switch = k_ary*k_ary/2; // the number of aggragate switch
+    CountT num_core_switch = k_ary*k_ary/4;
+
+    CountT num_host = k_ary*k_ary*k_ary/4;
+    CountT num_next_hop = k_ary;
+
+    // printf("*******generate_switch*******\n");
+    // build edge switch
+    for (int32_t i = 0; i < num_edge_switch; i++) {
+        Entity e_switch = ctx.makeEntity<Switch>();
+        ctx.get<SwitchType>(e_switch) = SwitchType::Edge;
+        ctx.get<SwitchID>(e_switch).switch_id = i;
+
+        for (int32_t j = 0; j < num_host; j++) {
+            for (int32_t k = 0; k < num_next_hop; k++) {
+                ctx.get<FIBTable>(e_switch).fib_table[j][k] = -1;
+            }
+        }
+
+        ctx.data()._switch[ctx.data().numSwitch++] = e_switch;
+    }
+    // build aggragate switch
+    for (int32_t i = 0; i < num_aggr_switch; i++) {
+        Entity e_switch = ctx.makeEntity<Switch>();
+        ctx.get<SwitchType>(e_switch) = SwitchType::Aggr;
+        ctx.get<SwitchID>(e_switch).switch_id = i+num_edge_switch;
+
+        for (int32_t j = 0; j < num_host; j++) {
+            for (int32_t k = 0; k < num_next_hop; k++) {
+                ctx.get<FIBTable>(e_switch).fib_table[j][k] = -1;
+            }
+        }
+
+        ctx.data()._switch[ctx.data().numSwitch++] = e_switch;
+    }
+    // build core switch
+    for (int32_t i = 0; i < num_core_switch; i++) {
+        Entity e_switch = ctx.makeEntity<Switch>();
+        ctx.get<SwitchType>(e_switch) = SwitchType::Core;
+        ctx.get<SwitchID>(e_switch).switch_id = i + num_edge_switch + num_aggr_switch;
+
+        for (int32_t j = 0; j < num_host; j++) {
+            for (int32_t k = 0; k < num_next_hop; k++) {
+                ctx.get<FIBTable>(e_switch).fib_table[j][k] = -1;
+            }
+        }
+
+        ctx.data()._switch[ctx.data().numSwitch++] = e_switch;
+    }
+    //printf("\n");
+}
+
+
+// // Check if an element is in an array
+// bool in_array(int32_t *array, int32_t size, int32_t element) {
+//     for (int32_t i = 0; i < size; i++) {
+//         if (array[i] == element) {
+//             return true;
+//         }
+//     }
+//     return false;
+// }
+
+
+// void generate_fib_table(Engine &ctx, CountT num_receiver, CountT k_ary)
+// {
+//     printf("*******Generate_fib_table*******\n");
+//     CountT num_edge_switch = k_ary*k_ary/2;
+//     CountT num_aggr_switch = k_ary*k_ary/2; // the number of aggragate switch
+//     CountT num_core_switch = k_ary*k_ary/4;
+
+//     // Read the paths from the file
+//     FILE* file = fopen("paths.txt", "r");
+//     if (!file) {
+//         printf("Failed to open the file.\n");
+//         return;
+//     }
+
+//     char line[1024]; // Assume the maximum line length is 1024
+//     while (fgets(line, sizeof(line), file)) {
+//         int32_t path[100]; // Assume the maximum path length is 100
+//         int32_t path_length = 0;
+//         char* token = strtok(line, " ");
+//         while (token) {
+//             path[path_length++] = atoi(token);
+//             token = strtok(NULL, " ");
+//         }
+
+//         // Update the FIB tables
+//         for (int32_t i = 1; i < path_length - 1; i++) { // Skip the first and last nodes (hosts)
+//             int32_t switch_id = path[i];
+//             int32_t next_hop = path[i + 1];
+//             int32_t dst_host = path[path_length - 1];
+//             Entity e_switch = ctx.data()._switch[switch_id];
+            
+//             int32_t *next_hops = ctx.get<FIBTable>(e_switch).fib_table[dst_host];
+//             if (!in_array(next_hops, k_ary, next_hop)) {
+//                 // Find the first -1 in the array and replace it with the next hop
+//                 for (int32_t j = 0; j < k_ary; j++) {
+//                     if (next_hops[j] == -1) {
+//                         next_hops[j] = next_hop;
+//                         break;
+//                     }
+//                 }
+//             }
+//         }
+//     }
+
+//     fclose(file);
+
+//     // After generating the FIB tables
+//     for (int32_t i = 0; i < num_edge_switch + num_aggr_switch + num_core_switch; i++) {
+//         Entity e_switch =  ctx.data()._switch[i];
+//         printf("Switch %d:\n", i);
+//         for (int j = 0; j < num_receiver; j++) {
+//             printf("  Destination host %d: ", j);
+//             int *next_hops = ctx.get<FIBTable>(e_switch).fib_table[j];
+//             for (int k = 0; k < k_ary*k_ary/2; k++) {
+//                 if (next_hops[k] != -1) {
+//                     printf("%d ", next_hops[k]);
+//                 } else {
+//                     break;
+//                 }
+//             }
+//             printf("\n");
+//         }
+//     }
+// }
+
+
+// void generate_in_port(Engine &ctx, CountT k_ary)
+// {
+//     CountT num_edge_switch = k_ary*k_ary/2;
+//     CountT num_aggr_switch = k_ary*k_ary/2; // the number of aggragate switch
+//     CountT num_core_switch = k_ary*k_ary/4;
+
+//     //printf("*******Generate ports and buffers*******\n");
+//     // ingress_ports for edge switch
+//     for (int32_t i = 0; i < num_edge_switch; i++) {
+//         for (int32_t j = 0; j < k_ary; j++) {
+//             Entity in_port = ctx.makeEntity<IngressPort>();
+//             //ctx.get<IsInport>(in_port).is_inport = 0;
+//             ctx.get<PortType>(in_port) = PortType::InPort;
+//             ctx.get<PortID>(in_port).port_id = j; //i*k_ary+j;
+//             ctx.get<PktBuf>(in_port).head = 0;
+//             ctx.get<PktBuf>(in_port).tail = 0;
+//             ctx.get<SwitchID>(in_port).switch_id = i;
+
+//             ctx.data().inPorts[ctx.data().numInPort++] = in_port;
+//         }
+//     }
+
+//     // ingress_ports for aggragate switch
+//     for (int32_t i = 0; i < num_aggr_switch; i++) {
+//         for (int32_t j = 0; j < k_ary; j++) {
+//             Entity in_port = ctx.makeEntity<IngressPort>();
+//             //ctx.get<IsInport>(in_port).is_inport = 0;
+//             ctx.get<PortType>(in_port) = PortType::InPort;
+//             ctx.get<PortID>(in_port).port_id = j;  //i*k_ary+j;
+//             ctx.get<PktBuf>(in_port).head = 0;
+//             ctx.get<PktBuf>(in_port).tail = 0;
+//             ctx.get<SwitchID>(in_port).switch_id = i + num_edge_switch;
+
+//             ctx.data().inPorts[ctx.data().numInPort++] = in_port;
+//         }
+//     }
+
+//     // ingress_ports for core switch
+//     for (int32_t i = 0; i < num_core_switch; i++) {
+//         for (int32_t j = 0; j < k_ary; j++) {
+//             Entity in_port = ctx.makeEntity<IngressPort>();
+//             //ctx.get<IsInport>(in_port).is_inport = 0;
+//             ctx.get<PortType>(in_port) = PortType::InPort;
+//             ctx.get<PortID>(in_port).port_id = j //i*k_ary+j;
+//             ctx.get<PktBuf>(in_port).head = 0;
+//             ctx.get<PktBuf>(in_port).tail = 0;
+//             ctx.get<SwitchID>(in_port).switch_id = i + num_edge_switch + num_aggr_switch;
+
+//             ctx.data().inPorts[ctx.data().numInPort++] = in_port;
+//         }
+//     }
+
+//     printf("\n");
+// }
+
+
+// void generate_e_port(Engine &ctx, CountT k_ary)
+// {
+//     CountT num_edge_switch = k_ary*k_ary/2;
+//     CountT num_aggr_switch = k_ary*k_ary/2; // the number of aggragate switch
+//     CountT num_core_switch = k_ary*k_ary/4;
+
+//     printf("*******Generate ports and buffers for egress_ports*******\n");
+//     // egress_ports for edge switch
+//     for (int32_t i = 0; i < num_edge_switch; i++) {
+//         for (int32_t j = 0; j < k_ary; j++) {
+//             Entity e_port = ctx.makeEntity<EgressPort>();
+//             ctx.get<SchedTrajType>(e_port) = SchedTrajType::FIFO;
+//             ctx.get<PortType>(e_port) = PortType::EPort;
+//             ctx.get<PortID>(in_port).port_id = j; //i*k_ary+j;
+//             ctx.get<PktBuf>(e_port).head = 0;
+//             ctx.get<PktBuf>(e_port).tail = 0;
+
+//             ctx.get<SwitchID>(e_port).switch_id = i; 
+//             ctx.get<NextSwitchID>(e_port).Next_switch_id = calc_next_hop(i); // next hop id
+
+//             ctx.data().ePorts[ctx.data().numEPort++] = in_port;
+//         }
+//     }
+
+//     // egress_ports for aggragate switch
+//     for (int32_t i = 0; i < num_aggr_switch; i++) {
+//         for (int32_t j = 0; j < k_ary; j++) {
+//             Entity e_port = ctx.makeEntity<EgressPort>();
+//             ctx.get<SchedTrajType>(e_port) = SchedTrajType::FIFO;
+//             ctx.get<PortType>(e_port) = PortType::EPort;
+//             ctx.get<PortID>(in_port).port_id = j; //num_edge_switch*k_ary + i*k_ary + j;
+//             ctx.get<PktBuf>(e_port).head = 0;
+//             ctx.get<PktBuf>(e_port).tail = 0;
+
+//             ctx.get<SwitchID>(in_port).switch_id = i + num_edge_switch;
+//             ctx.get<NextSwitchID>(e_port).Next_switch_id = calc_next_hop(i + num_edge_switch);
+
+//             ctx.data().ePorts[ctx.data().numEPort++] = in_port;
+//         }
+//     }
+
+//     // egress_ports for core switch
+//     for (int32_t i = 0; i < num_core_switch; i++) {
+//         for (int32_t j = 0; j < k_ary; j++) {
+
+//             Entity e_port = ctx.makeEntity<EgressPort>();
+//             ctx.get<SchedTrajType>(e_port) = SchedTrajType::FIFO;
+//             ctx.get<PortType>(e_port) = PortType::EPort;
+//             ctx.get<PortID>(in_port).port_id = j; //num_edge_switch*k_ary + num_core_switch*k_ary + i*k_ary+j;
+//             ctx.get<PktBuf>(e_port).head = 0;
+//             ctx.get<PktBuf>(e_port).tail = 0;
+//             ctx.get<SwitchID>(in_port).switch_id = i + num_edge_switch + num_aggr_switch;
+//             ctx.get<NextSwitchID>(e_port).Next_switch_id = calc_next_hop(i + num_edge_switch + num_aggr_switch); // next hop id
+
+//             ctx.data().ePorts[ctx.data().numEPort++] = in_port;
+//         }
+//     }
+// }
+
+
+
+// void generate_host(Engine &ctx, CountT num_sender, CountT num_receiver)
+// {
+//     //printf("*******Generate sender and receiver*******\n");
+//     // ingress_ports
+//     for (int32_t i = 0; i < num_sender; i++) {
+//         Entity sender_e = ctx.makeEntity<Sender>();
+//         ctx.get<SenderID>(sender_e).sender_id = i;
+//         ctx.get<EgressPortID>(sender_e).egress_port_id = i;
+//         ctx.data().sender[ctx.data().numSender++] = sender_e;
+//     }
+
+//     for (int32_t i = 0; i < num_receiver; i++) {
+//         Entity receiver_e = ctx.makeEntity<Receiver>();
+//         ctx.get<ReceiverID>(receiver_e).receiver_id = i;
+//         ctx.get<IngressPortID>(receiver_e).ingress_port_id = i;
+//         ctx.data().receiver[ctx.data().numReceiver++] = receiver_e;
+//     }
+//     //printf("\n");
+// }
+
+
+
+
+
+}
