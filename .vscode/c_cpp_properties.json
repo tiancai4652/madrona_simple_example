@@ -6,7 +6,9 @@
                 "${workspaceFolder}/**",
                 "/usr/include",
                 "/usr/local/include",
-                "/home/zhangran/work/project/madrona_simple_example/src/"
+                "/home/zhangran/work/project/madrona_simple_example/src",
+                "/home/zhangran/work/project/madrona_simple_example/include",
+                "/home/zhangran/work/project/madrona_simple_example/external/madrona/src"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

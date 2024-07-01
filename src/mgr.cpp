@@ -16,10 +16,6 @@
 #include <fstream>
 #include <string>
 
-// #include <fstream>
-// #include <sstream>
-
-
 using namespace madrona;
 using namespace madrona::py;
 
