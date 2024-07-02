@@ -33,6 +33,8 @@ public:
     MGR_EXPORT madrona::py::Tensor observationTensor() const;
     MGR_EXPORT madrona::py::Tensor rewardTensor() const;
     MGR_EXPORT madrona::py::Tensor doneTensor() const;
+    MGR_EXPORT madrona::py::Tensor resultsTensor() const;
+    
 
 private:
     struct Impl;

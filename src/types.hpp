@@ -10,7 +10,9 @@ enum class ExportID : uint32_t {
     GridPos,
     Reward,
     Done,
-    NumExports,
+    Results,
+    NumExports
+    
 };
 
 struct Reset {
@@ -37,6 +39,9 @@ struct Reward {
 struct Done {
     float episodeDone;
 };
+struct Results {
+    uint32_t results;
+};
 
 struct CurStep {
     uint32_t step;
@@ -48,7 +53,8 @@ struct Agent : public madrona::Archetype<
     GridPos,
     Reward,
     Done,
-    CurStep
+    CurStep,
+    Results
 > {};
 
 }

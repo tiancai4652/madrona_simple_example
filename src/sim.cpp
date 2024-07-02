@@ -16,7 +16,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Reward>();
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
-
+    registry.registerComponent<Results>();
     registry.registerArchetype<Agent>();
 
     // Export tensors for pytorch
@@ -25,6 +25,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, GridPos>((uint32_t)ExportID::GridPos);
     registry.exportColumn<Agent, Reward>((uint32_t)ExportID::Reward);
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
+    registry.exportColumn<Agent, Results>((uint32_t)ExportID::Results);
 }
 
 inline void tick(Engine &ctx,
@@ -33,7 +34,7 @@ inline void tick(Engine &ctx,
                  GridPos &grid_pos,
                  Reward &reward,
                  Done &done,
-                 CurStep &episode_step)
+                 CurStep &episode_step,Results &results)
 {
     const GridState *grid = ctx.data().grid;
 
@@ -99,7 +100,10 @@ inline void tick(Engine &ctx,
     if (cur_step == ctx.data().maxEpisodeLength - 1) {
         episode_done = true;
     }
-
+    results.results=results.results+1;
+    printf("****");
+    printf("%d", results.results);
+    printf("****");
     if (episode_done) {
         done.episodeDone = 1.f;
 
@@ -122,7 +126,7 @@ inline void tick(Engine &ctx,
 void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 {
     builder.addToGraph<ParallelForNode<Engine, tick,
-        Action, Reset, GridPos, Reward, Done, CurStep>>({});
+        Action, Reset, GridPos, Reward, Done, CurStep,Results>>({});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -140,6 +144,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Reward>(agent).r = 0.f;
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
+    ctx.get<Results>(agent).results = 0.f;
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);

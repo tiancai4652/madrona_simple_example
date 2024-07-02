@@ -41,4 +41,7 @@ for i in range(5):
     print(grid_world.rewards)
     print("Dones:   ")
     print(grid_world.dones)
+    
+    print("Results:   ")
+    print(grid_world.results)
     print()
