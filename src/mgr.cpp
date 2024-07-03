@@ -265,7 +265,7 @@ Tensor Manager::resultsTensor() const
 Tensor Manager::results2Tensor() const
 {
     return impl_->exportTensor(ExportID::Results2, Tensor::ElementType::Int32,
-        {impl_->cfg.numWorlds, 20});
+        {impl_->cfg.numWorlds, 1000});
 }
 
 }

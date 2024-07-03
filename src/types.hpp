@@ -44,7 +44,7 @@ struct Results {
     uint32_t results;
 };
 struct Results2 {
-   int32_t encoded_string[20];
+   int32_t encoded_string[1000];
 };
 
 struct CurStep {

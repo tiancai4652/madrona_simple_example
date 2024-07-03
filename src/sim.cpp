@@ -51,13 +51,25 @@ inline void tick(Engine &ctx,
                  Results2 &results2)
 {
     printf("tick");
+
     const char* new_string = "updated";
     size_t new_string_length = custom_strlen(new_string);
-    for (size_t i = 0; i < new_string_length && i < 20; ++i) {
-        results2.encoded_string[i] = static_cast<int32_t>(new_string[i]);
+    // 找到已有字符串的长度
+    size_t current_length = 0;
+    while (current_length < 1000 && results2.encoded_string[current_length] != 0) {
+        current_length++;
     }
-    if (new_string_length < 20) {
-        results2.encoded_string[new_string_length] = 0; // 终止符
+
+    // 确保新字符串不会超过最大长度
+    size_t available_space = 1000 - current_length;
+
+    for (size_t i = 0; i < new_string_length && i < available_space; ++i) {
+        results2.encoded_string[current_length + i] = static_cast<int32_t>(new_string[i]);
+    }
+
+    // 如果有空间，添加终止符
+    if (current_length + new_string_length < 1000) {
+        results2.encoded_string[current_length + new_string_length] = 0; // 终止符
     }
 
     const GridState *grid = ctx.data().grid;

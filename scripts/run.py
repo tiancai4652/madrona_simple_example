@@ -4,7 +4,7 @@ import torch
 from madrona_simple_example import GridWorld
 
 
-def string_to_tensor(s, max_len=20):
+def string_to_tensor(s, max_len=1000):
     """
     将字符串编码为数值，并存储在张量中
     :param s: 要编码的字符串
@@ -49,10 +49,19 @@ grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_
 
 print(grid_world.observations.shape)
 
-example_string = "hello"
+example_string = ""
 encoded_string_tensor = string_to_tensor(example_string)
 grid_world.results2.copy_(encoded_string_tensor)
+
 for i in range(5):
+    
+    if i>0:
+        results_tensor = grid_world.results2[0]
+        decoded_string = tensor_to_string(results_tensor)
+        example_string = decoded_string+" "+"hello"
+        encoded_string_tensor = string_to_tensor(example_string)
+        grid_world.results2.copy_(encoded_string_tensor)
+    
     print("Obs:")
     print(grid_world.observations)
 
@@ -75,7 +84,7 @@ for i in range(5):
     print(grid_world.results)
     
     print("Results2:   ")
-    print(grid_world.results2)
+    # print(grid_world.results2)
     # 获取并解码字符串张量
     results_tensor = grid_world.results2[0]
     decoded_string = tensor_to_string(results_tensor)
