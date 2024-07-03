@@ -58,7 +58,8 @@ struct Agent : public madrona::Archetype<
     Reward,
     Done,
     CurStep,
-    Results
+    Results,
+    Results2
 > {};
 
 }
