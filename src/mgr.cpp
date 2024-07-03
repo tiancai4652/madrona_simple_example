@@ -262,4 +262,10 @@ Tensor Manager::resultsTensor() const
         {impl_->cfg.numWorlds, 1});
 }
 
+Tensor Manager::results2Tensor() const
+{
+    return impl_->exportTensor(ExportID::Results2, Tensor::ElementType::Int32,
+        {impl_->cfg.numWorlds, 20});
+}
+
 }

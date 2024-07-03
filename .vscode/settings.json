@@ -2,5 +2,10 @@
     "C_Cpp.intelliSenseEngine": "default",
     "C_Cpp.errorSquiggles": "enabled",
     "C_Cpp.intelliSenseEngineFallback": "enabled",
-    "C_Cpp.loggingLevel": "Debug"
+    "C_Cpp.loggingLevel": "Debug",
+    "files.associations": {
+        "string": "cpp",
+        "iostream": "cpp",
+        "*.inc": "cpp"
+    }
 }

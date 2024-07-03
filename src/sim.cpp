@@ -1,8 +1,17 @@
 #include "sim.hpp"
-#include <madrona/mw_gpu_entry.hpp>
+#include <madrona/mw_gpu_entry.hpp> 
+
 
 using namespace madrona;
 using namespace madrona::math;
+
+size_t custom_strlen(const char* str) {
+    size_t len = 0;
+    while (str[len] != '\0') {
+        ++len;
+    }
+    return len;
+}
 
 namespace madsimple {
 
@@ -17,6 +26,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
     registry.registerComponent<Results>();
+    registry.registerComponent<Results2>();
     registry.registerArchetype<Agent>();
 
     // Export tensors for pytorch
@@ -26,6 +36,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, Reward>((uint32_t)ExportID::Reward);
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
     registry.exportColumn<Agent, Results>((uint32_t)ExportID::Results);
+    registry.exportColumn<Agent, Results2>((uint32_t)ExportID::Results2);
+    
 }
 
 inline void tick(Engine &ctx,
@@ -34,8 +46,20 @@ inline void tick(Engine &ctx,
                  GridPos &grid_pos,
                  Reward &reward,
                  Done &done,
-                 CurStep &episode_step,Results &results)
+                 CurStep &episode_step,
+                 Results &results,
+                 Results2 &results2)
 {
+    printf("tick");
+    const char* new_string = "updated";
+    size_t new_string_length = custom_strlen(new_string);
+    for (size_t i = 0; i < new_string_length && i < 20; ++i) {
+        results2.encoded_string[i] = static_cast<int32_t>(new_string[i]);
+    }
+    if (new_string_length < 20) {
+        results2.encoded_string[new_string_length] = 0; // 终止符
+    }
+
     const GridState *grid = ctx.data().grid;
 
     GridPos new_pos = grid_pos;
@@ -126,7 +150,7 @@ inline void tick(Engine &ctx,
 void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 {
     builder.addToGraph<ParallelForNode<Engine, tick,
-        Action, Reset, GridPos, Reward, Done, CurStep,Results>>({});
+        Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2>>({});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -135,6 +159,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
       grid(init.grid),
       maxEpisodeLength(cfg.maxEpisodeLength)
 {
+    printf("Sim Constructor");
     Entity agent = ctx.makeEntity<Agent>();
     ctx.get<Action>(agent) = Action::None;
     ctx.get<GridPos>(agent) = GridPos {

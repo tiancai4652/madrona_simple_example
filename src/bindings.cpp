@@ -132,6 +132,7 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
         .def("reward_tensor", &Manager::rewardTensor)
         .def("done_tensor", &Manager::doneTensor)
         .def("results_tensor", &Manager::resultsTensor)
+        .def("results2_tensor", &Manager::results2Tensor)
     ;
 }
 

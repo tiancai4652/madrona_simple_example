@@ -11,6 +11,7 @@ enum class ExportID : uint32_t {
     Reward,
     Done,
     Results,
+    Results2,
     NumExports
     
 };
@@ -41,6 +42,9 @@ struct Done {
 };
 struct Results {
     uint32_t results;
+};
+struct Results2 {
+   int32_t encoded_string[20];
 };
 
 struct CurStep {
