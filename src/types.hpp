@@ -51,6 +51,10 @@ struct CurStep {
     uint32_t step;
 };
 
+struct WorkloaderID {
+   int32_t workloader_id;
+};
+
 struct Agent : public madrona::Archetype<
     Reset,
     Action,

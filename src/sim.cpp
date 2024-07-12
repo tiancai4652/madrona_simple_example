@@ -159,10 +159,15 @@ inline void tick(Engine &ctx,
     reward.r = cur_cell.reward;
 }
 
+inline void workload(Engine &ctx, WorkloaderID &_worldload_id){
+    printf("*******Enter into wordload*********\n");
+}
+
 void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 {
-    builder.addToGraph<ParallelForNode<Engine, tick,
-        Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2>>({});
+    printf("*******Enter into setupTasks*********\n");
+    //builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2>>({});
+    auto workload_sys = builder.addToGraph<ParallelForNode<Engine, workload, WorkloaderID>>({});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -171,7 +176,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
       grid(init.grid),
       maxEpisodeLength(cfg.maxEpisodeLength)
 {
-    printf("Sim Constructor");
+    printf("Sim Constructorsssss\n");
     Entity agent = ctx.makeEntity<Agent>();
     ctx.get<Action>(agent) = Action::None;
     ctx.get<GridPos>(agent) = GridPos {
