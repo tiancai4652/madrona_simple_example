@@ -12,6 +12,8 @@ enum class ExportID : uint32_t {
     Done,
     Results,
     Results2,
+    MadronaEvent,
+    MadronaEvents,
     NumExports
     
 };
@@ -47,8 +49,28 @@ struct Results2 {
    int32_t encoded_string[1000];
 };
 
+struct  MadronaEvent
+{
+    int32_t type;
+    int32_t eventId;
+    int32_t time;
+    int32_t src;
+    int32_t dst;
+    int32_t size;
+};
+
+struct  MadronaEvents
+{
+    int32_t events[1000];
+};
+
+
 struct CurStep {
     uint32_t step;
+};
+
+struct WorkloaderID {
+   int32_t workloader_id;
 };
 
 struct Agent : public madrona::Archetype<
@@ -59,7 +81,8 @@ struct Agent : public madrona::Archetype<
     Done,
     CurStep,
     Results,
-    Results2
+    Results2,
+    MadronaEvents
 > {};
 
 }

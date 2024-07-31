@@ -35,6 +35,7 @@ public:
     MGR_EXPORT madrona::py::Tensor doneTensor() const;
     MGR_EXPORT madrona::py::Tensor resultsTensor() const;
     MGR_EXPORT madrona::py::Tensor results2Tensor() const;
+    MGR_EXPORT madrona::py::Tensor madronaEventsTensor() const;
     
 
 private:

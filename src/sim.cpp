@@ -27,6 +27,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<CurStep>();
     registry.registerComponent<Results>();
     registry.registerComponent<Results2>();
+    registry.registerComponent<MadronaEvents>();
     registry.registerArchetype<Agent>();
 
     // Export tensors for pytorch
@@ -37,7 +38,51 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
     registry.exportColumn<Agent, Results>((uint32_t)ExportID::Results);
     registry.exportColumn<Agent, Results2>((uint32_t)ExportID::Results2);
+    registry.exportColumn<Agent, MadronaEvents>((uint32_t)ExportID::MadronaEvents);
     
+}
+
+const int INTS_PER_EVENT = 6;  // 每个事件6个整数
+int parseMadronaEvents(const MadronaEvents &madronaEvents, MadronaEvent parsedEvents[], int maxEvents) {
+    int validEvents = 0;
+    for (int i = 0; i < maxEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex + 5 >= 1000) break;  // 确保不超出边界
+        MadronaEvent event = {
+            madronaEvents.events[baseIndex],
+            madronaEvents.events[baseIndex + 1],
+            madronaEvents.events[baseIndex + 2],
+            madronaEvents.events[baseIndex + 3],
+            madronaEvents.events[baseIndex + 4],
+            madronaEvents.events[baseIndex + 5]
+        };
+        // 如果解析出的事件全为0，则忽略
+        if (event.type == 0 && event.eventId == 0 &&
+            event.time == 0 && event.src == 0 &&
+            event.dst == 0 && event.size == 0) {
+            continue;
+        }
+        parsedEvents[validEvents++] = event;
+    }
+    return validEvents;  // 返回有效事件的数量
+}
+
+void updateMadronaEvents(MadronaEvents &madronaEvents, const MadronaEvent parsedEvents[], int numEvents) {
+    // 清空 madronaEvents
+    for (int i = 0; i < 1000; ++i) {
+        madronaEvents.events[i] = 0;
+    }
+
+    for (int i = 0; i < numEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex + 5 >= 1000) break;  // 确保不超出边界
+        madronaEvents.events[baseIndex] = parsedEvents[i].type;
+        madronaEvents.events[baseIndex + 1] = parsedEvents[i].eventId;
+        madronaEvents.events[baseIndex + 2] = parsedEvents[i].time;
+        madronaEvents.events[baseIndex + 3] = parsedEvents[i].src;
+        madronaEvents.events[baseIndex + 4] = parsedEvents[i].dst;
+        madronaEvents.events[baseIndex + 5] = parsedEvents[i].size;
+    }
 }
 
 inline void tick(Engine &ctx,
@@ -48,9 +93,34 @@ inline void tick(Engine &ctx,
                  Done &done,
                  CurStep &episode_step,
                  Results &results,
-                 Results2 &results2)
+                 Results2 &results2,
+                 MadronaEvents &madronaEvents)
 {
-    printf("tick");
+    printf("tick1\n");
+    const int maxEvents = 1000 / 6;
+    MadronaEvent parsedEvents[maxEvents];
+
+    // 解析MadronaEvents
+    int validEvents = parseMadronaEvents(madronaEvents, parsedEvents, maxEvents);
+    // 打印解析后的事件
+    for (int i = 0; i < validEvents; ++i) {
+        printf("Event %d: type=%d, eventId=%d, time=%d, src=%d, dst=%d, size=%d\n",
+               i, parsedEvents[i].type, parsedEvents[i].eventId,
+               parsedEvents[i].time, parsedEvents[i].src,
+               parsedEvents[i].dst, parsedEvents[i].size);
+    }
+    // 修改事件（示例：将第一个事件的time增加1）
+    if (validEvents > 0) {
+        parsedEvents[0].time += 1;
+    }
+    updateMadronaEvents(madronaEvents, parsedEvents, validEvents);
+
+
+    printf("tick2\n");
+    for (int i = 0; i < 6; i++)
+    {
+        printf("%d\n", results2.encoded_string[i]);
+    }
 
     const char* new_string = "updated";
     size_t new_string_length = custom_strlen(new_string);
@@ -137,9 +207,9 @@ inline void tick(Engine &ctx,
         episode_done = true;
     }
     results.results=results.results+1;
-    printf("****");
+    printf("sim****\n");
     printf("%d", results.results);
-    printf("****");
+    printf("sim****\n");
     if (episode_done) {
         done.episodeDone = 1.f;
 
@@ -159,10 +229,12 @@ inline void tick(Engine &ctx,
     reward.r = cur_cell.reward;
 }
 
+
+
 void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 {
-    builder.addToGraph<ParallelForNode<Engine, tick,
-        Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2>>({});
+    printf("*******Enter into setupTasks*********\n");
+    builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2,MadronaEvents>>({});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -171,7 +243,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
       grid(init.grid),
       maxEpisodeLength(cfg.maxEpisodeLength)
 {
-    printf("Sim Constructor");
+    printf("Sim Constructorsssss\n");
     Entity agent = ctx.makeEntity<Agent>();
     ctx.get<Action>(agent) = Action::None;
     ctx.get<GridPos>(agent) = GridPos {
@@ -182,6 +254,9 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
     ctx.get<Results>(agent).results = 0.f;
+    // ctx.get<MadronaEvents>(agent).events[0].type = 1;
+    printf("%d\n",ctx.get<MadronaEvents>(agent).events[0]);
+    //  printf("Sim Constructorsssss end\n");
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);
