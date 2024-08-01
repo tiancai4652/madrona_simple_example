@@ -38,6 +38,7 @@ class GridWorld:
         self.dones = self.sim.done_tensor().to_torch()
         self.results = self.sim.results_tensor().to_torch()
         self.results2 = self.sim.results2_tensor().to_torch()
+        self.simulation_time = self.sim.simulation_time_tensor().to_torch()
         self.madronaEvents = self.sim.madronaEvents_tensor().to_torch()
 
     def step(self):

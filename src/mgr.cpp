@@ -275,4 +275,10 @@ Tensor Manager::madronaEventsTensor() const
 }
 
 
+Tensor Manager::simulationTimeTensor() const
+{
+    return impl_->exportTensor(ExportID::SimulationTime, Tensor::ElementType::Int64,
+        {impl_->cfg.numWorlds, 1});
+}
+
 }

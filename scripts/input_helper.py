@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import struct
 
 
 class MadronaEvent:
@@ -10,9 +11,18 @@ class MadronaEvent:
         self.src = src
         self.dst = dst
         self.size = size
+    def __repr__(self):
+        return f"MadronaMsg(type={self.type}, eventId={self.eventId}, time={self.time}, src={self.src}, dst={self.dst}, size={self.size})"
+    def pack(self):
+        # 根据属性顺序和数据类型，这里假设所有属性都是整数
+        return struct.pack('6i', self.type, self.eventId, self.time, self.src, self.dst, self.size)
+    def print_event(self):
+        print(f"Type: {self.type}, Event ID: {self.eventId}, Time: {self.time}, Source: {self.src}, Destination: {self.dst}, Size: {self.size}")
 class MadronaEvents:
     def __init__(self, events):
         self.events = events
+    def __iter__(self):
+        return iter(self.events)
 
 def madrona_events_to_int_array(madrona_events):
     int_array = []

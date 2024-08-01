@@ -6,6 +6,15 @@
     "files.associations": {
         "string": "cpp",
         "iostream": "cpp",
-        "*.inc": "cpp"
+        "*.inc": "cpp",
+        "__bit_reference": "cpp",
+        "bitset": "cpp",
+        "map": "cpp",
+        "set": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "chrono": "cpp",
+        "algorithm": "cpp",
+        "__locale": "cpp"
     }
 }

@@ -27,6 +27,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<CurStep>();
     registry.registerComponent<Results>();
     registry.registerComponent<Results2>();
+    registry.registerComponent<SimulationTime>();
     registry.registerComponent<MadronaEvents>();
     registry.registerArchetype<Agent>();
 
@@ -38,6 +39,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
     registry.exportColumn<Agent, Results>((uint32_t)ExportID::Results);
     registry.exportColumn<Agent, Results2>((uint32_t)ExportID::Results2);
+     registry.exportColumn<Agent, SimulationTime>((uint32_t)ExportID::SimulationTime);
     registry.exportColumn<Agent, MadronaEvents>((uint32_t)ExportID::MadronaEvents);
     
 }
@@ -94,33 +96,50 @@ inline void tick(Engine &ctx,
                  CurStep &episode_step,
                  Results &results,
                  Results2 &results2,
+                 SimulationTime &time,
                  MadronaEvents &madronaEvents)
 {
-    printf("tick1\n");
+    printf("gpu:\n");
+    time.time=time.time+1;
+    printf("simulation_time: %ld\n",time.time);
+    printf("parse madronaEvents\n");
     const int maxEvents = 1000 / 6;
     MadronaEvent parsedEvents[maxEvents];
-
-    // 解析MadronaEvents
+    // parse MadronaEvents
     int validEvents = parseMadronaEvents(madronaEvents, parsedEvents, maxEvents);
-    // 打印解析后的事件
-    for (int i = 0; i < validEvents; ++i) {
-        printf("Event %d: type=%d, eventId=%d, time=%d, src=%d, dst=%d, size=%d\n",
-               i, parsedEvents[i].type, parsedEvents[i].eventId,
-               parsedEvents[i].time, parsedEvents[i].src,
-               parsedEvents[i].dst, parsedEvents[i].size);
-    }
-    // 修改事件（示例：将第一个事件的time增加1）
-    if (validEvents > 0) {
-        parsedEvents[0].time += 1;
-    }
-    updateMadronaEvents(madronaEvents, parsedEvents, validEvents);
-
-
-    printf("tick2\n");
-    for (int i = 0; i < 6; i++)
+    if (validEvents == 0)
     {
-        printf("%d\n", results2.encoded_string[i]);
+        printf("MadronaEvents is empty!\n ");
     }
+    else
+    {
+        // print events
+        for (int i = 0; i < validEvents; ++i)
+        {
+            printf("Event %d: type=%d, eventId=%d, time=%d, src=%d, dst=%d, size=%d\n",
+                   i, parsedEvents[i].type, parsedEvents[i].eventId,
+                   parsedEvents[i].time, parsedEvents[i].src,
+                   parsedEvents[i].dst, parsedEvents[i].size);
+        }
+        // // for instance: change one event property
+        // if (validEvents > 0)
+        // {
+        //     parsedEvents[0].time += 1;
+        // }
+        // updateMadronaEvents(madronaEvents, parsedEvents, validEvents);
+        for (int i = 0; i < validEvents; i++)
+        {
+            /* code */
+        }
+        
+
+    }
+
+    // printf("tick2\n");
+    // for (int i = 0; i < 6; i++)
+    // {
+    //     printf("%d\n", results2.encoded_string[i]);
+    // }
 
     const char* new_string = "updated";
     size_t new_string_length = custom_strlen(new_string);
@@ -207,9 +226,9 @@ inline void tick(Engine &ctx,
         episode_done = true;
     }
     results.results=results.results+1;
-    printf("sim****\n");
-    printf("%d", results.results);
-    printf("sim****\n");
+    // printf("sim****\n");
+    // printf("%d", results.results);
+    // printf("sim****\n");
     if (episode_done) {
         done.episodeDone = 1.f;
 
@@ -234,7 +253,7 @@ inline void tick(Engine &ctx,
 void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 {
     printf("*******Enter into setupTasks*********\n");
-    builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2,MadronaEvents>>({});
+    builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2,SimulationTime,MadronaEvents>>({});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -254,6 +273,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
     ctx.get<Results>(agent).results = 0.f;
+    ctx.get<SimulationTime>(agent).time = 0;
     // ctx.get<MadronaEvents>(agent).events[0].type = 1;
     printf("%d\n",ctx.get<MadronaEvents>(agent).events[0]);
     //  printf("Sim Constructorsssss end\n");

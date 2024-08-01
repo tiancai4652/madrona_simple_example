@@ -12,6 +12,6 @@ for _num_port in "${num_port[@]}"; do
     make -j 60
     cd ..
     # > out.file_$_num_port #$num_packet_total #> _${num_packet_total}_${_num_port}.log
-    python scripts/run.py $_num_port 
+    python scripts/run.py $_num_port  --gpu 
     # python scripts/run.py $_num_port  
 done

@@ -8,42 +8,20 @@ import posix_ipc
 import struct
 from input_helper import MadronaEvent,MadronaEvents,madrona_events_to_int_array,string_to_tensor,tensor_to_string,events_to_tensor,tensor_to_events,int_array_to_madrona_events
 
+import comm
 
-def comm():
-    memory = posix_ipc.SharedMemory("myshm")
-    map_file = mmap.mmap(memory.fd, mmap.PAGESIZE, mmap.MAP_SHARED, mmap.PROT_WRITE | mmap.PROT_READ)
-    semaphore_a = posix_ipc.Semaphore("semA")
-    semaphore_b = posix_ipc.Semaphore("semB")
+# read python params,set num_worlds and enable_gpu
+if(len(sys.argv)==1):
+    param1=1
+    enable_gpu=False
+else:
+    param1=int(sys.argv[1])
+    if len(sys.argv) >= 3 and sys.argv[2] == '--gpu':
+        enable_gpu=True
+num_worlds = param1
+enable_gpu_sim =enable_gpu
 
-    # 等待 C++ 程序的数据
-    semaphore_a.acquire()
-    data = map_file.read(4)
-    value = struct.unpack('i', data)[0]
-    print(f"Python: Received from C++: {value}")
-
-    # 处理数据并写回
-    new_value = value + 100
-    map_file.seek(0)
-    map_file.write(struct.pack('i', new_value))
-    print(f"Python: Data processed and written back: {new_value}")
-
-    # 通知 C++ 程序处理完成
-    semaphore_b.release()
-
-    # 清理资源
-    map_file.close()
-    memory.close_fd()
-    semaphore_a.close()
-    semaphore_b.close()
-
-
-# num_worlds = int(sys.argv[1])
-num_worlds = 1
-
-enable_gpu_sim = False
-# if len(sys.argv) >= 3 and sys.argv[2] == '--gpu':
-#     enable_gpu_sim = True
-
+# init 
 array_shape = [5,6]
 walls = np.zeros(array_shape)
 rewards = np.zeros(array_shape)
@@ -52,73 +30,66 @@ start_cell = np.array([4,5])
 end_cell = np.array([[4,5]])
 rewards[4, 0] = -1
 rewards[4, 5] = 1
-
 grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, 0)
-#grid_world.vis_world()
 
 
-print(grid_world.observations.shape)
-
+# memoryRW: set params string, for instance
 example_string = ""
 encoded_string_tensor = string_to_tensor(example_string)
 grid_world.results2.copy_(encoded_string_tensor)
 
-# events = [
-#   22, 100, 200, 300, 400, 500
-# ]
+# to do
+# memoryRW: read command and set field
+def receive_set_command():
+    # events = [
+    #     MadronaEvent(22, 100, 200, 300, 400, 500),
+    #     MadronaEvent(22, 101, 201, 301, 401, 501)
+    # ]
+    events=comm.receive_data()
+    madrona_events = MadronaEvents(events)
+    int_array = madrona_events_to_int_array(madrona_events)
+    int_tensor = events_to_tensor(int_array)
+    grid_world.madronaEvents.copy_(int_tensor)
 
-events = [
-    MadronaEvent(22, 100, 200, 300, 400, 500),
-    MadronaEvent(22, 101, 201, 301, 401, 501)
-]
-madrona_events = MadronaEvents(events)
-int_array = madrona_events_to_int_array(madrona_events)
-
-int_tensor = events_to_tensor(int_array)
-grid_world.madronaEvents.copy_(int_tensor)
-int_tensor=tensor_to_events(grid_world.madronaEvents)
-m_events=int_array_to_madrona_events(int_tensor)
-print(m_events.events[0].time)
-
-for i in range(5):
-# i=0
-# while True:
-    i=i+1 
-    if i>0:
-        # results_tensor = grid_world.results2[0]
-        # decoded_string = tensor_to_string(results_tensor)
-        # example_string = decoded_string+" "+"hello"
-        # encoded_string_tensor = string_to_tensor(example_string)
-        encoded_string_tensor=string_to_tensor("hello")
-        grid_world.results2.copy_(encoded_string_tensor)
-    
-    print("grid_world.madronaEvents:")
+    #  test read field
     int_tensor=tensor_to_events(grid_world.madronaEvents)
     m_events=int_array_to_madrona_events(int_tensor)
-    print(m_events.events[0].time)
+    for event in m_events:
+        event.print_event()
+    # process
+    for event in m_events:
+        # firsr to process sim_get_time event, type is 3
+        if event.type==3:
+            time=grid_world.simulation_time.cpu().item()
+            events = [MadronaEvent(event.type, event.eventId, time, 0, 0, 0)]
+            send_command(events)
+            receive_set_command()
+        # second, we process sim_schedule event, type is 2
+        # if event.type==2:
+            
+            
+
+def send_command(events):
+    comm.send_data(events)
     
-    # print("Obs:")
-    # print(grid_world.observations)
-
-    # grid_world.actions[:, 0] = torch.randint(0, 4, size=(num_worlds,))
-
-    # print("Actions:")
-    # print(grid_world.actions)
-
+for i in range(5):
+# while True:    
+    print("cpu:")
+    
+    print("time:")
+    print(grid_world.simulation_time.cpu().item())
+    # read command, set field
+    receive_set_command()
+    
+    # process next frame.
     grid_world.step()
     
-    # print("Rewards: ")
-    # print(grid_world.rewards)
-    # print("Dones:   ")
-    # print(grid_world.dones)
+    # to do
+    # read command result filed and send command.
+    # send_command()
     
-    # print("Results:   ")
-    # print(grid_world.results)
-    
-    # print("Results2:   ")
-    # results_tensor = grid_world.results2[0]
-    # decoded_string = tensor_to_string(results_tensor)
-    # print(decoded_string)
-
+    # to do
+    # check if end
+    # quit()
     
     print()
