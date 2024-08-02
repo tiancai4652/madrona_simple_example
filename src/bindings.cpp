@@ -134,7 +134,9 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
         .def("results_tensor", &Manager::resultsTensor)
         .def("results2_tensor", &Manager::results2Tensor)
         .def("madronaEvents_tensor", &Manager::madronaEventsTensor)
+        .def("madronaEventsResult_tensor", &Manager::madronaEventsResultTensor)
         .def("simulation_time_tensor", &Manager::simulationTimeTensor)
+        
     ;
 }
 

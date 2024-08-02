@@ -46,14 +46,16 @@ def receive_set_command():
     #     MadronaEvent(22, 101, 201, 301, 401, 501)
     # ]
     events=comm.receive_data()
-    madrona_events = MadronaEvents(events)
-    int_array = madrona_events_to_int_array(madrona_events)
-    int_tensor = events_to_tensor(int_array)
-    grid_world.madronaEvents.copy_(int_tensor)
+    # madrona_events = MadronaEvents(events)
+    # int_array = madrona_events_to_int_array(madrona_events)
+    # int_tensor = events_to_tensor(int_array)
+    # grid_world.madronaEvents.copy_(int_tensor)
 
     #  test read field
-    int_tensor=tensor_to_events(grid_world.madronaEvents)
-    m_events=int_array_to_madrona_events(int_tensor)
+    # int_tensor=tensor_to_events(grid_world.madronaEvents)
+    # m_events=int_array_to_madrona_events(int_tensor)
+    
+    m_events=events
     for event in m_events:
         event.print_event()
     # process
@@ -64,8 +66,26 @@ def receive_set_command():
             events = [MadronaEvent(event.type, event.eventId, time, 0, 0, 0)]
             send_command(events)
             receive_set_command()
-        # second, we process sim_schedule event, type is 2
-        # if event.type==2:
+        # second, we process sim_schedule and sim_send, type is 2,0
+        if event.type==2 or event.type==0:
+            # read event buffer
+            int_tensor=tensor_to_events(grid_world.madronaEvents)
+            m_events=int_array_to_madrona_events(int_tensor)
+            # add new event
+            m_events.events.append(event)
+            # set back
+            madrona_events = MadronaEvents(m_events)
+            int_array = madrona_events_to_int_array(madrona_events)
+            int_tensor = events_to_tensor(int_array)
+            grid_world.madronaEvents.copy_(int_tensor)
+            
+            int_tensor=tensor_to_events(grid_world.madronaEvents)
+            m_events=int_array_to_madrona_events(int_tensor)
+            for event in m_events.events:
+                event.print_event()
+            
+            grid_world.step()
+            
             
             
 
@@ -81,8 +101,21 @@ for i in range(5):
     # read command, set field
     receive_set_command()
     
+    # events = [
+    #     MadronaEvent(22, 100, 200, 300, 400, 500),
+    #     MadronaEvent(22, 101, 201, 301, 401, 501)
+    # ]
+    # madrona_events = MadronaEvents(events)
+    # int_array = madrona_events_to_int_array(madrona_events)
+    # int_tensor = events_to_tensor(int_array)
+    # grid_world.madronaEvents.copy_(int_tensor)
+    # int_tensor=tensor_to_events(grid_world.madronaEvents)
+    # m_events=int_array_to_madrona_events(int_tensor)
+    # for event in m_events.events:
+    #     event.print_event()
+    
     # process next frame.
-    grid_world.step()
+    # grid_world.step()
     
     # to do
     # read command result filed and send command.

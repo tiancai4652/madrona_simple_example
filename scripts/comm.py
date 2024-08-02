@@ -30,6 +30,7 @@ def _create_and_write_shared_memory(messages,map_file):
 def receive_data():
     # wait msg
     semaphore_a.acquire()
+    map_file.seek(0)
     # read msg num
     numMessages, = struct.unpack('i', map_file.read(4))  
     messages = []

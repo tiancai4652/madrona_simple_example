@@ -15,6 +15,7 @@ enum class ExportID : uint32_t {
     SimulationTime,
     MadronaEvent,
     MadronaEvents,
+    MadronaEventsResult,
     NumExports
     
 };
@@ -60,7 +61,17 @@ struct  MadronaEvent
     int32_t size;
 };
 
-struct  MadronaEvents
+struct MadronaEventsQueue
+{
+    int32_t events[1000];
+};
+
+struct MadronaEvents
+{
+    int32_t events[1000];
+};
+
+struct  MadronaEventsResult
 {
     int32_t events[1000];
 };
@@ -92,6 +103,8 @@ struct Agent : public madrona::Archetype<
     Results,
     Results2,
     SimulationTime,
+    MadronaEventsQueue,
+    MadronaEventsResult,
     MadronaEvents
 > {};
 
