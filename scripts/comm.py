@@ -7,7 +7,7 @@ from input_helper import MadronaEvent as MadronaMsg
 # init
 numMessages=1
 memory = posix_ipc.SharedMemory("myshm")
-size=24*numMessages+4
+size=28*numMessages+4
 map_file = mmap.mmap(memory.fd, size, mmap.MAP_SHARED, mmap.PROT_WRITE | mmap.PROT_READ)
 # map_file = mmap.mmap(memory.fd, mmap.PAGESIZE, mmap.MAP_SHARED, mmap.PROT_WRITE | mmap.PROT_READ)
 semaphore_a = posix_ipc.Semaphore("semA")
@@ -17,7 +17,7 @@ semaphore_b = posix_ipc.Semaphore("semB")
 def _create_and_write_shared_memory(messages,map_file):
     num_messages = len(messages)
     header_size = struct.calcsize('i')  # 消息数量头部大小
-    message_size = struct.calcsize('6i')  # 每个 MadronaMsg 的大小
+    message_size = struct.calcsize('7i')  # 每个 MadronaMsg 的大小
 
     # 写入消息数量到头部
     map_file.seek(0)

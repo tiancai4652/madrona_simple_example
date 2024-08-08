@@ -67,7 +67,7 @@ def receive_set_command():
             send_command(events)
             receive_set_command()
         # second, we process sim_schedule and sim_send, type is 2,0
-        if event.type==2 or event.type==0:
+        elif event.type==2 or event.type==0:
             # read event buffer
             int_tensor=tensor_to_events(grid_world.madronaEvents)
             m_events=int_array_to_madrona_events(int_tensor)
@@ -83,17 +83,22 @@ def receive_set_command():
             m_events=int_array_to_madrona_events(int_tensor)
             for event in m_events.events:
                 event.print_event()
-            
+            # assume one event per time.
             grid_world.step()
-            
+        #  third, "event type == -100" means nothing. for go next frame.
+        elif event.type==-100:
+            # assume one event per time.
+            grid_world.step()
+            break
             
             
 
 def send_command(events):
     comm.send_data(events)
-    
-for i in range(5):
-# while True:    
+
+
+# for i in range(5):
+while True:    
     print("cpu:")
     
     print("time:")
@@ -119,8 +124,24 @@ for i in range(5):
     
     # to do
     # read command result filed and send command.
-    # send_command()
     
+    # send_command()
+    int_tensor=tensor_to_events(grid_world.madronaEventsResult)
+    m_events=int_array_to_madrona_events(int_tensor)
+    if len(m_events.events)>0:
+        for event in m_events.events:
+            event.print_event()
+        send_command([m_events.events[0]])
+        # remove 0
+        m_events.events[0].set_empty()
+        # set back
+        madrona_events = MadronaEvents(m_events)
+        int_array = madrona_events_to_int_array(madrona_events)
+        int_tensor = events_to_tensor(int_array)
+        grid_world.madronaEventsResult.copy_(int_tensor)
+        
+    else:
+        send_command([])
     # to do
     # check if end
     # quit()

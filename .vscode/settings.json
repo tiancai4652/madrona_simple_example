@@ -19,6 +19,22 @@
         "any": "cpp",
         "optional": "cpp",
         "memory": "cpp",
-        "random": "cpp"
+        "random": "cpp",
+        "__hash_table": "cpp",
+        "__split_buffer": "cpp",
+        "__tree": "cpp",
+        "array": "cpp",
+        "deque": "cpp",
+        "initializer_list": "cpp",
+        "list": "cpp",
+        "queue": "cpp",
+        "regex": "cpp",
+        "span": "cpp",
+        "stack": "cpp",
+        "string_view": "cpp",
+        "valarray": "cpp",
+        "vector": "cpp",
+        "ranges": "cpp",
+        "utility": "cpp"
     }
 }

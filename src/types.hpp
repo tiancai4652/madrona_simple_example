@@ -59,6 +59,7 @@ struct  MadronaEvent
     int32_t src;
     int32_t dst;
     int32_t size;
+    int32_t port;
 };
 
 struct MadronaEventsQueue

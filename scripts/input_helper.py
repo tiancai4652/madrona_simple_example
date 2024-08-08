@@ -4,20 +4,31 @@ import struct
 
 
 class MadronaEvent:
-    def __init__(self, type, eventId, time, src, dst, size):
+    def __init__(self, type, eventId, time, src, dst, size,port=0):
         self.type = type
         self.eventId = eventId
         self.time = time
         self.src = src
         self.dst = dst
         self.size = size
+        self.port = port
     def __repr__(self):
-        return f"MadronaMsg(type={self.type}, eventId={self.eventId}, time={self.time}, src={self.src}, dst={self.dst}, size={self.size})"
+        return f"MadronaMsg(type={self.type}, eventId={self.eventId}, time={self.time}, src={self.src}, dst={self.dst}, size={self.size},port={self.port})"
     def pack(self):
         # 根据属性顺序和数据类型，这里假设所有属性都是整数
-        return struct.pack('6i', self.type, self.eventId, self.time, self.src, self.dst, self.size)
+        return struct.pack('7i', self.type, self.eventId, self.time, self.src, self.dst, self.size, self.port)
     def print_event(self):
-        print(f"Type: {self.type}, Event ID: {self.eventId}, Time: {self.time}, Source: {self.src}, Destination: {self.dst}, Size: {self.size}")
+        print(f"Type: {self.type}, Event ID: {self.eventId}, Time: {self.time}, Source: {self.src}, Destination: {self.dst}, Size: {self.size}, Port: {self.port}")
+    def set_empty(self):
+        self.type = 0
+        self.eventId = 0
+        self.time = 0
+        self.src = 0
+        self.dst = 0
+        self.size = 0
+        self.port = 0
+        
+        
 class MadronaEvents:
     def __init__(self, events):
         self.events = events
@@ -33,17 +44,18 @@ def madrona_events_to_int_array(madrona_events):
             event.time,
             event.src,
             event.dst,
-            event.size
+            event.size,
+            event.port
         ])
     return int_array
 def int_array_to_madrona_events(int_array):
     int_array = int_array[0]  # 获取一维张量数组
     events = []
-    for i in range(0, len(int_array), 6):
-        if i + 5 >= len(int_array):  # 如果不足6个元素则停止
+    for i in range(0, len(int_array), 7):
+        if i + 6 >= len(int_array):  # 如果不足7个元素则停止
             break
         if int_array[i] == 0 and int_array[i+1] == 0 and int_array[i+2] == 0 and \
-           int_array[i+3] == 0 and int_array[i+4] == 0 and int_array[i+5] == 0:
+           int_array[i+3] == 0 and int_array[i+4] == 0 and int_array[i+5] == 0and int_array[i+6] == 0:
             continue  # 忽略所有字段都为0的事件
         event = MadronaEvent(
             int_array[i],
@@ -51,7 +63,8 @@ def int_array_to_madrona_events(int_array):
             int_array[i+2],
             int_array[i+3],
             int_array[i+4],
-            int_array[i+5]
+            int_array[i+5],
+            int_array[i+6]
         )
         events.append(event)
     return MadronaEvents(events)
