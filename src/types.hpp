@@ -16,6 +16,7 @@ enum class ExportID : uint32_t {
     MadronaEvent,
     MadronaEvents,
     MadronaEventsResult,
+    ProcessParams,
     NumExports
     
 };
@@ -82,6 +83,11 @@ struct  Configuration
     int32_t events[1000];
 };
 
+struct  ProcessParams
+{
+    int32_t params[1000];
+};
+
 
 
 struct CurStep {
@@ -106,7 +112,8 @@ struct Agent : public madrona::Archetype<
     SimulationTime,
     MadronaEventsQueue,
     MadronaEventsResult,
-    MadronaEvents
+    MadronaEvents,
+    ProcessParams
 > {};
 
 }

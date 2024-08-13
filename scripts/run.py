@@ -60,8 +60,12 @@ def receive_set_command():
         event.print_event()
     # process
     for event in m_events:
+        # set scheduel event num
+        if event.type==10:
+            int_tensor = events_to_tensor([event.src,0])
+            grid_world.processParams.copy_(int_tensor)
         # firsr to process sim_get_time event, type is 3
-        if event.type==3:
+        elif event.type==3:
             time=grid_world.simulation_time.cpu().item()
             events = [MadronaEvent(event.type, event.eventId, time, 0, 0, 0)]
             send_command(events)
@@ -115,7 +119,7 @@ while True:
     # int_tensor = events_to_tensor(int_array)
     # grid_world.madronaEvents.copy_(int_tensor)
     # int_tensor=tensor_to_events(grid_world.madronaEvents)
-    # m_events=int_array_to_madrona_events(int_tensor)
+    # m_events=int_array_to_madrona_events(int_tensor).
     # for event in m_events.events:
     #     event.print_event()
     
@@ -132,6 +136,7 @@ while True:
         for event in m_events.events:
             event.print_event()
         send_command([m_events.events[0]])
+        receive_set_command()
         # remove 0
         m_events.events[0].set_empty()
         # set back
@@ -140,8 +145,8 @@ while True:
         int_tensor = events_to_tensor(int_array)
         grid_world.madronaEventsResult.copy_(int_tensor)
         
-    else:
-        send_command([])
+    # else:
+    #     send_command([])
     # to do
     # check if end
     # quit()

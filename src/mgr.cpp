@@ -287,4 +287,10 @@ Tensor Manager::simulationTimeTensor() const
         {impl_->cfg.numWorlds, 1});
 }
 
+Tensor Manager::processParamsTensor() const
+{
+    return impl_->exportTensor(ExportID::SimulationTime, Tensor::ElementType::Int64,
+        {impl_->cfg.numWorlds, 1000});
+}
+
 }

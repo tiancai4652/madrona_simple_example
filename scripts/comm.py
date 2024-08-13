@@ -48,6 +48,7 @@ def send_data(messages):
     print(f"Madrona: Data written to Astrasim: {messages}")
     # notifies astrasim
     semaphore_b.release()
+    # semaphore_a.acquire()
 
 # def comm():
 #     data= receive_data()

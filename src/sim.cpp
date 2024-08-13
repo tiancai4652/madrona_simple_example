@@ -31,6 +31,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<MadronaEventsQueue>();
     registry.registerComponent<MadronaEvents>();
     registry.registerComponent<MadronaEventsResult>();
+    registry.registerComponent<ProcessParams>();
     registry.registerArchetype<Agent>();
 
     // Export tensors for pytorch
@@ -44,6 +45,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, SimulationTime>((uint32_t)ExportID::SimulationTime);
     registry.exportColumn<Agent, MadronaEvents>((uint32_t)ExportID::MadronaEvents);
     registry.exportColumn<Agent, MadronaEventsResult>((uint32_t)ExportID::MadronaEventsResult);
+     registry.exportColumn<Agent, ProcessParams>((uint32_t)ExportID::ProcessParams);
     
 }
 
@@ -195,12 +197,15 @@ inline void tick(Engine &ctx,
                  // external event to put in madronaEventsQueue
                  MadronaEvents &madronaEvents,
                  // event result at current time
-                 MadronaEventsResult &madronaEventsResult)
+                 MadronaEventsResult &madronaEventsResult
+                 )
 {
     printf("gpu:\n");
-    
+    // printf("processParams: %ld\n",processParams.params[0]);
     printf("simulation_time: %ld\n",time.time);
     printf("parse madronaEvents\n");
+    // 1 frame 1 ns
+    time.time = time.time + 1;
 
 // test
 // for (int i = 0; i < 6; i++)
@@ -269,6 +274,7 @@ inline void tick(Engine &ctx,
             if (eventsQueue[i].type == 2)
             {
                 eventsResult[resultIndex] = eventsQueue[i];
+                eventsResult[resultIndex].time=time.time;
                 resultIndex++;
                 printf("process sim_schedule event.\n");
             }
@@ -278,6 +284,7 @@ inline void tick(Engine &ctx,
                 // to do : 1 set flow entities
                 // to do : 2 set result to eventsResult when flow done 
                 eventsResult[resultIndex] = eventsQueue[i];
+                eventsResult[resultIndex].time=time.time;
                 resultIndex++;
                 printf("process sim_send event.\n");
             }
@@ -301,8 +308,7 @@ inline void tick(Engine &ctx,
        updateMadronaEvents(madronaEventsQueue, eventsFuture, futureIndex+1);
     }
 
-    // 1 frame 1 ns
-    time.time = time.time + 1;
+    
 
     // printf("tick2\n");
     // for (int i = 0; i < 6; i++)
