@@ -20,7 +20,7 @@ else:
         enable_gpu=True
 num_worlds = param1
 enable_gpu_sim =enable_gpu
-gpu_id=1
+gpu_id=0
 
 # init 
 array_shape = [5,6]
