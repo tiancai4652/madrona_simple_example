@@ -197,11 +197,12 @@ inline void tick(Engine &ctx,
                  // external event to put in madronaEventsQueue
                  MadronaEvents &madronaEvents,
                  // event result at current time
-                 MadronaEventsResult &madronaEventsResult
+                 MadronaEventsResult &madronaEventsResult,
+                 ProcessParams &processParams
                  )
 {
     printf("gpu:\n");
-    // printf("processParams: %ld\n",processParams.params[0]);
+    printf("processParams: %ld\n",processParams.params[0]);
     printf("simulation_time: %ld\n",time.time);
     printf("parse madronaEvents\n");
     // 1 frame 1 ns
@@ -428,7 +429,7 @@ inline void tick(Engine &ctx,
 void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 {
     printf("*******Enter into setupTasks*********\n");
-    builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2,SimulationTime,MadronaEventsQueue,MadronaEvents,MadronaEventsResult>>({});
+    builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2,SimulationTime,MadronaEventsQueue,MadronaEvents,MadronaEventsResult,ProcessParams>>({});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)

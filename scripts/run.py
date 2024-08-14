@@ -20,6 +20,7 @@ else:
         enable_gpu=True
 num_worlds = param1
 enable_gpu_sim =enable_gpu
+gpu_id=1
 
 # init 
 array_shape = [5,6]
@@ -30,7 +31,7 @@ start_cell = np.array([4,5])
 end_cell = np.array([[4,5]])
 rewards[4, 0] = -1
 rewards[4, 5] = 1
-grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, 0)
+grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, gpu_id)
 
 
 # memoryRW: set params string, for instance
