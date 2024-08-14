@@ -202,7 +202,8 @@ inline void tick(Engine &ctx,
                  )
 {
     printf("gpu:\n");
-    printf("processParams: %d\n", processParams.params[0]);
+    printf("schedule run: %d\n", processParams.params[0]);
+    printf("flow run: %d\n", processParams.params[1]);
     printf("simulation_time: %ld\n",time.time);
     printf("parse madronaEvents\n");
     // 1 frame 1 ns

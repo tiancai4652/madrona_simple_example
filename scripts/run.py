@@ -34,6 +34,11 @@ rewards[4, 5] = 1
 grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, gpu_id)
 
 
+schedule_event=[]
+flow_event=[]
+schedule_num=-1
+flow_num=-1
+
 # memoryRW: set params string, for instance
 example_string = ""
 encoded_string_tensor = string_to_tensor(example_string)
@@ -42,6 +47,7 @@ grid_world.results2.copy_(encoded_string_tensor)
 # to do
 # memoryRW: read command and set field
 def receive_set_command():
+    global schedule_event,flow_event,schedule_num,flow_num
     # events = [
     #     MadronaEvent(22, 100, 200, 300, 400, 500),
     #     MadronaEvent(22, 101, 201, 301, 401, 501)
@@ -59,12 +65,21 @@ def receive_set_command():
     m_events=events
     for event in m_events:
         event.print_event()
-    # process
+    # process one event per time
     for event in m_events:
         # set scheduel event num
+        # event.src in torch[0] is schedule num.
         if event.type==10:
-            int_tensor = events_to_tensor([event.src,0])
-            grid_world.processParams.copy_(int_tensor)
+            schedule_num=event.src
+            events = [MadronaEvent(0,0 ,0, 0, 0, 0)]
+            send_command(events)
+            receive_set_command()
+        # event.src in torch[0] is schedule num.
+        elif event.type==20:
+            flow_num=event.src
+            events = [MadronaEvent(0,0 ,0, 0, 0, 0)]
+            send_command(events)
+            receive_set_command()
         # firsr to process sim_get_time event, type is 3
         elif event.type==3:
             time=grid_world.simulation_time.cpu().item()
@@ -73,23 +88,57 @@ def receive_set_command():
             receive_set_command()
         # second, we process sim_schedule and sim_send, type is 2,0
         elif event.type==2 or event.type==0:
-            # read event buffer
-            int_tensor=tensor_to_events(grid_world.madronaEvents)
-            m_events=int_array_to_madrona_events(int_tensor)
-            # add new event
-            m_events.events.append(event)
-            # set back
-            madrona_events = MadronaEvents(m_events)
-            int_array = madrona_events_to_int_array(madrona_events)
-            int_tensor = events_to_tensor(int_array)
-            grid_world.madronaEvents.copy_(int_tensor)
+            if event.type==2:
+                schedule_event.append(event)
+            if event.type==0:
+                flow_event.append(event) 
             
-            int_tensor=tensor_to_events(grid_world.madronaEvents)
-            m_events=int_array_to_madrona_events(int_tensor)
-            for event in m_events.events:
-                event.print_event()
-            # assume one event per time.
-            grid_world.step()
+            # tell madrona to run next frames until get result.
+            if len(schedule_event)>=schedule_num and schedule_num!=-1:
+                # read event buffer
+                int_tensor=tensor_to_events(grid_world.madronaEvents)
+                m_events=int_array_to_madrona_events(int_tensor)
+                # add new event
+                m_events.events.append(event)
+                # set back
+                madrona_events = MadronaEvents(m_events)
+                int_array = madrona_events_to_int_array(madrona_events)
+                int_tensor = events_to_tensor(int_array)
+                grid_world.madronaEvents.copy_(int_tensor)
+                schedule_num=-1
+                
+                # index=0 means run scheduel 
+                int_tensor = events_to_tensor([1,0])
+                grid_world.processParams.copy_(int_tensor)
+                # int_tensor=tensor_to_events(grid_world.madronaEvents)
+                # m_events=int_array_to_madrona_events(int_tensor)
+                # for event in m_events.events:
+                #     event.print_event()
+                # assume one event per time.
+                grid_world.step()
+                        # tell madrona to run next frames until get result.
+            if len(flow_event)>=flow_num and flow_num!=-1:
+                # read event buffer
+                int_tensor=tensor_to_events(grid_world.madronaEvents)
+                m_events=int_array_to_madrona_events(int_tensor)
+                # add new event
+                m_events.events.append(event)
+                # set back
+                madrona_events = MadronaEvents(m_events)
+                int_array = madrona_events_to_int_array(madrona_events)
+                int_tensor = events_to_tensor(int_array)
+                grid_world.madronaEvents.copy_(int_tensor)
+                flow_num=-1
+                
+                # index=0 means run scheduel 
+                int_tensor = events_to_tensor([0,1])
+                grid_world.processParams.copy_(int_tensor)
+                # int_tensor=tensor_to_events(grid_world.madronaEvents)
+                # m_events=int_array_to_madrona_events(int_tensor)
+                # for event in m_events.events:
+                #     event.print_event()
+                # assume one event per time.
+                grid_world.step()
         #  third, "event type == -100" means nothing. for go next frame.
         elif event.type==-100:
             # assume one event per time.
@@ -108,43 +157,50 @@ while True:
     
     print("time:")
     print(grid_world.simulation_time.cpu().item())
-    # read command, set field
-    receive_set_command()
     
-    # events = [
-    #     MadronaEvent(22, 100, 200, 300, 400, 500),
-    #     MadronaEvent(22, 101, 201, 301, 401, 501)
-    # ]
-    # madrona_events = MadronaEvents(events)
-    # int_array = madrona_events_to_int_array(madrona_events)
-    # int_tensor = events_to_tensor(int_array)
-    # grid_world.madronaEvents.copy_(int_tensor)
-    # int_tensor=tensor_to_events(grid_world.madronaEvents)
-    # m_events=int_array_to_madrona_events(int_tensor).
-    # for event in m_events.events:
-    #     event.print_event()
+    # not finish
+    int_tensor=tensor_to_events(grid_world.processParams)
+    if(int_tensor[0][0]==1 or int_tensor[0][1]==1):
+        grid_world.step()
+    else:
     
-    # process next frame.
-    # grid_world.step()
-    
-    # to do
-    # read command result filed and send command.
-    
-    # send_command()
-    int_tensor=tensor_to_events(grid_world.madronaEventsResult)
-    m_events=int_array_to_madrona_events(int_tensor)
-    if len(m_events.events)>0:
-        for event in m_events.events:
-            event.print_event()
-        send_command([m_events.events[0]])
+        # read command, set field
         receive_set_command()
-        # remove 0
-        m_events.events[0].set_empty()
-        # set back
-        madrona_events = MadronaEvents(m_events)
-        int_array = madrona_events_to_int_array(madrona_events)
-        int_tensor = events_to_tensor(int_array)
-        grid_world.madronaEventsResult.copy_(int_tensor)
+        
+        # events = [
+        #     MadronaEvent(22, 100, 200, 300, 400, 500),
+        #     MadronaEvent(22, 101, 201, 301, 401, 501)
+        # ]
+        # madrona_events = MadronaEvents(events)
+        # int_array = madrona_events_to_int_array(madrona_events)
+        # int_tensor = events_to_tensor(int_array)
+        # grid_world.madronaEvents.copy_(int_tensor)
+        # int_tensor=tensor_to_events(grid_world.madronaEvents)
+        # m_events=int_array_to_madrona_events(int_tensor).
+        # for event in m_events.events:
+        #     event.print_event()
+        
+        # process next frame.
+        # grid_world.step()
+        
+        # to do
+        # read command result filed and send command.
+        
+        # send_command()
+        int_tensor=tensor_to_events(grid_world.madronaEventsResult)
+        m_events=int_array_to_madrona_events(int_tensor)
+        if len(m_events.events)>0:
+            for event in m_events.events:
+                event.print_event()
+            send_command([m_events.events[0]])
+            receive_set_command()
+            # remove 0
+            m_events.events[0].set_empty()
+            # set back
+            madrona_events = MadronaEvents(m_events)
+            int_array = madrona_events_to_int_array(madrona_events)
+            int_tensor = events_to_tensor(int_array)
+            grid_world.madronaEventsResult.copy_(int_tensor)
         
     # else:
     #     send_command([])
@@ -152,4 +208,4 @@ while True:
     # check if end
     # quit()
     
-    print()
+    # print()
