@@ -40,12 +40,12 @@ def receive_data():
         unpacked_data = struct.unpack('6i', data)
         message = MadronaMsg(*unpacked_data)  
         messages.append(message)
-    print(f"Madrona: Received from Astrasim: {messages}")
+    # print(f"Madrona: Received from Astrasim: {messages}")
     return messages
 
 def send_data(messages):
     _create_and_write_shared_memory(messages,map_file)
-    print(f"Madrona: Data written to Astrasim: {messages}")
+    # print(f"Madrona: Data written to Astrasim: {messages}")
     # notifies astrasim
     semaphore_b.release()
     # semaphore_a.acquire()

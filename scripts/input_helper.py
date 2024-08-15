@@ -69,6 +69,9 @@ def int_array_to_madrona_events(int_array):
         events.append(event)
     return MadronaEvents(events)
 
+def empty_tensor(max_len=1000):
+    tensor = torch.zeros(max_len, dtype=torch.int32)
+    return tensor
 
 def string_to_tensor(s, max_len=1000):
     """

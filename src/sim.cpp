@@ -201,13 +201,14 @@ inline void tick(Engine &ctx,
                  ProcessParams &processParams
                  )
 {
+
+
     printf("gpu:\n");
     printf("schedule run: %d\n", processParams.params[0]);
     printf("flow run: %d\n", processParams.params[1]);
     printf("simulation_time: %ld\n",time.time);
-    printf("parse madronaEvents\n");
-    // 1 frame 1 ns
-    time.time = time.time + 1;
+
+    
 
 // test
 // for (int i = 0; i < 6; i++)
@@ -215,7 +216,7 @@ inline void tick(Engine &ctx,
 //     printf("%d",madronaEvents.events[i]);
 // }
 
-
+    printf("parse madronaEvents\n");
     const int maxEvents = 1000 / 7;
     MadronaEvent parsedEvents[maxEvents];
     // parse MadronaEvents
@@ -257,6 +258,9 @@ inline void tick(Engine &ctx,
         // updateMadronaEvents(madronaEvents, parsedEvents, validEvents);
     }
 
+        // 1 frame 1 ns
+    time.time = time.time + 1;
+
     MadronaEvent eventsQueue[maxEvents];
     // process event queue
     int eventsQueueNum = parseMadronaEvents(madronaEventsQueue, eventsQueue, maxEvents);
@@ -276,9 +280,10 @@ inline void tick(Engine &ctx,
             if (eventsQueue[i].type == 2)
             {
                 eventsResult[resultIndex] = eventsQueue[i];
-                eventsResult[resultIndex].time=time.time;
+                // scheduel not to set time
+                // eventsResult[resultIndex].time=time.time;
                 resultIndex++;
-                printf("process sim_schedule event.\n");
+                printf("process sim_schedule event. time: %d\n",eventsResult[resultIndex].time);
             }
             // sim_send event.
             else if (eventsQueue[i].type == 0)
@@ -301,12 +306,12 @@ inline void tick(Engine &ctx,
     // put to madronaEventsResult
     if (resultIndex > 0)
     {
-        printf("resultNum:%d",resultIndex+1);
+        printf("resultNum:%d\n",resultIndex+1);
         updateMadronaEvents(madronaEventsResult, eventsResult, resultIndex+1);
     }
     else 
     {
-        printf("futureNum:%d",futureIndex+1);
+        printf("futureNum:%d\n",futureIndex+1);
        updateMadronaEvents(madronaEventsQueue, eventsFuture, futureIndex+1);
     }
 
@@ -318,111 +323,111 @@ inline void tick(Engine &ctx,
     //     printf("%d\n", results2.encoded_string[i]);
     // }
 
-    const char* new_string = "updated";
-    size_t new_string_length = custom_strlen(new_string);
-    // 找到已有字符串的长度
-    size_t current_length = 0;
-    while (current_length < 1000 && results2.encoded_string[current_length] != 0) {
-        current_length++;
-    }
+    // const char* new_string = "updated";
+    // size_t new_string_length = custom_strlen(new_string);
+    // // 找到已有字符串的长度
+    // size_t current_length = 0;
+    // while (current_length < 1000 && results2.encoded_string[current_length] != 0) {
+    //     current_length++;
+    // }
 
-    // 确保新字符串不会超过最大长度
-    size_t available_space = 1000 - current_length;
+    // // 确保新字符串不会超过最大长度
+    // size_t available_space = 1000 - current_length;
 
-    for (size_t i = 0; i < new_string_length && i < available_space; ++i) {
-        results2.encoded_string[current_length + i] = static_cast<int32_t>(new_string[i]);
-    }
+    // for (size_t i = 0; i < new_string_length && i < available_space; ++i) {
+    //     results2.encoded_string[current_length + i] = static_cast<int32_t>(new_string[i]);
+    // }
 
-    // 如果有空间，添加终止符
-    if (current_length + new_string_length < 1000) {
-        results2.encoded_string[current_length + new_string_length] = 0; // 终止符
-    }
+    // // 如果有空间，添加终止符
+    // if (current_length + new_string_length < 1000) {
+    //     results2.encoded_string[current_length + new_string_length] = 0; // 终止符
+    // }
 
-    const GridState *grid = ctx.data().grid;
+    // const GridState *grid = ctx.data().grid;
 
-    GridPos new_pos = grid_pos;
+    // GridPos new_pos = grid_pos;
 
-    switch (action) {
-        case Action::Up: {
-            new_pos.y += 1;
-        } break;
-        case Action::Down: {
-            new_pos.y -= 1;
-        } break;
-        case Action::Left: {
-            new_pos.x -= 1;
-        } break;
-        case Action::Right: {
-            new_pos.x += 1;
-        } break;
-        default: break;
-    }
+    // switch (action) {
+    //     case Action::Up: {
+    //         new_pos.y += 1;
+    //     } break;
+    //     case Action::Down: {
+    //         new_pos.y -= 1;
+    //     } break;
+    //     case Action::Left: {
+    //         new_pos.x -= 1;
+    //     } break;
+    //     case Action::Right: {
+    //         new_pos.x += 1;
+    //     } break;
+    //     default: break;
+    // }
 
-    action = Action::None;
+    // action = Action::None;
 
-    if (new_pos.x < 0) {
-        new_pos.x = 0;
-    }
+    // if (new_pos.x < 0) {
+    //     new_pos.x = 0;
+    // }
 
-    if (new_pos.x >= grid->width) {
-        new_pos.x = grid->width - 1;
-    }
+    // if (new_pos.x >= grid->width) {
+    //     new_pos.x = grid->width - 1;
+    // }
 
-    if (new_pos.y < 0) {
-        new_pos.y = 0;
-    }
+    // if (new_pos.y < 0) {
+    //     new_pos.y = 0;
+    // }
 
-    if (new_pos.y >= grid->height) {
-        new_pos.y = grid->height -1;
-    }
+    // if (new_pos.y >= grid->height) {
+    //     new_pos.y = grid->height -1;
+    // }
 
 
-    {
-        const Cell &new_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
+    // {
+    //     const Cell &new_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
 
-        if ((new_cell.flags & CellFlag::Wall)) {
-            new_pos = grid_pos;
-        }
-    }
+    //     if ((new_cell.flags & CellFlag::Wall)) {
+    //         new_pos = grid_pos;
+    //     }
+    // }
 
-    const Cell &cur_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
+    // const Cell &cur_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
 
-    bool episode_done = false;
-    if (reset.resetNow != 0) {
-        reset.resetNow = 0;
-        episode_done = true;
-    }
+    // bool episode_done = false;
+    // if (reset.resetNow != 0) {
+    //     reset.resetNow = 0;
+    //     episode_done = true;
+    // }
 
-    if ((cur_cell.flags & CellFlag::End)) {
-        episode_done = true;
-    }
+    // if ((cur_cell.flags & CellFlag::End)) {
+    //     episode_done = true;
+    // }
 
-    uint32_t cur_step = episode_step.step;
+    // uint32_t cur_step = episode_step.step;
 
-    if (cur_step == ctx.data().maxEpisodeLength - 1) {
-        episode_done = true;
-    }
-    results.results=results.results+1;
-    // printf("sim****\n");
-    // printf("%d", results.results);
-    // printf("sim****\n");
-    if (episode_done) {
-        done.episodeDone = 1.f;
+    // if (cur_step == ctx.data().maxEpisodeLength - 1) {
+    //     episode_done = true;
+    // }
+    // results.results=results.results+1;
+    // // printf("sim****\n");
+    // // printf("%d", results.results);
+    // // printf("sim****\n");
+    // if (episode_done) {
+    //     done.episodeDone = 1.f;
 
-        new_pos = GridPos {
-            grid->startY,
-            grid->startX,
-        };
+    //     new_pos = GridPos {
+    //         grid->startY,
+    //         grid->startX,
+    //     };
 
-        episode_step.step = 0;
-    } else {
-        done.episodeDone = 0.f;
-        episode_step.step = cur_step + 1;
-    }
+    //     episode_step.step = 0;
+    // } else {
+    //     done.episodeDone = 0.f;
+    //     episode_step.step = cur_step + 1;
+    // }
 
-    // Commit new position
-    grid_pos = new_pos;
-    reward.r = cur_cell.reward;
+    // // Commit new position
+    // grid_pos = new_pos;
+    // reward.r = cur_cell.reward;
 }
 
 
