@@ -75,15 +75,16 @@ def receive_set_command():
         # event.src in torch[0] is schedule num.
         if event.type==10:
             schedule_num=event.src
-            events = [MadronaEvent(0,0 ,0, 0, 0, 0)]
-            send_command(events)
-            receive_set_command()
-        # event.src in torch[0] is schedule num.
-        elif event.type==20:
             flow_num=event.src
             events = [MadronaEvent(0,0 ,0, 0, 0, 0)]
             send_command(events)
             receive_set_command()
+        # event.src in torch[0] is schedule num.
+        # elif event.type==20:
+        #     flow_num=event.src
+        #     events = [MadronaEvent(0,0 ,0, 0, 0, 0)]
+        #     send_command(events)
+        #     receive_set_command()
         # firsr to process sim_get_time event, type is 3
         elif event.type==3:
             time=grid_world.simulation_time.cpu().item()
@@ -156,7 +157,7 @@ def receive_set_command():
         #  third, "event type == -100" means nothing. for go next frame.
         elif event.type==-100:
             # assume one event per time.
-            grid_world.step()
+            # grid_world.step()
             break
             
             
