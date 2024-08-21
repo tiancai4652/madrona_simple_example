@@ -283,17 +283,26 @@ inline void tick(Engine &ctx,
                 // scheduel not to set time
                 // eventsResult[resultIndex].time=time.time;
                 resultIndex++;
-                printf("process sim_schedule event. time: %d\n",eventsResult[resultIndex].time);
+                printf("process sim_schedule event. time: %d\n", eventsResult[resultIndex].time);
             }
             // sim_send event.
             else if (eventsQueue[i].type == 0)
             {
-                // to do : 1 set flow entities
-                // to do : 2 set result to eventsResult when flow done 
-                eventsResult[resultIndex] = eventsQueue[i];
-                eventsResult[resultIndex].time=time.time;
-                resultIndex++;
-                printf("process sim_send event.\n");
+                // assume flow finish at 20 frame after.
+                if (time.time >= eventsQueue[i].time + 20)
+                {
+                    // to do : 1 set flow entities
+                    // to do : 2 set result to eventsResult when flow done
+                    eventsResult[resultIndex] = eventsQueue[i];
+                    eventsResult[resultIndex].time = eventsQueue[i].time + 20;
+                    resultIndex++;
+                    printf("process sim_send event,time:%ld.\n", time.time);
+                }
+                else
+                {
+                    eventsFuture[futureIndex] = eventsQueue[i];
+                    futureIndex++;
+                }
             }
         }
         else
@@ -306,16 +315,12 @@ inline void tick(Engine &ctx,
     // put to madronaEventsResult
     if (resultIndex > 0)
     {
-        printf("resultNum:%d\n",resultIndex+1);
-        updateMadronaEvents(madronaEventsResult, eventsResult, resultIndex+1);
-    }
-    else 
-    {
-        printf("futureNum:%d\n",futureIndex+1);
-       updateMadronaEvents(madronaEventsQueue, eventsFuture, futureIndex+1);
+        printf("resultNum:%d\n", resultIndex + 1);
+        updateMadronaEvents(madronaEventsResult, eventsResult, resultIndex + 1);
     }
 
-    
+    printf("futureNum:%d\n", futureIndex + 1);
+    updateMadronaEvents(madronaEventsQueue, eventsFuture, futureIndex + 1);
 
     // printf("tick2\n");
     // for (int i = 0; i < 6; i++)
