@@ -28,3 +28,13 @@ num_worlds: 1
 step_num: 2
 step function took 0.01643 seconds to execute.
 
+finish_time: 2024-10-23 21:42:21.106091
+num_worlds: 1
+step_num: 23
+step function took 0.11083 seconds to execute.
+
+finish_time: 2024-10-23 21:48:49.730884
+num_worlds: 1
+step_num: 23
+step function took 0.00958 seconds to execute.
+

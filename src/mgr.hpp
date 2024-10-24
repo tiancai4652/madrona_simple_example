@@ -34,13 +34,6 @@ public:
     MGR_EXPORT madrona::py::Tensor rewardTensor() const;
     MGR_EXPORT madrona::py::Tensor doneTensor() const;
     MGR_EXPORT madrona::py::Tensor resultsTensor() const;
-    MGR_EXPORT madrona::py::Tensor results2Tensor() const;
-    MGR_EXPORT madrona::py::Tensor madronaEventsTensor() const;
-    MGR_EXPORT madrona::py::Tensor simulationTimeTensor() const;
-    MGR_EXPORT madrona::py::Tensor madronaEventsResultTensor() const;
-    MGR_EXPORT madrona::py::Tensor processParamsTensor() const;
-    
-    
 
 private:
     struct Impl;

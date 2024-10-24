@@ -1,5 +1,8 @@
 #include "mgr.hpp"
-#include "sim.hpp"
+// #include "sim.hpp"
+#include "2_sim_mflow.hpp"
+
+// #include "dcqcn.hpp"
 
 #include <madrona/utils.hpp>
 #include <madrona/importer.hpp>
@@ -15,6 +18,10 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+
+// #include <fstream>
+// #include <sstream>
+
 
 using namespace madrona;
 using namespace madrona::py;
@@ -79,6 +86,9 @@ struct Manager::CPUImpl final : Manager::Impl {
 struct Manager::GPUImpl final : Manager::Impl {
     MWCudaExecutor gpuExec;
 
+    // added by fei
+    // CUcontext cu_ctx = MWCudaExecutor::initCUDA(cfg.gpuID);
+
     inline GPUImpl(const Manager::Config &mgr_cfg,
                    const Sim::Config &sim_cfg,
                    EpisodeManager *episode_mgr,
@@ -94,12 +104,20 @@ struct Manager::GPUImpl final : Manager::Impl {
                   .worldDataAlignment = alignof(Sim),
                   .numWorlds = mgr_cfg.numWorlds,
                   .numExportedBuffers = (uint32_t)ExportID::NumExports, 
+                  // deleted by fei
                   .gpuID = (uint32_t)mgr_cfg.gpuID,
+                  
               }, {
                   { SIMPLE_SRC_LIST },
                   { SIMPLE_COMPILE_FLAGS },
                   CompileConfig::OptMode::LTO,
               })
+            //   }, {
+            //       { SIMPLE_SRC_LIST },
+            //       { SIMPLE_COMPILE_FLAGS },
+            //       CompileConfig::OptMode::LTO,
+            //   }, cu_ctx)
+
     {}
 
     inline virtual ~GPUImpl() final {
@@ -176,6 +194,8 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
 #ifndef MADRONA_CUDA_SUPPORT
         FATAL("CUDA support not compiled in!");
 #else
+
+        //
         EpisodeManager *episode_mgr = 
             (EpisodeManager *)cu::allocGPU(sizeof(EpisodeManager));
         // Set the current episode count to 0
@@ -260,37 +280,6 @@ Tensor Manager::resultsTensor() const
 {
     return impl_->exportTensor(ExportID::Results, Tensor::ElementType::Int32,
         {impl_->cfg.numWorlds, 1});
-}
-
-Tensor Manager::results2Tensor() const
-{
-    return impl_->exportTensor(ExportID::Results2, Tensor::ElementType::Int32,
-        {impl_->cfg.numWorlds, 1000});
-}
-
-Tensor Manager::madronaEventsTensor() const
-{
-    return impl_->exportTensor(ExportID::MadronaEvents, Tensor::ElementType::Int32,
-        {impl_->cfg.numWorlds, 1000});
-}
-
-Tensor Manager::madronaEventsResultTensor() const
-{
-    return impl_->exportTensor(ExportID::MadronaEventsResult, Tensor::ElementType::Int32,
-        {impl_->cfg.numWorlds, 1000});
-}
-
-
-Tensor Manager::simulationTimeTensor() const
-{
-    return impl_->exportTensor(ExportID::SimulationTime, Tensor::ElementType::Int64,
-        {impl_->cfg.numWorlds, 1});
-}
-
-Tensor Manager::processParamsTensor() const
-{
-    return impl_->exportTensor(ExportID::ProcessParams, Tensor::ElementType::Int32,
-        {impl_->cfg.numWorlds, 1000});
 }
 
 }

@@ -11,7 +11,7 @@ class GridWorld:
                  rewards,
                  walls,
                  gpu_sim = False,
-                 gpu_id = 0,
+                 _gpu_id = 0,
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -28,7 +28,7 @@ class GridWorld:
                 max_episode_length = 0, # No max
                 exec_mode = madrona.ExecMode.CUDA if gpu_sim else madrona.ExecMode.CPU,
                 num_worlds = num_worlds,
-                gpu_id = gpu_id,
+                gpu_id = _gpu_id,
             )
 
         self.force_reset = self.sim.reset_tensor().to_torch()
@@ -37,11 +37,6 @@ class GridWorld:
         self.rewards = self.sim.reward_tensor().to_torch()
         self.dones = self.sim.done_tensor().to_torch()
         self.results = self.sim.results_tensor().to_torch()
-        self.results2 = self.sim.results2_tensor().to_torch()
-        self.simulation_time = self.sim.simulation_time_tensor().to_torch()
-        self.madronaEvents = self.sim.madronaEvents_tensor().to_torch()
-        self.madronaEventsResult = self.sim.madronaEventsResult_tensor().to_torch()
-        self.processParams = self.sim.processParams_tensor().to_torch()
 
     def step(self):
         self.sim.step()
