@@ -1612,6 +1612,282 @@ inline void flow_receive(Engine &ctx, FlowID &_flow_id, PktBuf &_recv_queue,
 }
 
 
+///////////////////////////////////////////////////////////////////
+// support for astrasim
+const int INTS_PER_EVENT = 7;  // 每个事件7个整数
+int parseMadronaEvents(const MadronaEvents &madronaEvents, MadronaEvent parsedEvents[], int maxEvents) {
+    int validEvents = 0;
+    for (int i = 0; i < maxEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex + INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        MadronaEvent event = {
+            madronaEvents.events[baseIndex],
+            madronaEvents.events[baseIndex + 1],
+            madronaEvents.events[baseIndex + 2],
+            madronaEvents.events[baseIndex + 3],
+            madronaEvents.events[baseIndex + 4],
+            madronaEvents.events[baseIndex + 5],
+            madronaEvents.events[baseIndex + 6]
+        };
+        // 如果解析出的事件全为0,则忽略
+        if (event.type == 0 && event.eventId == 0 &&
+            event.time == 0 && event.src == 0 &&
+            event.dst == 0 && event.size == 0 && event.port == 0) {
+            continue;
+        }
+        parsedEvents[validEvents++] = event;
+    }
+    return validEvents;  // 返回有效事件的数量
+}
+void updateMadronaEvents(MadronaEvents &madronaEvents, const MadronaEvent parsedEvents[], int numEvents) {
+    // 清空 madronaEvents
+    for (int i = 0; i < 1000; ++i) {
+        madronaEvents.events[i] = 0;
+    }
+
+    for (int i = 0; i < numEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex +  INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        madronaEvents.events[baseIndex] = parsedEvents[i].type;
+        madronaEvents.events[baseIndex + 1] = parsedEvents[i].eventId;
+        madronaEvents.events[baseIndex + 2] = parsedEvents[i].time;
+        madronaEvents.events[baseIndex + 3] = parsedEvents[i].src;
+        madronaEvents.events[baseIndex + 4] = parsedEvents[i].dst;
+        madronaEvents.events[baseIndex + 5] = parsedEvents[i].size;
+        madronaEvents.events[baseIndex + 6] = parsedEvents[i].port;
+    }
+}  
+
+int parseMadronaEvents(const MadronaEventsResult &madronaEvents, MadronaEvent parsedEvents[], int maxEvents) {
+    int validEvents = 0;
+    for (int i = 0; i < maxEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex + INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        MadronaEvent event = {
+            madronaEvents.events[baseIndex],
+            madronaEvents.events[baseIndex + 1],
+            madronaEvents.events[baseIndex + 2],
+            madronaEvents.events[baseIndex + 3],
+            madronaEvents.events[baseIndex + 4],
+            madronaEvents.events[baseIndex + 5],
+            madronaEvents.events[baseIndex + 6]
+        };
+        // 如果解析出的事件全为0,则忽略
+        if (event.type == 0 && event.eventId == 0 &&
+            event.time == 0 && event.src == 0 &&
+            event.dst == 0 && event.size == 0 && event.port == 0) {
+            continue;
+        }
+        parsedEvents[validEvents++] = event;
+    }
+    return validEvents;  // 返回有效事件的数量
+}
+void updateMadronaEvents(MadronaEventsResult &madronaEvents, const MadronaEvent parsedEvents[], int numEvents) {
+    // 清空 madronaEvents
+    for (int i = 0; i < 1000; ++i) {
+        madronaEvents.events[i] = 0;
+    }
+
+    for (int i = 0; i < numEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex +  INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        madronaEvents.events[baseIndex] = parsedEvents[i].type;
+        madronaEvents.events[baseIndex + 1] = parsedEvents[i].eventId;
+        madronaEvents.events[baseIndex + 2] = parsedEvents[i].time;
+        madronaEvents.events[baseIndex + 3] = parsedEvents[i].src;
+        madronaEvents.events[baseIndex + 4] = parsedEvents[i].dst;
+        madronaEvents.events[baseIndex + 5] = parsedEvents[i].size;
+        madronaEvents.events[baseIndex + 6] = parsedEvents[i].port;
+    }
+}
+
+int parseMadronaEvents(const MadronaEventsQueue &madronaEvents, MadronaEvent parsedEvents[], int maxEvents) {
+    int validEvents = 0;
+    for (int i = 0; i < maxEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex + INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        MadronaEvent event = {
+            madronaEvents.events[baseIndex],
+            madronaEvents.events[baseIndex + 1],
+            madronaEvents.events[baseIndex + 2],
+            madronaEvents.events[baseIndex + 3],
+            madronaEvents.events[baseIndex + 4],
+            madronaEvents.events[baseIndex + 5],
+            madronaEvents.events[baseIndex + 6]
+        };
+        // 如果解析出的事件全为0,则忽略
+        if (event.type == 0 && event.eventId == 0 &&
+            event.time == 0 && event.src == 0 &&
+            event.dst == 0 && event.size == 0 && event.port == 0) {
+            continue;
+        }
+        parsedEvents[validEvents++] = event;
+    }
+    return validEvents;  // 返回有效事件的数量
+}
+void updateMadronaEvents(MadronaEventsQueue &madronaEvents, const MadronaEvent parsedEvents[], int numEvents) {
+    // 清空 madronaEvents
+    for (int i = 0; i < 1000; ++i) {
+        madronaEvents.events[i] = 0;
+    }
+
+    for (int i = 0; i < numEvents; ++i) {
+        int baseIndex = i * INTS_PER_EVENT;
+        if (baseIndex +  INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        madronaEvents.events[baseIndex] = parsedEvents[i].type;
+        madronaEvents.events[baseIndex + 1] = parsedEvents[i].eventId;
+        madronaEvents.events[baseIndex + 2] = parsedEvents[i].time;
+        madronaEvents.events[baseIndex + 3] = parsedEvents[i].src;
+        madronaEvents.events[baseIndex + 4] = parsedEvents[i].dst;
+        madronaEvents.events[baseIndex + 5] = parsedEvents[i].size;
+        madronaEvents.events[baseIndex + 6] = parsedEvents[i].port;
+    }
+}
+
+
+
+inline void tick(Engine &ctx,
+                 Action &action,
+                 Reset &reset,
+                 GridPos &grid_pos,
+                 Reward &reward,
+                 Done &done,
+                 CurStep &episode_step,
+                 Results &results,
+                 Results2 &results2,
+                 // SimulationTime
+                 SimulationTime &time,
+                 // internal event queue to save event excuted in future 
+                 MadronaEventsQueue &madronaEventsQueue,
+                 // external event to put in madronaEventsQueue
+                 MadronaEvents &madronaEvents,
+                 // event result at current time
+                 MadronaEventsResult &madronaEventsResult,
+                 ProcessParams &processParams
+                 )
+{
+
+
+    printf("gpu:\n");
+    printf("schedule run: %d\n", processParams.params[0]);
+    printf("flow run: %d\n", processParams.params[1]);
+    printf("simulation_time: %ld\n",time.time);
+
+    
+
+// test
+// for (int i = 0; i < 6; i++)
+// {
+//     printf("%d",madronaEvents.events[i]);
+// }
+
+    printf("parse madronaEvents\n");
+    const int maxEvents = 1000 / 7;
+    MadronaEvent parsedEvents[maxEvents];
+    // parse MadronaEvents
+    int validEvents = parseMadronaEvents(madronaEvents, parsedEvents, maxEvents);
+    if (validEvents == 0)
+    {
+        printf("MadronaEvents is empty!\n ");
+    }
+    // add madronaEvents to madronaEventsQueue
+    else
+    {
+        printf("receiveEvents : %d\n",validEvents);
+        // print events
+        for (int i = 0; i < validEvents; ++i)
+        {
+            printf("Event %d: type=%d, eventId=%d, time=%d, src=%d, dst=%d, size=%d, port=%d\n",
+                   i, parsedEvents[i].type, parsedEvents[i].eventId,
+                   parsedEvents[i].time, parsedEvents[i].src,
+                   parsedEvents[i].dst, parsedEvents[i].size,parsedEvents[i].port);
+        }
+        MadronaEvent exitedEvents[maxEvents];
+        // add receive events to event queue.
+        int existedEventsNum = parseMadronaEvents(madronaEventsQueue, exitedEvents, maxEvents);
+        printf("eventsQueueNum : %d\n",existedEventsNum);
+        for (int i = 0; i < validEvents; ++i)
+        {
+            // relative time changes to absolute time
+            parsedEvents[i].time+=time.time;
+            exitedEvents[existedEventsNum+i]=parsedEvents[i];
+        }
+        updateMadronaEvents(madronaEventsQueue,exitedEvents,existedEventsNum+validEvents);
+        // clear recieve events.
+        updateMadronaEvents(madronaEvents, parsedEvents, 0);
+        // // for instance: change one event property
+        // if (validEvents > 0)
+        // {
+        //     parsedEvents[0].time += 1;
+        // }
+        // updateMadronaEvents(madronaEvents, parsedEvents, validEvents);
+    }
+
+        // 1 frame 1 ns
+    time.time = time.time + 1;
+
+    MadronaEvent eventsQueue[maxEvents];
+    // process event queue
+    int eventsQueueNum = parseMadronaEvents(madronaEventsQueue, eventsQueue, maxEvents);
+    printf("eventsQueueNum :%d\n",eventsQueueNum);
+    MadronaEvent eventsResult[maxEvents];
+    int resultIndex = 0;
+    MadronaEvent eventsFuture[maxEvents];
+    int futureIndex = 0;
+    for (int i = 0; i < eventsQueueNum; i++)
+    {
+        // printf("time.time:%ld\n",time.time);
+        printf("eventsQueue[%d].time:%d,type:%d,id:%d\n",i,eventsQueue[i].time,eventsQueue[i].type,eventsQueue[i].eventId);
+        // to do :maybe relative time,done
+        if (time.time >= eventsQueue[i].time)
+        {
+            // sim_schedule event.
+            if (eventsQueue[i].type == 2)
+            {
+                eventsResult[resultIndex] = eventsQueue[i];
+                // scheduel not to set time
+                // eventsResult[resultIndex].time=time.time;
+                resultIndex++;
+                printf("process sim_schedule event. time: %d\n", eventsResult[resultIndex].time);
+            }
+            // sim_send event.
+            else if (eventsQueue[i].type == 0)
+            {
+                // assume flow finish at 20 frame after.
+                if (time.time >= eventsQueue[i].time + 20)
+                {
+                    // to do : 1 set flow entities
+                    // to do : 2 set result to eventsResult when flow done
+                    eventsResult[resultIndex] = eventsQueue[i];
+                    eventsResult[resultIndex].time = eventsQueue[i].time + 20;
+                    resultIndex++;
+                    printf("process sim_send event,time:%ld.\n", time.time);
+                }
+                else
+                {
+                    eventsFuture[futureIndex] = eventsQueue[i];
+                    futureIndex++;
+                }
+            }
+        }
+        else
+        {
+            eventsFuture[futureIndex] = eventsQueue[i];
+            futureIndex++;
+        }
+    }
+
+    // put to madronaEventsResult
+    if (resultIndex > 0)
+    {
+        printf("resultNum:%d\n", resultIndex + 1);
+        updateMadronaEvents(madronaEventsResult, eventsResult, resultIndex + 1);
+    }
+
+    printf("futureNum:%d\n", futureIndex + 1);
+    updateMadronaEvents(madronaEventsQueue, eventsFuture, futureIndex + 1);
+}
+
 
 
 
@@ -1628,9 +1904,10 @@ void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
     // auto send_sys = builder.addToGraph<ParallelForNode<Engine, send, SenderID, NextHop, NICRate, \
     //                                    HSLinkDelay, SimTime, SimTimePerUpdate, SendFlowQueue, PktBuf>>({receive_sys});
 
+    auto comm_sys=builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2,SimulationTime,MadronaEventsQueue,MadronaEvents,MadronaEventsResult,ProcessParams>>({});
 
     auto setup_flow_sys = builder.addToGraph<ParallelForNode<Engine, setup_flow, NPU_ID, NewFlowQueue, \
-                                             SimTime, SimTimePerUpdate>>({}); 
+                                             SimTime, SimTimePerUpdate>>({comm_sys}); 
 
     // auto nic_receive_sys = builder.addToGraph<ParallelForNode<Engine, nic_receive, NIC_ID, \
     //                                           BidPktBuf, NICRate, SimTime, SimTimePerUpdate>>({setup_flow_sys});
