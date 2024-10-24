@@ -1744,7 +1744,18 @@ void updateMadronaEvents(MadronaEventsQueue &madronaEvents, const MadronaEvent p
     }
 }
 
-
+void Comm_SetFlow(Engine &ctx,MadronaEvent event)
+{
+    Entity npu_entt = ctx.data()._npus[event.src];
+    SimTime time=ctx.get<SimTime>(npu_entt);
+    FlowEvent flowEvent;
+    flowEvent.src = event.src;
+    flowEvent.dst = event.dst;
+    flowEvent.flow_size = event.size;
+    flowEvent.l4_port = event.port;
+    flowEvent.start_time = event.time + time.sim_time;
+    _enqueue_flow(ctx.get<NewFlowQueue>(npu_entt),flowEvent);
+}
 
 inline void tick(Engine &ctx,
                  Action &action,
@@ -1857,6 +1868,7 @@ inline void tick(Engine &ctx,
                 if (time.time >= eventsQueue[i].time + 20)
                 {
                     // to do : 1 set flow entities
+                    Comm_SetFlow(ctx,eventsQueue[i]);
                     // to do : 2 set result to eventsResult when flow done
                     eventsResult[resultIndex] = eventsQueue[i];
                     eventsResult[resultIndex].time = eventsQueue[i].time + 20;

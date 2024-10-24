@@ -14,8 +14,8 @@ namespace madsimple {
 
 const int32_t flow_events[2][8] = {
 //{flow_id, src, dst, flow_size, start_time, nic_id, snd_server_id, recv_server_id},
-    {0, 0, 8, 100*1000, 3000, 0, 0, 8}, 
-    {1, 0, 9, 100*1000, 3000, 0, 0, 9},
+    // {0, 0, 8, 100*1000, 3000, 0, 0, 8}, 
+    // {1, 0, 9, 100*1000, 3000, 0, 0, 9},
 };
 
 }
