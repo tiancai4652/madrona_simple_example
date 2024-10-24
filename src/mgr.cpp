@@ -282,4 +282,36 @@ Tensor Manager::resultsTensor() const
         {impl_->cfg.numWorlds, 1});
 }
 
+Tensor Manager::results2Tensor() const
+{
+    return impl_->exportTensor(ExportID::Results2, Tensor::ElementType::Int32,
+        {impl_->cfg.numWorlds, 1000});
+}
+
+Tensor Manager::madronaEventsTensor() const
+{
+    return impl_->exportTensor(ExportID::MadronaEvents, Tensor::ElementType::Int32,
+        {impl_->cfg.numWorlds, 1000});
+}
+
+Tensor Manager::madronaEventsResultTensor() const
+{
+    return impl_->exportTensor(ExportID::MadronaEventsResult, Tensor::ElementType::Int32,
+        {impl_->cfg.numWorlds, 1000});
+}
+
+
+Tensor Manager::simulationTimeTensor() const
+{
+    return impl_->exportTensor(ExportID::SimulationTime, Tensor::ElementType::Int64,
+        {impl_->cfg.numWorlds, 1});
+}
+
+Tensor Manager::processParamsTensor() const
+{
+    return impl_->exportTensor(ExportID::ProcessParams, Tensor::ElementType::Int32,
+        {impl_->cfg.numWorlds, 1000});
+}
+
+
 }

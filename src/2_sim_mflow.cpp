@@ -27,7 +27,13 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Reward>();
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
-
+    registry.registerComponent<Results>();
+    registry.registerComponent<Results2>();
+    registry.registerComponent<SimulationTime>();
+    registry.registerComponent<MadronaEventsQueue>();
+    registry.registerComponent<MadronaEvents>();
+    registry.registerComponent<MadronaEventsResult>();
+    registry.registerComponent<ProcessParams>();
     registry.registerArchetype<Agent>();
 
     // Export tensors for pytorch
@@ -36,6 +42,12 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, GridPos>((uint32_t)ExportID::GridPos);
     registry.exportColumn<Agent, Reward>((uint32_t)ExportID::Reward);
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
+    registry.exportColumn<Agent, Results>((uint32_t)ExportID::Results);
+    registry.exportColumn<Agent, Results2>((uint32_t)ExportID::Results2);
+    registry.exportColumn<Agent, SimulationTime>((uint32_t)ExportID::SimulationTime);
+    registry.exportColumn<Agent, MadronaEvents>((uint32_t)ExportID::MadronaEvents);
+    registry.exportColumn<Agent, MadronaEventsResult>((uint32_t)ExportID::MadronaEventsResult);
+    registry.exportColumn<Agent, ProcessParams>((uint32_t)ExportID::ProcessParams);
 
 
     //***************************************************

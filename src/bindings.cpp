@@ -132,6 +132,11 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
         .def("reward_tensor", &Manager::rewardTensor)
         .def("done_tensor", &Manager::doneTensor)
         .def("results_tensor", &Manager::resultsTensor)
+        .def("results2_tensor", &Manager::results2Tensor)
+        .def("madronaEvents_tensor", &Manager::madronaEventsTensor)
+        .def("madronaEventsResult_tensor", &Manager::madronaEventsResultTensor)
+        .def("simulation_time_tensor", &Manager::simulationTimeTensor)
+        .def("processParams_tensor",&Manager::processParamsTensor)
     ;
 }
 

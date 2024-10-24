@@ -37,6 +37,7 @@ class GridWorld:
         self.rewards = self.sim.reward_tensor().to_torch()
         self.dones = self.sim.done_tensor().to_torch()
         self.results = self.sim.results_tensor().to_torch()
+        self.results2 = self.sim.results2_tensor().to_torch()
 
     def step(self):
         self.sim.step()
