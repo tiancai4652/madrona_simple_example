@@ -1747,13 +1747,12 @@ void updateMadronaEvents(MadronaEventsQueue &madronaEvents, const MadronaEvent p
 void Comm_SetFlow(Engine &ctx,MadronaEvent event)
 {
     Entity npu_entt = ctx.data()._npus[event.src];
-    SimTime time=ctx.get<SimTime>(npu_entt);
     FlowEvent flowEvent;
     flowEvent.src = event.src;
     flowEvent.dst = event.dst;
     flowEvent.flow_size = event.size;
     flowEvent.l4_port = event.port;
-    flowEvent.start_time = event.time + time.sim_time;
+    flowEvent.start_time = event.time + ctx.get<SimTime>(npu_entt).sim_time;
     _enqueue_flow(ctx.get<NewFlowQueue>(npu_entt),flowEvent);
 }
 
@@ -1779,6 +1778,7 @@ inline void tick(Engine &ctx,
 {
 
 
+    time.time=ctx.get<SimTime>(ctx.data()._npus[0]).sim_time;
     printf("gpu:\n");
     printf("schedule run: %d\n", processParams.params[0]);
     printf("flow run: %d\n", processParams.params[1]);
@@ -1986,7 +1986,8 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Reward>(agent).r = 0.f;
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
-
+    ctx.get<Results>(agent).results = 0.f;
+    ctx.get<SimulationTime>(agent).time = 0;
     //***************************************************
     // for the router forwarding function, of GPU_acclerated DES
     numInPort = 0;
