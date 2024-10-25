@@ -88,6 +88,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<SndNxt>();
     registry.registerComponent<SndUna>();
     registry.registerComponent<FlowState>();
+    registry.registerComponent<Extra_1>();
     
     registry.registerComponent<AckPktBuf>();
 
@@ -108,6 +109,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<SendFlows>();
     registry.registerComponent<NewFlowQueue>(); 
     registry.registerComponent<CompletedFlowQueue>();
+
+
 
     registry.registerArchetype<NPU>();
 
@@ -549,6 +552,7 @@ inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
     ctx.get<SndNxt>(snd_flow_entt).snd_nxt = 0;
     ctx.get<SndUna>(snd_flow_entt).snd_una = 0;
     ctx.get<FlowState>(snd_flow_entt) = FlowState::UNCOMPLETE;
+    ctx.get<Extra_1>(snd_flow_entt).extra_1 =-1;
 
     ctx.get<LastAckTimestamp>(snd_flow_entt).last_ack_timestamp = 0; //1ms
     ctx.get<NxtPktEvent>(snd_flow_entt).nxt_pkt_event = 0;
@@ -638,7 +642,7 @@ inline void setup_flow(Engine &ctx, NPU_ID _npu_id,
                        NewFlowQueue & _new_flow_queue, SimTime &_sim_time,
                        SimTimePerUpdate &_sim_time_per_update) {
     
-    if (_npu_id.npu_id == 0) {printf("*********Enter into setup_flow:*********\n");}
+    // if (_npu_id.npu_id == 0) {printf("*********Enter into setup_flow:*********\n");}
 
     uint32_t flow_event_num = get_queue_len(_new_flow_queue);
     for (uint32_t i = 0; i < flow_event_num; i++)
@@ -689,7 +693,7 @@ inline void check_flow_state(Engine &ctx, NPU_ID &_npu_id, CompletedFlowQueue &_
             FlowEvent flow_event = {ctx.get<FlowID>(flow_entt).flow_id, ctx.get<Src>(flow_entt).src, ctx.get<Dst>(flow_entt).dst, \
                                     ctx.get<L4Port>(flow_entt).l4_port, ctx.get<NIC_ID>(flow_entt).nic_id, \
                                     ctx.get<FlowSize>(flow_entt).flow_size, ctx.get<StartTime>(flow_entt).start_time, \
-                                    ctx.get<StopTime>(flow_entt).stop_time, ctx.get<FlowState>(flow_entt)};
+                                    ctx.get<StopTime>(flow_entt).stop_time, ctx.get<FlowState>(flow_entt),ctx.get<Extra_1>(flow_entt).extra_1};
             _enqueue_flow(_completed_flow_queue, flow_event);
             //
 
@@ -726,12 +730,12 @@ inline void flow_send(Engine &ctx, FlowID &_flow_id, Src &_src, Dst &_dst, L4Por
                       SimTime &_sim_time, SimTimePerUpdate &_sim_time_per_update) {
     // Entity in_port = ctx.data().inPorts[_next_hop.next_hop];
     int64_t end_time = _sim_time.sim_time + _sim_time_per_update.sim_time_per_update;
-    if (_flow_id.flow_id == 0 || _flow_id.flow_id == 1) {
-        printf("\n*******Enter into flow send*********\n");
-        printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
-        printf("end_time: %ld\n", end_time);
-        // printf("cc target rate: %.3lf, cc cur rate: %.3lf\n", _cc_para.tar_rate/(1000*1000*1000.0), _m_rate.m_rate/(1000*1000*1000.0));
-    }
+    // if (_flow_id.flow_id == 0 || _flow_id.flow_id == 1) {
+    //     printf("\n*******Enter into flow send*********\n");
+    //     printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
+    //     printf("end_time: %ld\n", end_time);
+    //     // printf("cc target rate: %.3lf, cc cur rate: %.3lf\n", _cc_para.tar_rate/(1000*1000*1000.0), _m_rate.m_rate/(1000*1000*1000.0));
+    // }
 
     uint16_t flow_id = 0;
     uint16_t header_len = 40; 
@@ -1105,9 +1109,9 @@ inline void set_forward_plan(Engine &ctx,
     // if (_global_port_id.global_port_id != 36) {
     //     return;
     // }
-    if (_global_port_id.global_port_id == 0) {
-        printf("\n\n*******Enter into set_forward_plan sys*********\n\n");
-    }
+    // if (_global_port_id.global_port_id == 0) {
+    //     printf("\n\n*******Enter into set_forward_plan sys*********\n\n");
+    // }
     //reset
     for (uint8_t i = 0; i < INPORT_NUM; i++) {_forward_plan.forward_plan[i] = 0;}
 
@@ -1192,9 +1196,9 @@ inline void _forward(Engine &ctx,
                     SimTime &_sim_time,
                     SimTimePerUpdate &_sim_time_per_update)
 {
-    if (_global_port_id.global_port_id == 0) {
-        printf("*******Enter into _forward sys*********\n");
-    }
+    // if (_global_port_id.global_port_id == 0) {
+    //     printf("*******Enter into _forward sys*********\n");
+    // }
     // if (_global_port_id.global_port_id == 5) {
     //     return;
     // }
@@ -1267,10 +1271,10 @@ inline void remove_pkts(Engine &ctx,
 {   
 
     int64_t end_time = _sim_time.sim_time + _sim_time_per_update.sim_time_per_update;
-    if (_global_port_id.global_port_id == 0) {
-        printf("*******Enter into remove_pkts sys*********\n");
-        // printf("end_time: %lld\n", end_time);
-    }
+    // if (_global_port_id.global_port_id == 0) {
+    //     printf("*******Enter into remove_pkts sys*********\n");
+    //     // printf("end_time: %lld\n", end_time);
+    // }
 
 
     uint16_t q_len = get_queue_len(_queue);
@@ -1319,9 +1323,9 @@ inline void transmit(Engine &ctx, SchedTrajType sched_traj_type,
 {
 
 
-    if (_global_port_id.global_port_id == 0) {
-        printf("*******Enter into transmit sys*********\n");
-    }
+    // if (_global_port_id.global_port_id == 0) {
+    //     printf("*******Enter into transmit sys*********\n");
+    // }
 
     // if (_global_port_id.global_port_id != 2 && _global_port_id.global_port_id != 33) {
     //      return;
@@ -1516,11 +1520,11 @@ inline void flow_receive(Engine &ctx, FlowID &_flow_id, PktBuf &_recv_queue,
                          LastCNPTimestamp &_last_cnp_timestamp) {
 
     int64_t end_time = _sim_time.sim_time + _sim_time_per_update.sim_time_per_update;
-    if (_flow_id.flow_id == 0) {
-        printf("*******Enter into receive system*********\n");
-        printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
-        printf("end_time: %ld\n", end_time);
-    }
+    // if (_flow_id.flow_id == 0) {
+    //     printf("*******Enter into receive system*********\n");
+    //     printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
+    //     printf("end_time: %ld\n", end_time);
+    // }
 
     Pkt pkt;
     uint8_t flow_priority = 0;
@@ -1752,9 +1756,12 @@ void Comm_SetFlow(Engine &ctx,MadronaEvent event)
     flowEvent.dst = event.dst;
     flowEvent.flow_size = event.size;
     flowEvent.l4_port = event.port;
-    flowEvent.start_time = event.time + ctx.get<SimTime>(npu_entt).sim_time;
+    flowEvent.extra_1=event.eventId;
+    // flowEvent.start_time = event.time + ctx.get<SimTime>(npu_entt).sim_time;
+    flowEvent.start_time = event.time;
     _enqueue_flow(ctx.get<NewFlowQueue>(npu_entt),flowEvent);
 }
+
 
 inline void tick(Engine &ctx,
                  Action &action,
@@ -1778,7 +1785,8 @@ inline void tick(Engine &ctx,
 {
 
 
-    time.time=ctx.get<SimTime>(ctx.data()._npus[0]).sim_time;
+    time.time=ctx.get<SimTime>(ctx.data().inPorts[0]).sim_time;
+    // printf("simulation_time: %ld\n",ctx.get<SimTime>(ctx.data()._npus[0]).sim_time);
     printf("gpu:\n");
     printf("schedule run: %d\n", processParams.params[0]);
     printf("flow run: %d\n", processParams.params[1]);
@@ -1834,8 +1842,8 @@ inline void tick(Engine &ctx,
         // updateMadronaEvents(madronaEvents, parsedEvents, validEvents);
     }
 
-        // 1 frame 1 ns
-    time.time = time.time + 1;
+    // 1 frame 1 ns
+    // time.time = time.time + 1;
 
     MadronaEvent eventsQueue[maxEvents];
     // process event queue
@@ -1856,30 +1864,31 @@ inline void tick(Engine &ctx,
             if (eventsQueue[i].type == 2)
             {
                 eventsResult[resultIndex] = eventsQueue[i];
-                // scheduel not to set time
-                // eventsResult[resultIndex].time=time.time;
                 resultIndex++;
                 printf("process sim_schedule event. time: %d\n", eventsResult[resultIndex].time);
             }
             // sim_send event.
             else if (eventsQueue[i].type == 0)
             {
-                // assume flow finish at 20 frame after.
-                if (time.time >= eventsQueue[i].time + 20)
-                {
-                    // to do : 1 set flow entities
-                    Comm_SetFlow(ctx,eventsQueue[i]);
-                    // to do : 2 set result to eventsResult when flow done
-                    eventsResult[resultIndex] = eventsQueue[i];
-                    eventsResult[resultIndex].time = eventsQueue[i].time + 20;
-                    resultIndex++;
-                    printf("process sim_send event,time:%ld.\n", time.time);
-                }
-                else
-                {
-                    eventsFuture[futureIndex] = eventsQueue[i];
-                    futureIndex++;
-                }
+                // to do : 1 set flow entities
+                Comm_SetFlow(ctx,eventsQueue[i]);
+                
+                // // assume flow finish at 20 frame after.
+                // if (time.time >= eventsQueue[i].time + 20)
+                // {
+                //     // to do : 1 set flow entities
+                //     Comm_SetFlow(ctx,eventsQueue[i]);
+                //     // to do : 2 set result to eventsResult when flow done
+                //     eventsResult[resultIndex] = eventsQueue[i];
+                //     eventsResult[resultIndex].time = eventsQueue[i].time + 20;
+                //     resultIndex++;
+                //     printf("process sim_send event,time:%ld.\n", time.time);
+                // }
+                // else
+                // {
+                //     eventsFuture[futureIndex] = eventsQueue[i];
+                //     futureIndex++;
+                // }
             }
         }
         else
@@ -1887,6 +1896,40 @@ inline void tick(Engine &ctx,
             eventsFuture[futureIndex] = eventsQueue[i];
             futureIndex++;
         }
+    }
+
+    //support for astrasim: check flow donw
+    uint32_t num = ctx.data().num_npu;
+    for (uint32_t i = 0; i < num; i++)
+    {
+        Entity npu_entt = ctx.data()._npus[i];
+        CompletedFlowQueue completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
+
+        uint32_t flow_event_num = get_queue_len(completedFlowQueue);
+        for (uint32_t i = 0; i < flow_event_num; i++)
+        {
+            FlowEvent flow_event;
+            _dequeue_flow(completedFlowQueue, flow_event);
+            // struct  MadronaEvent
+            // {
+            //     int32_t type;
+            //     int32_t eventId;
+            //     int32_t time;
+            //     int32_t src;
+            //     int32_t dst;
+            //     int32_t size;
+            //     int32_t port;
+            // };
+            MadronaEvent event_temp;
+            event_temp.type=0;
+            event_temp.eventId=flow_event.extra_1;
+            event_temp.time=time.time;
+            eventsResult[resultIndex] = event_temp;
+            resultIndex++;
+            printf("process sim_send event,time:%ld.\n", time.time);
+        }
+
+        clear_queue(completedFlowQueue);
     }
 
     // put to madronaEventsResult

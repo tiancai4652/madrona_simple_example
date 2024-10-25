@@ -307,6 +307,7 @@ struct FlowEvent {
     int64_t stop_time;
     // uint16_t phase_num; // which step in a ring all-reduce    
     FlowState flow_state;
+    int64_t extra_1;
 };
 
 
@@ -405,6 +406,11 @@ struct CC_Para {
     bool CNPState; 
 };
 
+struct Extra_1 {
+    int64_t extra_1;
+};
+
+
 
 struct SndFlow : public madrona::Archetype<
     FlowID,
@@ -437,7 +443,9 @@ struct SndFlow : public madrona::Archetype<
     NICRate,
     HSLinkDelay,
     SimTime,
-    SimTimePerUpdate
+    SimTimePerUpdate,
+
+    Extra_1
 > {};
 
 
