@@ -947,11 +947,11 @@ inline void flow_send(Engine &ctx, FlowID &_flow_id, Src &_src, Dst &_dst, L4Por
 
 inline void nic_forward(Engine &ctx, NIC_ID &_nic_id, NICRate &_nic_rate, SimTime &_sim_time, 
                         SimTimePerUpdate &_sim_time_per_update, BidPktBuf &_bid_pkt_buf) {
-    if (_nic_id.nic_id == 0) {
-        printf("\n*******Enter into nic_forward*********\n");
-        printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
-        printf("end_time: %ld\n", _sim_time.sim_time+_sim_time_per_update.sim_time_per_update);
-    }
+    // if (_nic_id.nic_id == 0) {
+    //     printf("\n*******Enter into nic_forward*********\n");
+    //     printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
+    //     printf("end_time: %ld\n", _sim_time.sim_time+_sim_time_per_update.sim_time_per_update);
+    // }
 
     Map<uint16_t, Entity> tmp_snd_flow = ctx.data().snd_flows[_nic_id.nic_id];
     for (auto it = tmp_snd_flow.begin(); it != tmp_snd_flow.end(); ++it) {
@@ -997,11 +997,11 @@ inline void nic_transmit(Engine &ctx, NIC_ID &_nic_id,
                          NextHop &_next_hop, Seed &_seed) {
     int64_t end_time = _sim_time.sim_time + _sim_time_per_update.sim_time_per_update;
 
-    if (_nic_id.nic_id == 0) {
-        printf("\n*******Enter into nic_forward*********\n");
-        printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
-        printf("end_time: %ld\n", end_time);
-    }
+    // if (_nic_id.nic_id == 0) {
+    //     printf("\n*******Enter into nic_forward*********\n");
+    //     printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
+    //     printf("end_time: %ld\n", end_time);
+    // }
 
     insertionSort(_bid_pkt_buf.snd_buf);
 
