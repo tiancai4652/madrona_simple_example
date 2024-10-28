@@ -45,6 +45,8 @@ flow_events_result=[]
 schedule_send_back=False
 flow_send_back=False
 
+time_current=None
+
 # memoryRW: set params string, for instance
 example_string = ""
 encoded_string_tensor = string_to_tensor(example_string)
@@ -69,8 +71,8 @@ def receive_set_command():
     # m_events=int_array_to_madrona_events(int_tensor)
     
     m_events=events
-    for event in m_events:
-        event.print_event()
+    # for event in m_events:
+    #     event.print_event()
     # process one event per time
     for event in m_events:
         # set scheduel event num
@@ -90,6 +92,8 @@ def receive_set_command():
         # firsr to process sim_get_time event, type is 3
         elif event.type==3:
             time=grid_world.simulation_time.cpu().item()
+            if time_current is not None:
+                time=time_current
             events = [MadronaEvent(event.type, event.eventId, time, 0, 0, 0)]
             send_command(events)
             receive_set_command()
@@ -197,12 +201,14 @@ while True:
             index=1
              
             for event in schedule_events_result:
+                time_current=event.time
                 print(f"process {index} result")
                 index=index+1
                 send_command([event])
                 receive_set_command()
             schedule_send_back=False
             schedule_events_result=[]
+            time_current=None
         elif (in_flow and len(m_events.events)==flow_num) or flow_send_back:
             flow_send_back=True
             for event in m_events.events:
@@ -213,10 +219,12 @@ while True:
             # flow_num=-1
  
             for event in flow_events_result:
+                time_current=event.time
                 send_command([event])
                 receive_set_command()
             flow_send_back=False
             flow_events_result=[]
+            time_current=None
         else:
             grid_world.step()     
     else:

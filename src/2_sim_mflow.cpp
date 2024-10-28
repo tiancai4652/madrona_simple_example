@@ -13,7 +13,7 @@
 using namespace madrona;
 using namespace madrona::math;
 
-#define PRINT_PKT_LOG 1
+#define PRINT_PKT_LOG 0
 
 namespace madsimple {
 
@@ -349,7 +349,7 @@ void inline dcqcn_rate_increase(CC_Para &cc_para, uint32_t src, long curSimTime)
         // update current rate
         cc_para.m_rate = cc_para.m_rate / 2 + cc_para.tar_rate / 2;
 
-        printf("In additive increase stage. sender: %d, sim_time: %ld, target rate is %.3lf Gbps, and current rate is %.3lf Gbps\n", src, curSimTime, cc_para.tar_rate/(1000*1000*1000.0), cc_para.m_rate/(1000*1000*1000.0));
+        // printf("In additive increase stage. sender: %d, sim_time: %ld, target rate is %.3lf Gbps, and current rate is %.3lf Gbps\n", src, curSimTime, cc_para.tar_rate/(1000*1000*1000.0), cc_para.m_rate/(1000*1000*1000.0));
     }
     else
     {
@@ -1800,14 +1800,14 @@ inline void tick(Engine &ctx,
 //     printf("%d",madronaEvents.events[i]);
 // }
 
-    printf("parse madronaEvents\n");
+    // printf("parse madronaEvents\n");
     const int maxEvents = 1000 / 7;
     MadronaEvent parsedEvents[maxEvents];
     // parse MadronaEvents
     int validEvents = parseMadronaEvents(madronaEvents, parsedEvents, maxEvents);
     if (validEvents == 0)
     {
-        printf("MadronaEvents is empty!\n ");
+        // printf("MadronaEvents is empty!\n ");
     }
     // add madronaEvents to madronaEventsQueue
     else
@@ -1824,7 +1824,7 @@ inline void tick(Engine &ctx,
         MadronaEvent exitedEvents[maxEvents];
         // add receive events to event queue.
         int existedEventsNum = parseMadronaEvents(madronaEventsQueue, exitedEvents, maxEvents);
-        printf("eventsQueueNum : %d\n",existedEventsNum);
+        // printf("eventsQueueNum : %d\n",existedEventsNum);
         for (int i = 0; i < validEvents; ++i)
         {
             // relative time changes to absolute time
@@ -1856,7 +1856,7 @@ inline void tick(Engine &ctx,
     for (int i = 0; i < eventsQueueNum; i++)
     {
         // printf("time.time:%ld\n",time.time);
-        printf("eventsQueue[%d].time:%d,type:%d,id:%d\n",i,eventsQueue[i].time,eventsQueue[i].type,eventsQueue[i].eventId);
+        // printf("eventsQueue[%d].time:%d,type:%d,id:%d\n",i,eventsQueue[i].time,eventsQueue[i].type,eventsQueue[i].eventId);
         // to do :maybe relative time,done
         if (time.time >= eventsQueue[i].time)
         {
@@ -1865,14 +1865,14 @@ inline void tick(Engine &ctx,
             {
                 eventsResult[resultIndex] = eventsQueue[i];
                 resultIndex++;
-                printf("process sim_schedule event. time: %d\n", eventsResult[resultIndex].time);
+                printf("process sim_schedule event. time:%ld, eventId=%d.\n,", eventsResult[resultIndex].time,eventsResult[resultIndex].eventId);
             }
             // sim_send event.
             else if (eventsQueue[i].type == 0)
             {
                 // to do : 1 set flow entities
                 Comm_SetFlow(ctx,eventsQueue[i]);
-                
+                printf("process sim_send event,time:%ld, eventId=%d.\n", time.time,eventsQueue[i].eventId);
                 // // assume flow finish at 20 frame after.
                 // if (time.time >= eventsQueue[i].time + 20)
                 // {
@@ -1898,7 +1898,9 @@ inline void tick(Engine &ctx,
         }
     }
 
-    //support for astrasim: check flow donw
+    printf("check flow done\n");
+
+    //support for astrasim: check flow done
     uint32_t num = ctx.data().num_npu;
     for (uint32_t i = 0; i < num; i++)
     {
@@ -1906,40 +1908,45 @@ inline void tick(Engine &ctx,
         CompletedFlowQueue completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
 
         uint32_t flow_event_num = get_queue_len(completedFlowQueue);
-        for (uint32_t i = 0; i < flow_event_num; i++)
+        printf("completedFlowQueue.flow_event_num=%d.\n", flow_event_num);
+        if (flow_event_num > 0)
         {
-            FlowEvent flow_event;
-            _dequeue_flow(completedFlowQueue, flow_event);
-            // struct  MadronaEvent
-            // {
-            //     int32_t type;
-            //     int32_t eventId;
-            //     int32_t time;
-            //     int32_t src;
-            //     int32_t dst;
-            //     int32_t size;
-            //     int32_t port;
-            // };
-            MadronaEvent event_temp;
-            event_temp.type=0;
-            event_temp.eventId=flow_event.extra_1;
-            event_temp.time=time.time;
-            eventsResult[resultIndex] = event_temp;
-            resultIndex++;
-            printf("process sim_send event,time:%ld.\n", time.time);
-        }
+            for (uint32_t i = 0; i < flow_event_num; i++)
+            {
+                FlowEvent flow_event;
+                _dequeue_flow(completedFlowQueue, flow_event);
+                MadronaEvent event_temp;
+                event_temp.type = 0;
+                event_temp.eventId = flow_event.extra_1;
+                event_temp.time = time.time;
+                eventsResult[resultIndex] = event_temp;
+                resultIndex++;
+                printf("finish sim_send event,time:%ld.\n", time.time);
+            }
 
-        clear_queue(completedFlowQueue);
+            clear_queue(completedFlowQueue);
+        }
     }
+
+    printf("check flow done over\n");
 
     // put to madronaEventsResult
     if (resultIndex > 0)
     {
-        printf("resultNum:%d\n", resultIndex + 1);
+        printf("finishFlowEvents : %d\n",resultIndex);
+        // print events
+        for (int i = 0; i < resultIndex; ++i)
+        {
+            printf("Event %d: type=%d, eventId=%d, time=%d, src=%d, dst=%d, size=%d, port=%d\n",
+                   i, eventsResult[i].type, eventsResult[i].eventId,
+                   eventsResult[i].time, eventsResult[i].src,
+                   eventsResult[i].dst, eventsResult[i].size,eventsResult[i].port);
+        }
+        // printf("resultNum:%d\n", resultIndex + 1);
         updateMadronaEvents(madronaEventsResult, eventsResult, resultIndex + 1);
     }
 
-    printf("futureNum:%d\n", futureIndex + 1);
+    // printf("futureNum:%d\n", futureIndex + 1);
     updateMadronaEvents(madronaEventsQueue, eventsFuture, futureIndex + 1);
 }
 
