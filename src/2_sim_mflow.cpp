@@ -552,7 +552,7 @@ inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
     ctx.get<SndNxt>(snd_flow_entt).snd_nxt = 0;
     ctx.get<SndUna>(snd_flow_entt).snd_una = 0;
     ctx.get<FlowState>(snd_flow_entt) = FlowState::UNCOMPLETE;
-    ctx.get<Extra_1>(snd_flow_entt).extra_1 =-1;
+    ctx.get<Extra_1>(snd_flow_entt).extra_1 =flow_event.extra_1;
 
     ctx.get<LastAckTimestamp>(snd_flow_entt).last_ack_timestamp = 0; //1ms
     ctx.get<NxtPktEvent>(snd_flow_entt).nxt_pkt_event = 0;
@@ -1908,7 +1908,7 @@ inline void tick(Engine &ctx,
         CompletedFlowQueue completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
 
         uint32_t flow_event_num = get_queue_len(completedFlowQueue);
-        printf("completedFlowQueue.flow_event_num=%d.\n", flow_event_num);
+        // printf("completedFlowQueue.flow_event_num=%d.\n", flow_event_num);
         if (flow_event_num > 0)
         {
             for (uint32_t i = 0; i < flow_event_num; i++)
