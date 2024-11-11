@@ -255,7 +255,7 @@ struct PktBuf {
 };
 
 struct AckPktBuf {
-    Pkt pkts[PKT_BUF_LEN/2];
+    Pkt pkts[PKT_BUF_LEN];
     uint16_t head;
     uint16_t tail;
     uint16_t cur_num;

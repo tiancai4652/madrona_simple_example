@@ -399,7 +399,7 @@ void generate_host(Engine &ctx, CountT k_ary)
 
     printf("*******Generate send/recv flows*******\n");
     // send flows 
-    for (uint32_t i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < 1; i++) {
         /////////////////////////////////////////////////////////////////////////////////
         // snd flows
         Entity flow_entt = ctx.makeEntity<SndFlow>();
@@ -470,7 +470,7 @@ void generate_host(Engine &ctx, CountT k_ary)
         ctx.data().snd_flows[src][ctx.get<FlowID>(flow_entt).flow_id] = flow_entt;
     }
 
-    for (uint32_t i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < 1; i++) {
         /////////////////////////////////////////////////////////////////////////////////
         // recv flows
         Entity flow_entt = ctx.makeEntity<RecvFlow>();
