@@ -499,6 +499,8 @@ inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
     ctx.get<SndNxt>(snd_flow_entt).snd_nxt = 0;
     ctx.get<SndUna>(snd_flow_entt).snd_una = 0;
     ctx.get<FlowState>(snd_flow_entt) = FlowState::UNCOMPLETE;
+    ctx.get<Extra_1>(snd_flow_entt).extra_1 =flow_event.extra_1;
+
 
     ctx.get<LastAckTimestamp>(snd_flow_entt).last_ack_timestamp = 0; //1ms
     ctx.get<NxtPktEvent>(snd_flow_entt).nxt_pkt_event = 0;
@@ -625,7 +627,7 @@ inline void check_flow_state(Engine &ctx, NPU_ID &_npu_id, CompletedFlowQueue &_
             FlowEvent flow_event = {ctx.get<FlowID>(flow_entt).flow_id, ctx.get<Src>(flow_entt).src, ctx.get<Dst>(flow_entt).dst, \
                                     ctx.get<L4Port>(flow_entt).l4_port, ctx.get<NIC_ID>(flow_entt).nic_id, \
                                     ctx.get<FlowSize>(flow_entt).flow_size, ctx.get<StartTime>(flow_entt).start_time, \
-                                    ctx.get<StopTime>(flow_entt).stop_time, ctx.get<FlowState>(flow_entt)};
+                                    ctx.get<StopTime>(flow_entt).stop_time, ctx.get<FlowState>(flow_entt),ctx.get<Extra_1>(flow_entt).extra_1};
             _enqueue_flow(_completed_flow_queue, flow_event);
             // printf("check_flow_state: _completed_flow_queue: %d\n", get_queue_len(_completed_flow_queue));
             //
