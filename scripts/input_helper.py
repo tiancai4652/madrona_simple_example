@@ -56,7 +56,7 @@ def int_array_to_madrona_events(int_array):
             break
         if int_array[i] == 0 and int_array[i+1] == 0 and int_array[i+2] == 0 and \
            int_array[i+3] == 0 and int_array[i+4] == 0 and int_array[i+5] == 0and int_array[i+6] == 0:
-            continue  # 忽略所有字段都为0的事件
+            break  # 忽略所有字段都为0的事件
         event = MadronaEvent(
             int_array[i],
             int_array[i+1],

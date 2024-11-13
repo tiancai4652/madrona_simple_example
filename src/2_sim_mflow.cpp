@@ -501,7 +501,6 @@ inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
     ctx.get<FlowState>(snd_flow_entt) = FlowState::UNCOMPLETE;
     ctx.get<Extra_1>(snd_flow_entt).extra_1 =flow_event.extra_1;
 
-
     ctx.get<LastAckTimestamp>(snd_flow_entt).last_ack_timestamp = 0; //1ms
     ctx.get<NxtPktEvent>(snd_flow_entt).nxt_pkt_event = 0;
     
@@ -536,16 +535,11 @@ inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
     ctx.get<NICRate>(snd_flow_entt).nic_rate = 1000LL*1000*1000*100; // 100 Gbps
     ctx.get<HSLinkDelay>(snd_flow_entt).HS_link_delay = HS_LINK_DELAY; // 1 us, 1000 ns 
 
-    ctx.get<SimTime>(snd_flow_entt).sim_time = 0;
+    ctx.get<SimTime>(snd_flow_entt).sim_time = flow_event.start_time;
+    // ctx.get<SimTime>(snd_flow_entt).sim_time = 0;
     ctx.get<SimTimePerUpdate>(snd_flow_entt).sim_time_per_update = LOOKAHEAD_TIME; //1000ns
 
     uint32_t src = flow_event.src;
-    // mounted to NPU
-    Entity npu_entt = ctx.data()._npus[src];
-    _enqueue_entt(ctx.get<SendFlows>(npu_entt), snd_flow_entt);
-    // mounted to NIC
-    // Entity nic_entt = ctx.data()._nics[ctx.get<NIC_ID>(snd_flow_entt).nic_id];
-    // _enqueue_entt(ctx.get<MountedFlows>(nic_entt), snd_flow_entt);
 
     ctx.data().snd_flows[flow_event.src][flow_id] = snd_flow_entt;
 //
@@ -586,9 +580,39 @@ inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
 }
 
 
+// struct FlowEvent {
+//     uint16_t flow_id;
+//     uint32_t src;
+//     uint32_t dst;
+//     uint16_t l4_port;
+//     uint32_t nic; // nic id
+//     int64_t flow_size;
+//     int64_t start_time;
+//     int64_t stop_time;   
+//     FlowState flow_state;
+// };
+
+
+// inline void comm_set_flow(Engine &ctx, NPU_ID _npu_id,
+//                        NewFlowQueue &_new_flow_queue, SimTime &_sim_time,
+//                        SimTimePerUpdate &_sim_time_per_update) {
+    
+//     if (_npu_id.npu_id == 0) {printf("*********Enter into comm_set_flow:*********\n");}
+//     else {return;}
+    
+
+//     // uint16_t flow_id = _sim_time.sim_time+1000;
+//     FlowEvent flow_event = {0, 0, 8, 1, 0, 1000, _sim_time.sim_time+2000, 0, FlowState::UNCOMPLETE};
+    
+//     printf("comm_set_flow: _new_flow_queue, before enqueue %d\n", get_queue_len(_new_flow_queue));
+//     _enqueue_flow(_new_flow_queue, flow_event);
+
+//     printf("comm_set_flow: _new_flow_queue, afeter enqueue %d\n", get_queue_len(_new_flow_queue));
+// }
+
 
 inline void setup_flow(Engine &ctx, NPU_ID _npu_id,
-                       NewFlowQueue & _new_flow_queue, SimTime &_sim_time,
+                       NewFlowQueue &_new_flow_queue, SimTime &_sim_time,
                        SimTimePerUpdate &_sim_time_per_update) {
     
     if (_npu_id.npu_id == 0) {printf("*********Enter into setup_flow:*********\n");}
@@ -599,17 +623,22 @@ inline void setup_flow(Engine &ctx, NPU_ID _npu_id,
         FlowEvent flow_event;
         _dequeue_flow(_new_flow_queue, flow_event);
         // printf("setup_flow, _new_flow_queue: %d\n", get_queue_len(_new_flow_queue));
-        uint32_t flow_id = ctx.data().flow_count[_npu_id.npu_id];
+        uint32_t flow_id = ctx.data().flow_count[_npu_id.npu_id]++;
         create_flow(ctx, flow_event, flow_id); //or create flow entities
     }
 
     clear_queue(_new_flow_queue);
+
+    _sim_time.sim_time += _sim_time_per_update.sim_time_per_update;
     // printf("setup_flow: after clear_queue, _new_flow_queue: %d\n", get_queue_len(_new_flow_queue));
 }
 
 
 inline void check_flow_state(Engine &ctx, NPU_ID &_npu_id, CompletedFlowQueue &_completed_flow_queue,
                              SimTime &_sim_time, SimTimePerUpdate &_sim_time_per_update) {
+
+    if (_npu_id.npu_id == 0) {printf("*********Enter into check_flow_state:*********\n");}
+    else {return;}
 
     uint32_t tmp_snd_flow[MAP_SIZE];
     memset(tmp_snd_flow, 0, MAX_PATH_LEN*sizeof(uint32_t));
@@ -629,7 +658,7 @@ inline void check_flow_state(Engine &ctx, NPU_ID &_npu_id, CompletedFlowQueue &_
                                     ctx.get<FlowSize>(flow_entt).flow_size, ctx.get<StartTime>(flow_entt).start_time, \
                                     ctx.get<StopTime>(flow_entt).stop_time, ctx.get<FlowState>(flow_entt),ctx.get<Extra_1>(flow_entt).extra_1};
             _enqueue_flow(_completed_flow_queue, flow_event);
-            // printf("check_flow_state: _completed_flow_queue: %d\n", get_queue_len(_completed_flow_queue));
+            printf("check_flow_state: _completed_flow_queue: %d\n", get_queue_len(_completed_flow_queue));
             //
 
             tmp_snd_flow[cnt++] = ctx.get<FlowID>(flow_entt).flow_id;
@@ -666,12 +695,12 @@ inline void flow_send(Engine &ctx, FlowID &_flow_id, Src &_src, Dst &_dst, L4Por
                       SimTime &_sim_time, SimTimePerUpdate &_sim_time_per_update) {
     // Entity in_port = ctx.data().inPorts[_next_hop.next_hop];
     int64_t end_time = _sim_time.sim_time + _sim_time_per_update.sim_time_per_update;
-    if (_flow_id.flow_id == 0 || _flow_id.flow_id == 1) {
+    // if (_flow_id.flow_id == 0 || _flow_id.flow_id == 1) {
         printf("\n*******Enter into flow send*********\n");
-        printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
+        printf("start _sim_time.sim_time: %ld, flow_id: %d\n", _sim_time.sim_time, _flow_id.flow_id);
         printf("end_time: %ld\n", end_time);
         // printf("cc target rate: %.3lf, cc cur rate: %.3lf\n", _cc_para.tar_rate/(1000*1000*1000.0), _m_rate.m_rate/(1000*1000*1000.0));
-    }
+    // }
 
     uint16_t flow_id = 0;
     uint16_t header_len = 40; 
@@ -1583,6 +1612,7 @@ inline void flow_receive(Engine &ctx, FlowID &_flow_id, PktBuf &_recv_queue,
 }
 
 
+
 ///////////////////////////////////////////////////////////////////
 // support for astrasim
 const int INTS_PER_EVENT = 7;  // 每个事件7个整数
@@ -1902,7 +1932,12 @@ inline void tick(Engine &ctx,
                    eventsResult[i].dst, eventsResult[i].size,eventsResult[i].port);
         }
         // printf("resultNum:%d\n", resultIndex + 1);
-        updateMadronaEvents(madronaEventsResult, eventsResult, resultIndex + 1);
+        updateMadronaEvents(madronaEventsResult, eventsResult, resultIndex);
+    }
+    else
+    {
+        printf("finishFlowEvents : %d\n",resultIndex);
+        updateMadronaEvents(madronaEventsResult, eventsResult, 0);
     }
 
     printf("future Event Num:%d\n", futureIndex);
@@ -1920,6 +1955,7 @@ inline void tick(Engine &ctx,
 
 
 
+
 void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 {
     printf("*******Enter into setupTasks*********\n");
@@ -1931,6 +1967,7 @@ void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
 
     // auto send_sys = builder.addToGraph<ParallelForNode<Engine, send, SenderID, NextHop, NICRate, \
     //                                    HSLinkDelay, SimTime, SimTimePerUpdate, SendFlowQueue, PktBuf>>({receive_sys});
+
     auto comm_sys=builder.addToGraph<ParallelForNode<Engine, tick, Action, Reset, GridPos, Reward, Done, CurStep,Results,Results2,SimulationTime,MadronaEventsQueue,MadronaEvents,MadronaEventsResult,ProcessParams>>({});
 
     
@@ -2046,6 +2083,8 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);
 
 }
+
+
 
 
 

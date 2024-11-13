@@ -164,34 +164,6 @@ public:
 };
 
 
-template<typename T1, typename T2>
-inline bool _dequeue_entt(T1& queue, T2& elem) 
-{
-    if (queue.cur_num == 0) {
-        // The queue is empty, cannot dequeue
-        return false;
-    }
-
-    elem = queue.flow[queue.head];
-    queue.head = (queue.head + 1) % MAX_NPU_FLOW_NUM;
-    queue.cur_num -= 1;
-
-    return true; 
-}
-
-
-template<typename T1, typename T2>
-inline void _enqueue_entt(T1 &queue, T2 pkt) {
-    if (queue.cur_num >= MAX_NPU_FLOW_NUM) {
-        printf("error: flow queue is overloaded\n");
-        // exit(0);
-    }
-    queue.flow[queue.tail] = pkt;
-    queue.tail = (queue.tail + 1) % MAX_NPU_FLOW_NUM;
-    queue.cur_num += 1;
-}
-
-
 class Engine;
 
 struct Sim : public madrona::WorldBase {

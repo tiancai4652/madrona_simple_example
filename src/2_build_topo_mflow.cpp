@@ -341,6 +341,15 @@ void generate_host(Engine &ctx, CountT k_ary)
         ctx.get<SendFlows>(npu_e).head = 0;
         ctx.get<SendFlows>(npu_e).tail = 0;
         ctx.get<SendFlows>(npu_e).cur_num = 0;
+
+        ctx.get<CompletedFlowQueue>(npu_e).head = 0;
+        ctx.get<CompletedFlowQueue>(npu_e).tail = 0;
+        ctx.get<CompletedFlowQueue>(npu_e).cur_num = 0;
+
+        ctx.get<NewFlowQueue>(npu_e).head = 0;
+        ctx.get<NewFlowQueue>(npu_e).tail = 0;
+        ctx.get<NewFlowQueue>(npu_e).cur_num = 0;
+
         ctx.data()._npus[ctx.data().num_npu++] = npu_e;
     }
 
@@ -397,118 +406,118 @@ void generate_host(Engine &ctx, CountT k_ary)
         ctx.data()._nics[ctx.data().num_nic++] = nic_e;
     }
 
-    printf("*******Generate send/recv flows*******\n");
-    // send flows 
-    for (uint32_t i = 0; i < 1; i++) {
-        /////////////////////////////////////////////////////////////////////////////////
-        // snd flows
-        Entity flow_entt = ctx.makeEntity<SndFlow>();
+    // printf("*******Generate send/recv flows*******\n");
+    // // send flows 
+    // for (uint32_t i = 0; i < 1; i++) {
+    //     /////////////////////////////////////////////////////////////////////////////////
+    //     // snd flows
+    //     Entity flow_entt = ctx.makeEntity<SndFlow>();
 
-        ctx.get<FlowID>(flow_entt).flow_id = flow_events[i][0];
-        ctx.get<Src>(flow_entt).src = flow_events[i][1];
-        ctx.get<Dst>(flow_entt).dst = flow_events[i][2];
-        ctx.get<L4Port>(flow_entt).l4_port = 0; //FIXME
+    //     ctx.get<FlowID>(flow_entt).flow_id = flow_events[i][0];
+    //     ctx.get<Src>(flow_entt).src = flow_events[i][1];
+    //     ctx.get<Dst>(flow_entt).dst = flow_events[i][2];
+    //     ctx.get<L4Port>(flow_entt).l4_port = 0; //FIXME
     
-        ctx.get<FlowSize>(flow_entt).flow_size = flow_events[i][3];
-        ctx.get<StartTime>(flow_entt).start_time = flow_events[i][4];
-        ctx.get<StopTime>(flow_entt).stop_time = 0;
+    //     ctx.get<FlowSize>(flow_entt).flow_size = flow_events[i][3];
+    //     ctx.get<StartTime>(flow_entt).start_time = flow_events[i][4];
+    //     ctx.get<StopTime>(flow_entt).stop_time = 0;
 
-        ctx.get<NIC_ID>(flow_entt).nic_id = flow_events[i][5];
-        ctx.get<SndServerID>(flow_entt).snd_server_id = flow_events[i][6];
-        ctx.get<RecvServerID>(flow_entt).recv_server_id = flow_events[i][7];
+    //     ctx.get<NIC_ID>(flow_entt).nic_id = flow_events[i][5];
+    //     ctx.get<SndServerID>(flow_entt).snd_server_id = flow_events[i][6];
+    //     ctx.get<RecvServerID>(flow_entt).recv_server_id = flow_events[i][7];
 
-        ctx.get<SndNxt>(flow_entt).snd_nxt = 0;
-        ctx.get<SndUna>(flow_entt).snd_una = 0;
-        ctx.get<FlowState>(flow_entt) = FlowState::UNCOMPLETE;
+    //     ctx.get<SndNxt>(flow_entt).snd_nxt = 0;
+    //     ctx.get<SndUna>(flow_entt).snd_una = 0;
+    //     ctx.get<FlowState>(flow_entt) = FlowState::UNCOMPLETE;
 
-        ctx.get<LastAckTimestamp>(flow_entt).last_ack_timestamp = 0; //1ms
-        ctx.get<NxtPktEvent>(flow_entt).nxt_pkt_event = 0;
+    //     ctx.get<LastAckTimestamp>(flow_entt).last_ack_timestamp = 0; //1ms
+    //     ctx.get<NxtPktEvent>(flow_entt).nxt_pkt_event = 0;
         
-        ctx.get<PFCState>(flow_entt) = PFCState::RESUME;
+    //     ctx.get<PFCState>(flow_entt) = PFCState::RESUME;
 
-        ctx.get<CC_Para>(flow_entt).m_rate = DCQCN_CurrentRate;
-        ctx.get<CC_Para>(flow_entt).tar_rate = DCQCN_TargetRate;
-        ctx.get<CC_Para>(flow_entt).dcqcn_Alpha = DCQCN_Alpha;
-        ctx.get<CC_Para>(flow_entt).dcqcn_G = DCQCN_G;
-        ctx.get<CC_Para>(flow_entt).dcqcn_AIRate = DCQCN_AIRate;
-        ctx.get<CC_Para>(flow_entt).dcqcn_HAIRate = DCQCN_HAIRate; 
-        ctx.get<CC_Para>(flow_entt).dcqcn_RateDecreaseInterval = DCQCN_RateDecreaseInterval;
-        ctx.get<CC_Para>(flow_entt).dcqcn_RateIncreaseInterval = DCQCN_RateIncreaseInterval;
-        ctx.get<CC_Para>(flow_entt).dcqcn_AlphaUpdateInterval = DCQCN_AlphaUpdateInterval;
-        ctx.get<CC_Para>(flow_entt).dcqcn_IncreaseStageCount = DCQCN_IncreaseStageCount;
-        ctx.get<CC_Para>(flow_entt).dcqcn_RateDecreaseNextTime = DCQCN_RateDecreaseNextTime;
-        ctx.get<CC_Para>(flow_entt).dcqcn_RateIncreaseNextTime = DCQCN_RateIncreaseNextTime;
-        ctx.get<CC_Para>(flow_entt).dcqcn_AlphaUpdateNextTime = DCQCN_AlphaUpdateNextTime;
-        ctx.get<CC_Para>(flow_entt).dcqcn_RateIsDecreased = DCQCN_RateIsDecreased;
-        ctx.get<CC_Para>(flow_entt).CNPState = false;
+    //     ctx.get<CC_Para>(flow_entt).m_rate = DCQCN_CurrentRate;
+    //     ctx.get<CC_Para>(flow_entt).tar_rate = DCQCN_TargetRate;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_Alpha = DCQCN_Alpha;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_G = DCQCN_G;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_AIRate = DCQCN_AIRate;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_HAIRate = DCQCN_HAIRate; 
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_RateDecreaseInterval = DCQCN_RateDecreaseInterval;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_RateIncreaseInterval = DCQCN_RateIncreaseInterval;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_AlphaUpdateInterval = DCQCN_AlphaUpdateInterval;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_IncreaseStageCount = DCQCN_IncreaseStageCount;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_RateDecreaseNextTime = DCQCN_RateDecreaseNextTime;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_RateIncreaseNextTime = DCQCN_RateIncreaseNextTime;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_AlphaUpdateNextTime = DCQCN_AlphaUpdateNextTime;
+    //     ctx.get<CC_Para>(flow_entt).dcqcn_RateIsDecreased = DCQCN_RateIsDecreased;
+    //     ctx.get<CC_Para>(flow_entt).CNPState = false;
 
-        ctx.get<PktBuf>(flow_entt).head = 0;
-        ctx.get<PktBuf>(flow_entt).tail = 0;
-        ctx.get<PktBuf>(flow_entt).cur_num = 0;
-        ctx.get<PktBuf>(flow_entt).cur_bytes = 0;
+    //     ctx.get<PktBuf>(flow_entt).head = 0;
+    //     ctx.get<PktBuf>(flow_entt).tail = 0;
+    //     ctx.get<PktBuf>(flow_entt).cur_num = 0;
+    //     ctx.get<PktBuf>(flow_entt).cur_bytes = 0;
 
-        ctx.get<AckPktBuf>(flow_entt).head = 0;
-        ctx.get<AckPktBuf>(flow_entt).tail = 0;
-        ctx.get<AckPktBuf>(flow_entt).cur_num = 0;
-        ctx.get<AckPktBuf>(flow_entt).cur_bytes = 0;
+    //     ctx.get<AckPktBuf>(flow_entt).head = 0;
+    //     ctx.get<AckPktBuf>(flow_entt).tail = 0;
+    //     ctx.get<AckPktBuf>(flow_entt).cur_num = 0;
+    //     ctx.get<AckPktBuf>(flow_entt).cur_bytes = 0;
 
-        ctx.get<NICRate>(flow_entt).nic_rate = 1000LL*1000*1000*100; // 100 Gbps
-        ctx.get<HSLinkDelay>(flow_entt).HS_link_delay = HS_LINK_DELAY; // 1 us, 1000 ns 
+    //     ctx.get<NICRate>(flow_entt).nic_rate = 1000LL*1000*1000*100; // 100 Gbps
+    //     ctx.get<HSLinkDelay>(flow_entt).HS_link_delay = HS_LINK_DELAY; // 1 us, 1000 ns 
 
-        ctx.get<SimTime>(flow_entt).sim_time = 0;
-        ctx.get<SimTimePerUpdate>(flow_entt).sim_time_per_update = LOOKAHEAD_TIME; //1000ns
+    //     ctx.get<SimTime>(flow_entt).sim_time = 0;
+    //     ctx.get<SimTimePerUpdate>(flow_entt).sim_time_per_update = LOOKAHEAD_TIME; //1000ns
 
-        uint32_t src = ctx.get<Src>(flow_entt).src;
-        // mounted to NPU
-        Entity npu_entt = ctx.data()._npus[src];
-        _enqueue_entt(ctx.get<SendFlows>(npu_entt), flow_entt);
-        // mounted to NIC
-        Entity nic_entt = ctx.data()._nics[ctx.get<NIC_ID>(flow_entt).nic_id];
-        _enqueue_entt(ctx.get<MountedFlows>(nic_entt), flow_entt);
+    //     uint32_t src = ctx.get<Src>(flow_entt).src;
+    //     // mounted to NPU
+    //     Entity npu_entt = ctx.data()._npus[src];
+    //     _enqueue_entt(ctx.get<SendFlows>(npu_entt), flow_entt);
+    //     // mounted to NIC
+    //     Entity nic_entt = ctx.data()._nics[ctx.get<NIC_ID>(flow_entt).nic_id];
+    //     _enqueue_entt(ctx.get<MountedFlows>(nic_entt), flow_entt);
 
-        //ctx.data()._snd_flows[ctx.data().num_snd_flow++] = flow_entt;
-        ctx.data().snd_flows[src][ctx.get<FlowID>(flow_entt).flow_id] = flow_entt;
-    }
+    //     //ctx.data()._snd_flows[ctx.data().num_snd_flow++] = flow_entt;
+    //     ctx.data().snd_flows[src][ctx.get<FlowID>(flow_entt).flow_id] = flow_entt;
+    // }
 
-    for (uint32_t i = 0; i < 1; i++) {
-        /////////////////////////////////////////////////////////////////////////////////
-        // recv flows
-        Entity flow_entt = ctx.makeEntity<RecvFlow>();
+    // for (uint32_t i = 0; i < 1; i++) {
+    //     /////////////////////////////////////////////////////////////////////////////////
+    //     // recv flows
+    //     Entity flow_entt = ctx.makeEntity<RecvFlow>();
         
-        ctx.get<FlowID>(flow_entt).flow_id = flow_events[i][0];
-        ctx.get<Src>(flow_entt).src = flow_events[i][1];
-        ctx.get<Dst>(flow_entt).dst = flow_events[i][2];
-        ctx.get<L4Port>(flow_entt).l4_port = 0;
+    //     ctx.get<FlowID>(flow_entt).flow_id = flow_events[i][0];
+    //     ctx.get<Src>(flow_entt).src = flow_events[i][1];
+    //     ctx.get<Dst>(flow_entt).dst = flow_events[i][2];
+    //     ctx.get<L4Port>(flow_entt).l4_port = 0;
     
-        ctx.get<FlowSize>(flow_entt).flow_size = flow_events[i][3];
-        ctx.get<StartTime>(flow_entt).start_time = flow_events[i][4];
-        ctx.get<StopTime>(flow_entt).stop_time = 0;
+    //     ctx.get<FlowSize>(flow_entt).flow_size = flow_events[i][3];
+    //     ctx.get<StartTime>(flow_entt).start_time = flow_events[i][4];
+    //     ctx.get<StopTime>(flow_entt).stop_time = 0;
 
-        ctx.get<NIC_ID>(flow_entt).nic_id = flow_events[i][5];
-        ctx.get<SndServerID>(flow_entt).snd_server_id = flow_events[i][6];
-        ctx.get<RecvServerID>(flow_entt).recv_server_id = flow_events[i][7];
+    //     ctx.get<NIC_ID>(flow_entt).nic_id = flow_events[i][5];
+    //     ctx.get<SndServerID>(flow_entt).snd_server_id = flow_events[i][6];
+    //     ctx.get<RecvServerID>(flow_entt).recv_server_id = flow_events[i][7];
 
-        ctx.get<FlowState>(flow_entt) = FlowState::UNCOMPLETE;
+    //     ctx.get<FlowState>(flow_entt) = FlowState::UNCOMPLETE;
 
-        ctx.get<LastCNPTimestamp>(flow_entt).last_cnp_timestamp = 0; //1ms
+    //     ctx.get<LastCNPTimestamp>(flow_entt).last_cnp_timestamp = 0; //1ms
 
-        ctx.get<RecvBytes>(flow_entt).recv_bytes = 0;
+    //     ctx.get<RecvBytes>(flow_entt).recv_bytes = 0;
 
-        ctx.get<PktBuf>(flow_entt).head = 0;
-        ctx.get<PktBuf>(flow_entt).tail = 0;
-        ctx.get<PktBuf>(flow_entt).cur_num = 0;
-        ctx.get<PktBuf>(flow_entt).cur_bytes = 0;
+    //     ctx.get<PktBuf>(flow_entt).head = 0;
+    //     ctx.get<PktBuf>(flow_entt).tail = 0;
+    //     ctx.get<PktBuf>(flow_entt).cur_num = 0;
+    //     ctx.get<PktBuf>(flow_entt).cur_bytes = 0;
 
-        ctx.get<NICRate>(flow_entt).nic_rate = 1000LL*1000*1000*100; // 100 Gbps  
-        ctx.get<HSLinkDelay>(flow_entt).HS_link_delay = HS_LINK_DELAY; // 1 us, 1000 ns 
+    //     ctx.get<NICRate>(flow_entt).nic_rate = 1000LL*1000*1000*100; // 100 Gbps  
+    //     ctx.get<HSLinkDelay>(flow_entt).HS_link_delay = HS_LINK_DELAY; // 1 us, 1000 ns 
 
-        ctx.get<SimTime>(flow_entt).sim_time = 0;
-        ctx.get<SimTimePerUpdate>(flow_entt).sim_time_per_update = LOOKAHEAD_TIME; //1000ns
+    //     ctx.get<SimTime>(flow_entt).sim_time = 0;
+    //     ctx.get<SimTimePerUpdate>(flow_entt).sim_time_per_update = LOOKAHEAD_TIME; //1000ns
 
-        uint32_t src = ctx.get<Src>(flow_entt).src;
-        //ctx.data()._recv_flows[ctx.data().num_recv_flow++] = flow_entt;
-        ctx.data().recv_flows[src][ctx.get<FlowID>(flow_entt).flow_id] = flow_entt;
-    }
+    //     uint32_t src = ctx.get<Src>(flow_entt).src;
+    //     //ctx.data()._recv_flows[ctx.data().num_recv_flow++] = flow_entt;
+    //     ctx.data().recv_flows[src][ctx.get<FlowID>(flow_entt).flow_id] = flow_entt;
+    // }
 
     memset(ctx.data().flow_count, 0, MAX_PATH_LEN*sizeof(uint32_t));
     // ctx.data().flow_count = 
