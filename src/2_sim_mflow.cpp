@@ -637,7 +637,7 @@ inline void setup_flow(Engine &ctx, NPU_ID _npu_id,
 inline void check_flow_state(Engine &ctx, NPU_ID &_npu_id, CompletedFlowQueue &_completed_flow_queue,
                              SimTime &_sim_time, SimTimePerUpdate &_sim_time_per_update) {
 
-    if (_npu_id.npu_id == 0) {printf("*********Enter into check_flow_state:*********\n");}
+    if (_npu_id.npu_id == 0||_npu_id.npu_id == 1) {printf("*********Enter into check_flow_state:*********\n");}
     else {return;}
 
     uint32_t tmp_snd_flow[MAP_SIZE];
@@ -1894,9 +1894,9 @@ inline void tick(Engine &ctx,
     for (uint32_t i = 0; i < num; i++)
     {
         Entity npu_entt = ctx.data()._npus[i];
-        CompletedFlowQueue completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
+        // CompletedFlowQueue completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
 
-        uint32_t flow_event_num = get_queue_len(completedFlowQueue);
+        uint32_t flow_event_num = get_queue_len(ctx.get<CompletedFlowQueue>(npu_entt));
         
         if (flow_event_num > 0)
         {
@@ -1904,19 +1904,32 @@ inline void tick(Engine &ctx,
             for (uint32_t i = 0; i < flow_event_num; i++)
             {
                 FlowEvent flow_event;
-                _dequeue_flow(completedFlowQueue, flow_event);
+                _dequeue_flow(ctx.get<CompletedFlowQueue>(npu_entt), flow_event);
+    //              int32_t type;
+    // int32_t eventId;
+    // int32_t time;
+    // int32_t src;
+    // int32_t dst;
+    // int32_t size;
+    // int32_t port;
                 MadronaEvent event_temp;
                 event_temp.type = 0;
                 event_temp.eventId = flow_event.extra_1;
-                event_temp.time = time.time;
+                event_temp.time = flow_event.stop_time;
+                event_temp.src=flow_event.src;
+                event_temp.dst=flow_event.dst;
+                event_temp.size=flow_event.flow_size;
+                event_temp.port=flow_event.l4_port;
+                
+                
                 eventsResult[resultIndex] = event_temp;
                 resultIndex++;
                 printf("finish sim_send event,eventId:%ld.\n", flow_event.extra_1);
             }
 
-            clear_queue(completedFlowQueue);
-            completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
-            flow_event_num = get_queue_len(completedFlowQueue);
+            clear_queue(ctx.get<CompletedFlowQueue>(npu_entt));
+            // completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
+            flow_event_num = get_queue_len(ctx.get<CompletedFlowQueue>(npu_entt));
             printf("completedFlowQueue.flow_event_num=%d.\n", flow_event_num);
         }
     }
