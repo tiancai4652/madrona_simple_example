@@ -44,7 +44,7 @@ grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_
 
 start_time = time.time()
 
-step_num = 23 #100*100
+step_num = 100*100
 for i in range(step_num):
     # print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
     # print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n\n")

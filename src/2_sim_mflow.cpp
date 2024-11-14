@@ -226,10 +226,10 @@ inline bool fetch_elem(T1& queue, int32_t idx, T2& elem)
 
 template<typename T1, typename T2>
 inline void _enqueue(T1 &queue, T2 pkt) {
-    if (queue.cur_num >= PKT_BUF_LEN) {
-        printf("queue is overloaded\n");
-        // exit(0);
-    }
+    // if (queue.cur_num >= PKT_BUF_LEN) {
+    //     printf("queue is overloaded\n");
+    //     // exit(0);
+    // }
 
     queue.pkts[queue.tail] = pkt;
     //queue.tail = (queue.tail + 1) % getArrayLength(queue.pkts);
@@ -677,7 +677,7 @@ inline void check_flow_state(Engine &ctx, NPU_ID &_npu_id, CompletedFlowQueue &_
         ctx.data().recv_flows[_npu_id.npu_id].remove(tmp_snd_flow[i]);
     }
 
-    clear_queue(_completed_flow_queue);
+    // clear_queue(_completed_flow_queue);
     // printf("check_flow_state: after clear_queue: _completed_flow_queue: %d\n", get_queue_len(_completed_flow_queue));
 }
 
@@ -931,11 +931,11 @@ inline void clear_q(Engine &ctx, FlowID &_flow_id, Src &_src, Dst &_dst, L4Port 
 
 inline void nic_forward(Engine &ctx, NIC_ID &_nic_id, NICRate &_nic_rate, SimTime &_sim_time, 
                         SimTimePerUpdate &_sim_time_per_update, BidPktBuf &_bid_pkt_buf) {
-    if (_nic_id.nic_id == 0) {
-        printf("\n*******Enter into nic_forward*********\n");
-        printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
-        printf("end_time: %ld\n", _sim_time.sim_time+_sim_time_per_update.sim_time_per_update);
-    }
+    // if (_nic_id.nic_id == 0) {
+    //     printf("\n*******Enter into nic_forward*********\n");
+    //     printf("start _sim_time.sim_time: %ld\n", _sim_time.sim_time);
+    //     printf("end_time: %ld\n", _sim_time.sim_time+_sim_time_per_update.sim_time_per_update);
+    // }
 
     Map<uint16_t, Entity> tmp_snd_flow = ctx.data().snd_flows[_nic_id.nic_id];
     for (auto it = tmp_snd_flow.begin(); it != tmp_snd_flow.end(); ++it) {
@@ -948,7 +948,7 @@ inline void nic_forward(Engine &ctx, NIC_ID &_nic_id, NICRate &_nic_rate, SimTim
         for (uint16_t k = 0; k < pkt_num; k++) {
             _dequeue(snd_flow_buf, pkt);
 
-            PrintPkt(pkt, "nic_forward: ");
+            // PrintPkt(pkt, "nic_forward: ");
             // printf("nic_forward: after dequeue, snd_flow_buf: %d\n", get_queue_len(snd_flow_buf));
             _enqueue(_bid_pkt_buf.snd_buf, pkt);
             // printf("nic_forward: after enqueue, _bid_pkt_buf.snd_buf: %d\n", get_queue_len(_bid_pkt_buf.snd_buf));
@@ -1460,7 +1460,7 @@ inline void transmit(Engine &ctx, SchedTrajType sched_traj_type,
                 uint8_t flow_priority = 0; // and the pfc frame is set with highest flow priority
 
                 uint32_t path[MAX_PATH_LEN];
-                memset(path, 0, MAX_PATH_LEN*sizeof(MAX_PATH_LEN));
+                memset(path, 0, MAX_PATH_LEN*sizeof(uint32_t));
                 Pkt pfc_frame;
                 // Pkt pfc_frame = {0, PFC_FOR_UPSTREAM, pkt.l4_port, 40, 0, 0, queue_idx, pfc_enqueue_time, 0, flow_priority, PktType::PFC_PAUSE}; // and PktType is PFC PAUSE
                 printf("create_pkt: \n");
@@ -1555,7 +1555,7 @@ inline void flow_receive(Engine &ctx, FlowID &_flow_id, PktBuf &_recv_queue,
             PrintPkt(pkt, "DATA received by receiver: ");
             #endif
             uint32_t path[MAX_PATH_LEN];
-            memset(path, 0, MAX_PATH_LEN*sizeof(MAX_PATH_LEN));
+            memset(path, 0, MAX_PATH_LEN*sizeof(uint32_t));
 
             // int64_t expect_byte = + payload_len;
             uint32_t ack_src = pkt.dst; //recv_flow_queue.recv_flow[0].dst;
@@ -1897,9 +1897,10 @@ inline void tick(Engine &ctx,
         CompletedFlowQueue completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
 
         uint32_t flow_event_num = get_queue_len(completedFlowQueue);
-        // printf("completedFlowQueue.flow_event_num=%d.\n", flow_event_num);
+        
         if (flow_event_num > 0)
         {
+            printf("completedFlowQueue.flow_event_num=%d.\n", flow_event_num);
             for (uint32_t i = 0; i < flow_event_num; i++)
             {
                 FlowEvent flow_event;
@@ -1910,10 +1911,13 @@ inline void tick(Engine &ctx,
                 event_temp.time = time.time;
                 eventsResult[resultIndex] = event_temp;
                 resultIndex++;
-                printf("finish sim_send event,time:%ld.\n", time.time);
+                printf("finish sim_send event,eventId:%ld.\n", flow_event.extra_1);
             }
 
             clear_queue(completedFlowQueue);
+            completedFlowQueue = ctx.get<CompletedFlowQueue>(npu_entt);
+            flow_event_num = get_queue_len(completedFlowQueue);
+            printf("completedFlowQueue.flow_event_num=%d.\n", flow_event_num);
         }
     }
 
@@ -2021,11 +2025,11 @@ void Sim::setupTasks(TaskGraphBuilder &builder, const Config &)
                                               LocalPortID, GlobalPortID, PktBuf, ForwardPlan, \
                                               SimTime, SimTimePerUpdate>>({forward_sys}); 
 
-    auto transmit_sys = builder.addToGraph<ParallelForNode<Engine, transmit, SchedTrajType, \
-                                           PortType, LocalPortID,  GlobalPortID, SwitchID, \
-                                           NextHop, NextHopType, PktQueue, TXHistory, \
-                                           SSLinkDelay, LinkRate, SimTime, \
-                                           SimTimePerUpdate, Seed>>({remove_pkts_sys}); 
+    // auto transmit_sys = builder.addToGraph<ParallelForNode<Engine, transmit, SchedTrajType, \
+    //                                        PortType, LocalPortID,  GlobalPortID, SwitchID, \
+    //                                        NextHop, NextHopType, PktQueue, TXHistory, \
+    //                                        SSLinkDelay, LinkRate, SimTime, \
+    //                                        SimTimePerUpdate, Seed>>({remove_pkts_sys}); 
 }
 
 
@@ -2044,6 +2048,15 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Reward>(agent).r = 0.f;
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
+    // int evts[] = {0, 1, 10, 0, 1, 524288, 0, 0, 2, 10, 1, 0, 524288, 0};
+    // for (size_t i = 0; i < 1000; i++)
+    // {
+    //      ctx.get<MadronaEvents>(agent).events[i]=0;
+    // }
+    // for (size_t i = 0; i < 14.; i++)
+    // {
+    //      ctx.get<MadronaEvents>(agent).events[i]=evts[i];
+    // }
 
     //***************************************************
     // for the router forwarding function, of GPU_acclerated DES

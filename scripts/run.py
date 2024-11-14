@@ -55,11 +55,9 @@ def check_result_reponse():
         for event in m_events.events:
             flow_events_result.append(event)
         grid_world.madronaEventsResult.copy_(empty_tensor())
-        index=1
-        for event in flow_events_result:
-            print(f"process {index} result")
-            index=index+1
-            send_command([event])
+        if len(flow_events_result)>0:
+            first_element = flow_events_result.pop(0)
+            send_command([first_element])
             receive_set_command()
         # type 12 means return over.
         send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
@@ -71,15 +69,14 @@ def check_result_reponse():
 def check_result_noReponse_if_noResult():
     int_tensor=tensor_to_events(grid_world.madronaEventsResult)
     m_events=int_array_to_madrona_events(int_tensor)
-    if len(m_events.events)>0:
+    if len(m_events.events)>0 or len(flow_events_result)>0:
         for event in m_events.events:
             flow_events_result.append(event)
         grid_world.madronaEventsResult.copy_(empty_tensor())
-        index=1
-        for event in flow_events_result:
-            print(f"process {index} result")
-            index=index+1
-            send_command([event])
+        
+        if len(flow_events_result)>0:
+            first_element = flow_events_result.pop(0)
+            send_command([first_element])
             receive_set_command()
         # type 12 means return over.
         send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
@@ -88,6 +85,24 @@ def check_result_noReponse_if_noResult():
         # send_command([MadronaEvent(-1,0 ,0, 0, 0, 0)])
         # receive_set_command()
         return
+def check_result_noReponse_if_returnContinue():
+    int_tensor=tensor_to_events(grid_world.madronaEventsResult)
+    m_events=int_array_to_madrona_events(int_tensor)
+    if len(m_events.events)>0 or len(flow_events_result)>0:
+        for event in m_events.events:
+            flow_events_result.append(event)
+        grid_world.madronaEventsResult.copy_(empty_tensor())
+        
+        if len(flow_events_result)>0:
+            first_element = flow_events_result.pop(0)
+            send_command([first_element])
+            receive_set_command()
+        # type 12 means return over.
+        send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
+        receive_set_command()
+    else:
+        send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
+        receive_set_command()
 
 
 # to do
@@ -142,7 +157,7 @@ def receive_set_command():
                 
                 grid_world.step()
                 check_result_reponse()
-            else: 
+            elif event.type==11:
                 while True:
                     if len(flow_events)>0:
                         int_tensor=tensor_to_events(grid_world.madronaEvents)
@@ -158,7 +173,8 @@ def receive_set_command():
                         grid_world.madronaEvents.copy_(int_tensor)
                     grid_world.step()
                     check_result_noReponse_if_noResult()
-                    
+            elif event.type==13:
+                    check_result_noReponse_if_returnContinue()
                     
             
         #     # tell madrona to run next frames until get result.
