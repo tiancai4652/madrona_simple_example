@@ -163,6 +163,11 @@ def receive_set_command():
                 elif event.type==13:
                         check_result_noReponse_if_returnContinue()
                         break
+                # exit
+                elif event.type==14:
+                        send_command([])
+                        sys.exit(0)
+                        # break
                         
                 
            
