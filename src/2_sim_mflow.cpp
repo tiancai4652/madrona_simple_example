@@ -638,7 +638,7 @@ inline void check_flow_state(Engine &ctx, NPU_ID &_npu_id, CompletedFlowQueue &_
                              SimTime &_sim_time, SimTimePerUpdate &_sim_time_per_update) {
 
     if (_npu_id.npu_id == 0||_npu_id.npu_id == 1) {printf("*********Enter into check_flow_state:*********\n");}
-    else {return;}
+    // else {return;}
 
     uint32_t tmp_snd_flow[MAP_SIZE];
     memset(tmp_snd_flow, 0, MAX_PATH_LEN*sizeof(uint32_t));

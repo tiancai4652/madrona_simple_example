@@ -116,11 +116,13 @@ def receive_set_command():
         m_events=events
 
         for event in m_events:
+                # sim_send event
                 if event.type==0:
                     flow_events.append(event) 
                     send_command([MadronaEvent(-1,0 ,0, 0, 0, 0)])
                     # receive_set_command()
                     break
+                # step 1 event
                 elif event.type==10:
                     if len(flow_events)>0:
                         int_tensor=tensor_to_events(grid_world.madronaEvents)
@@ -138,6 +140,7 @@ def receive_set_command():
                     grid_world.step()
                     check_result_reponse()
                     break
+                # step all event
                 elif event.type==11:
                     while True:
                         if len(flow_events)>0:
@@ -156,6 +159,7 @@ def receive_set_command():
                         if check_result_noReponse_if_noResult():
                             break
                     break
+                # return continue
                 elif event.type==13:
                         check_result_noReponse_if_returnContinue()
                         break
