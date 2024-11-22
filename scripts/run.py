@@ -100,7 +100,8 @@ def check_result_noReponse_if_returnContinue():
             send_command([first_element])
             # receive_set_command()
         # type 12 means return over.
-        send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
+        else:
+            send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
         # receive_set_command()
     else:
         send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
