@@ -16,14 +16,14 @@ semaphore_b = posix_ipc.Semaphore("semB")
 
 def _create_and_write_shared_memory(messages,map_file):
     num_messages = len(messages)
-    header_size = struct.calcsize('i')  # 消息数量头部大小
-    message_size = struct.calcsize('7i')  # 每个 MadronaMsg 的大小
+    header_size = struct.calcsize('i')  # num
+    message_size = struct.calcsize('7i')  # size
 
-    # 写入消息数量到头部
+    # write num
     map_file.seek(0)
     map_file.write(struct.pack('i', num_messages))
 
-    # 写入每个 MadronaMsg
+    # write MadronaMsg
     for msg in messages:
         map_file.write(msg.pack())
 
@@ -45,21 +45,7 @@ def receive_data():
 
 def send_data(messages):
     _create_and_write_shared_memory(messages,map_file)
-    # print(f"Madrona: Data written to Astrasim: {messages}")
-    # notifies astrasim
     semaphore_b.release()
-    # semaphore_a.acquire()
-
-# def comm():
-#     data= receive_data()
-#     # 处理数据并写回
-#     messages = [MadronaMsg(1, 100, 5000, 10, 20, 30)]
-#     _create_and_write_shared_memory(messages,map_file)
-#     print(f"Madrona: Data written to Astrasim: {messages}")
-#     # 通知 C++ 程序处理完成
-#     semaphore_b.release()
-
-    
 
 def comm_dispose():
     map_file.close()
