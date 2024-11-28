@@ -1877,7 +1877,7 @@ inline void tick(Engine &ctx,
                 // to do : 1 set flow entities
                 Comm_SetFlow(ctx,eventsQueue[i]);
                 // process sim_send event,time:1000, eventId=1
-                printf("process sim_send event,time:%ld, eventId=%d.\n", time.time,eventsQueue[i].eventId);
+                printf("process sim_send event,time:%ld, eventId=%d.\n", eventsQueue[i].time,eventsQueue[i].eventId);
             }
         // }
         // else
@@ -2062,12 +2062,17 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Reward>(agent).r = 0.f;
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
-    // int evts[] = {0, 1, 10, 0, 1, 524288, 0, 0, 2, 10, 1, 0, 524288, 0};
+    // int evts[] = {0, 1, 10, 0, 1, 131072, 0, 0, 2, 10, 1, 2, 131072, 0, 0, 3, 10, 2, 3, 131072, 0, 0, 4, 10, 3, 4, 131072, 0, 0, 5, 10, 4, 5, 131072, 0, 0, 6, 10, 5, 6, 131072, 0, 0, 7, 10, 6, 7, 131072, 0, 0, 8, 10, 7, 0, 131072, 0, 0, 9, 10, 8, 9, 131072, 0, 0, 10, 10, 9, 10, 131072, 0, 0, 11, 10, 10, 11, 131072, 0, 0, 12, 10, 11, 12, 131072, 0, 0, 13, 10, 12, 13, 131072, 0, 0, 14, 10, 13, 14, 131072, 0, 0, 15, 10, 14, 15, 131072, 0, 0, 16, 10, 15, 8, 131072, 0, 0, 17, 10, 16, 17, 131072, 0, 0, 18, 10, 17, 18, 131072, 0, 0, 19, 10, 18, 19, 131072, 0, 0, 20, 10, 19, 20, 131072, 0, 0, 21, 10, 20, 21, 131072, 0, 0, 22, 10, 21, 22, 131072, 0, 0, 23, 10, 22, 23, 131072, 0, 0, 24, 10, 23, 16, 131072, 0, 0, 25, 10, 24, 25, 131072, 0, 0, 26, 10, 25, 26, 131072, 0, 0, 27, 10, 26, 27, 131072, 0, 0, 28, 10, 27, 28, 131072, 0, 0, 29, 10, 28, 29, 131072, 0, 0, 30, 10, 29, 30, 131072, 0, 0, 31, 10, 30, 31, 131072, 0, 0, 32, 10, 31, 24, 131072, 0};
+
+    //  if (event.type == 0 && event.eventId == 0 &&
+    //         event.time == 0 && event.src == 0 &&
+    //         event.dst == 0 && event.size == 0 && event.port == 0) {
+    // int evts[] = {0, 1, 10, 0, 1, 131072, 0, 0, 2, 10010, 1, 2, 131072, 0};
     // for (size_t i = 0; i < 1000; i++)
     // {
     //      ctx.get<MadronaEvents>(agent).events[i]=0;
     // }
-    // for (size_t i = 0; i < 14.; i++)
+    // for (size_t i = 0; i < 32*7; i++)
     // {
     //      ctx.get<MadronaEvents>(agent).events[i]=evts[i];
     // }

@@ -35,9 +35,9 @@ def receive_data():
     numMessages, = struct.unpack('i', map_file.read(4))  
     messages = []
     for _ in range(numMessages):
-        data = map_file.read(24)  #  MadronaMsg = 24byte
+        data = map_file.read(28)  #  MadronaMsg = 24byte
         # message = MadronaMsg(data)
-        unpacked_data = struct.unpack('6i', data)
+        unpacked_data = struct.unpack('7i', data)
         message = MadronaMsg(*unpacked_data)  
         messages.append(message)
     # print(f"Madrona: Received from Astrasim: {messages}")

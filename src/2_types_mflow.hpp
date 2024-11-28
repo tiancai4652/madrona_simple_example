@@ -4,7 +4,7 @@
 #include <madrona/components.hpp>
 // #include <2_sim_mflow.hpp>
 
-#define K_ARY 4 // 8 //4 //16
+#define K_ARY 8 // 8 //4 //16
 #define INPORT_NUM  K_ARY //40
 
 #define NIC_RATE 1000LL*1000*1000 * 100 // 100 Gbps
