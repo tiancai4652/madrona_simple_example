@@ -51,13 +51,14 @@ def send_command(events):
 def check_result_reponse():
     int_tensor=tensor_to_events(grid_world.madronaEventsResult)
     m_events=int_array_to_madrona_events(int_tensor)
-    if len(m_events.events)>0:
+    if len(m_events.events)>0 or len(flow_events_result)>0:
         for event in m_events.events:
             flow_events_result.append(event)
         grid_world.madronaEventsResult.copy_(empty_tensor())
         if len(flow_events_result)>0:
             first_element = flow_events_result.pop(0)
             send_command([first_element])
+            return
             # receive_set_command()
         # type 12 means return over.
         send_command([MadronaEvent(12,0 ,0, 0, 0, 0)])
