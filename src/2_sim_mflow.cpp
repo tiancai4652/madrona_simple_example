@@ -479,7 +479,7 @@ inline void create_pkt(Pkt &pkt,
 
 
 // create send flow entity and recv flow entity
-inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
+inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id,int64_t sim_time) {
 // snd flows
     Entity snd_flow_entt = ctx.makeEntity<SndFlow>();
 
@@ -535,7 +535,8 @@ inline void create_flow(Engine &ctx, FlowEvent flow_event, uint32_t flow_id) {
     ctx.get<NICRate>(snd_flow_entt).nic_rate = 1000LL*1000*1000*100; // 100 Gbps
     ctx.get<HSLinkDelay>(snd_flow_entt).HS_link_delay = HS_LINK_DELAY; // 1 us, 1000 ns 
 
-    ctx.get<SimTime>(snd_flow_entt).sim_time = flow_event.start_time;
+    // ctx.get<SimTime>(snd_flow_entt).sim_time = flow_event.start_time;
+    ctx.get<SimTime>(snd_flow_entt).sim_time = sim_time;
     // ctx.get<SimTime>(snd_flow_entt).sim_time = 0;
     ctx.get<SimTimePerUpdate>(snd_flow_entt).sim_time_per_update = LOOKAHEAD_TIME; //1000ns
 
@@ -624,7 +625,7 @@ inline void setup_flow(Engine &ctx, NPU_ID _npu_id,
         _dequeue_flow(_new_flow_queue, flow_event);
         // // printf("setup_flow, _new_flow_queue: %d\n", get_queue_len(_new_flow_queue));
         uint32_t flow_id = ctx.data().flow_count[_npu_id.npu_id]++;
-        create_flow(ctx, flow_event, flow_id); //or create flow entities
+        create_flow(ctx, flow_event, flow_id,_sim_time.sim_time); //or create flow entities
     }
 
     clear_queue(_new_flow_queue);
