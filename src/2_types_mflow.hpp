@@ -75,6 +75,8 @@
 //Map structure size
 #define MAP_SIZE 1000
 
+#define MESSAGE_BUFFER_LENGTH (1000*100)
+
 
 namespace madsimple {
 
@@ -139,17 +141,17 @@ struct  MadronaEvent
 
 struct MadronaEventsQueue
 {
-    int32_t events[1000];
+    int32_t events[MESSAGE_BUFFER_LENGTH];
 };
 
 struct MadronaEvents
 {
-    int32_t events[1000];
+    int32_t events[MESSAGE_BUFFER_LENGTH];
 };
 
 struct  MadronaEventsResult
 {
-    int32_t events[1000];
+    int32_t events[MESSAGE_BUFFER_LENGTH];
 };
 
 struct  Configuration

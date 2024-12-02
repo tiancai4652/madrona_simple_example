@@ -15,6 +15,8 @@ using namespace madrona::math;
 
 #define PRINT_PKT_LOG 0
 
+#define MESSAGE_BUFFER_LENGTH (1000*100)
+
 namespace madsimple {
 
 void Sim::registerTypes(ECSRegistry &registry, const Config &)
@@ -1622,7 +1624,7 @@ int parseMadronaEvents(const MadronaEvents &madronaEvents, MadronaEvent parsedEv
     int validEvents = 0;
     for (int i = 0; i < maxEvents; ++i) {
         int baseIndex = i * INTS_PER_EVENT;
-        if (baseIndex + INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        if (baseIndex + INTS_PER_EVENT-1 >= MESSAGE_BUFFER_LENGTH) break;  // 确保不超出边界
         MadronaEvent event = {
             madronaEvents.events[baseIndex],
             madronaEvents.events[baseIndex + 1],
@@ -1644,13 +1646,13 @@ int parseMadronaEvents(const MadronaEvents &madronaEvents, MadronaEvent parsedEv
 }
 void updateMadronaEvents(MadronaEvents &madronaEvents, const MadronaEvent parsedEvents[], int numEvents) {
     // 清空 madronaEvents
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < MESSAGE_BUFFER_LENGTH; ++i) {
         madronaEvents.events[i] = 0;
     }
 
     for (int i = 0; i < numEvents; ++i) {
         int baseIndex = i * INTS_PER_EVENT;
-        if (baseIndex +  INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        if (baseIndex +  INTS_PER_EVENT-1 >= MESSAGE_BUFFER_LENGTH) break;  // 确保不超出边界
         madronaEvents.events[baseIndex] = parsedEvents[i].type;
         madronaEvents.events[baseIndex + 1] = parsedEvents[i].eventId;
         madronaEvents.events[baseIndex + 2] = parsedEvents[i].time;
@@ -1665,7 +1667,7 @@ int parseMadronaEvents(const MadronaEventsResult &madronaEvents, MadronaEvent pa
     int validEvents = 0;
     for (int i = 0; i < maxEvents; ++i) {
         int baseIndex = i * INTS_PER_EVENT;
-        if (baseIndex + INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        if (baseIndex + INTS_PER_EVENT-1 >= MESSAGE_BUFFER_LENGTH) break;  // 确保不超出边界
         MadronaEvent event = {
             madronaEvents.events[baseIndex],
             madronaEvents.events[baseIndex + 1],
@@ -1687,13 +1689,13 @@ int parseMadronaEvents(const MadronaEventsResult &madronaEvents, MadronaEvent pa
 }
 void updateMadronaEvents(MadronaEventsResult &madronaEvents, const MadronaEvent parsedEvents[], int numEvents) {
     // 清空 madronaEvents
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < MESSAGE_BUFFER_LENGTH; ++i) {
         madronaEvents.events[i] = 0;
     }
 
     for (int i = 0; i < numEvents; ++i) {
         int baseIndex = i * INTS_PER_EVENT;
-        if (baseIndex +  INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        if (baseIndex +  INTS_PER_EVENT-1 >= MESSAGE_BUFFER_LENGTH) break;  // 确保不超出边界
         madronaEvents.events[baseIndex] = parsedEvents[i].type;
         madronaEvents.events[baseIndex + 1] = parsedEvents[i].eventId;
         madronaEvents.events[baseIndex + 2] = parsedEvents[i].time;
@@ -1708,7 +1710,7 @@ int parseMadronaEvents(const MadronaEventsQueue &madronaEvents, MadronaEvent par
     int validEvents = 0;
     for (int i = 0; i < maxEvents; ++i) {
         int baseIndex = i * INTS_PER_EVENT;
-        if (baseIndex + INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        if (baseIndex + INTS_PER_EVENT-1 >= MESSAGE_BUFFER_LENGTH) break;  // 确保不超出边界
         MadronaEvent event = {
             madronaEvents.events[baseIndex],
             madronaEvents.events[baseIndex + 1],
@@ -1730,13 +1732,13 @@ int parseMadronaEvents(const MadronaEventsQueue &madronaEvents, MadronaEvent par
 }
 void updateMadronaEvents(MadronaEventsQueue &madronaEvents, const MadronaEvent parsedEvents[], int numEvents) {
     // 清空 madronaEvents
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < MESSAGE_BUFFER_LENGTH; ++i) {
         madronaEvents.events[i] = 0;
     }
 
     for (int i = 0; i < numEvents; ++i) {
         int baseIndex = i * INTS_PER_EVENT;
-        if (baseIndex +  INTS_PER_EVENT-1 >= 1000) break;  // 确保不超出边界
+        if (baseIndex +  INTS_PER_EVENT-1 >= MESSAGE_BUFFER_LENGTH) break;  // 确保不超出边界
         madronaEvents.events[baseIndex] = parsedEvents[i].type;
         madronaEvents.events[baseIndex + 1] = parsedEvents[i].eventId;
         madronaEvents.events[baseIndex + 2] = parsedEvents[i].time;
@@ -1807,7 +1809,7 @@ inline void tick(Engine &ctx,
     // printf("simulation_time: %ld\n",time.time);
 
     // // printf("parse madronaEvents\n");
-    const int maxEvents = 1000 / 7;
+    const int maxEvents = MESSAGE_BUFFER_LENGTH / 7;
     MadronaEvent parsedEvents[maxEvents];
     // parse MadronaEvents
     int validEvents = parseMadronaEvents(madronaEvents, parsedEvents, maxEvents);
@@ -2073,7 +2075,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     // {
     //      ctx.get<MadronaEvents>(agent).events[i]=0;
     // }
-    // for (size_t i = 0; i < 32*7; i++)
+    // for (size_t i = 0; i < 2*7; i++)
     // {
     //      ctx.get<MadronaEvents>(agent).events[i]=evts[i];
     // }

@@ -41,7 +41,7 @@ time_current=None
 
 # memoryRW: set params string, for instance
 example_string = ""
-encoded_string_tensor = string_to_tensor(example_string)
+encoded_string_tensor = string_to_tensor(example_string,1000)
 grid_world.results2.copy_(encoded_string_tensor)
 
 

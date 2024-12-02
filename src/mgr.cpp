@@ -291,13 +291,13 @@ Tensor Manager::results2Tensor() const
 Tensor Manager::madronaEventsTensor() const
 {
     return impl_->exportTensor(ExportID::MadronaEvents, Tensor::ElementType::Int32,
-        {impl_->cfg.numWorlds, 1000});
+        {impl_->cfg.numWorlds, 100000});
 }
 
 Tensor Manager::madronaEventsResultTensor() const
 {
     return impl_->exportTensor(ExportID::MadronaEventsResult, Tensor::ElementType::Int32,
-        {impl_->cfg.numWorlds, 1000});
+        {impl_->cfg.numWorlds, 100000});
 }
 
 
