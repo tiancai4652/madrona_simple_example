@@ -24,23 +24,21 @@ grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_
 print(grid_world.observations.shape)
 
 for i in range(5):
-    print("frame: ", i,"\n")
+    print("Obs:")
+    print(grid_world.observations)
+
+    # "Policy"
+    grid_world.actions[:, 0] = torch.randint(0, 4, size=(num_worlds,))
+    #grid_world.actions[:, 0] = 3 # right to win given (4, 4) start
+
+    print("Actions:")
+    print(grid_world.actions)
+
+    # Advance simulation across all worlds
     grid_world.step()
-    # print("Obs:")
-    # print(grid_world.observations)
-
-    # # "Policy"
-    # grid_world.actions[:, 0] = torch.randint(0, 4, size=(num_worlds,))
-    # #grid_world.actions[:, 0] = 3 # right to win given (4, 4) start
-
-    # print("Actions:")
-    # print(grid_world.actions)
-
-    # # Advance simulation across all worlds
-    # grid_world.step()
     
-    # print("Rewards: ")
-    # print(grid_world.rewards)
-    # print("Dones:   ")
-    # print(grid_world.dones)
-    # print()
+    print("Rewards: ")
+    print(grid_world.rewards)
+    print("Dones:   ")
+    print(grid_world.dones)
+    print()

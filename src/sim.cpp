@@ -2,6 +2,7 @@
 #include <madrona/mw_gpu_entry.hpp>
 #include "sys_layer/sysComponent.hpp"
 #include "sys_layer/Astrasim.hpp"
+#include "sys_layer/HelperTool.hpp"
 
 using namespace madrona;
 using namespace madrona::math;
@@ -198,7 +199,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     config.accuracy = 0.98f;
     config.maxIterations = 2000;
     // config.simulationMode = "advanced";
-    stringToIntArray( "advanced", config.simulationMode);
+    HelperTool::stringToIntArray( "advanced", config.simulationMode);
 
     // 初始化 SystemLayerComponent
     SystemLayerComponent &sysComponent = ctx.get<SystemLayerComponent>(sysAgent);

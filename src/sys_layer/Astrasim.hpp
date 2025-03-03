@@ -9,7 +9,7 @@ namespace AstraSim {
 struct SimulationData {
     float time;
     float value;
-    std::string description;
+    int description[1024];
 };
 
 // SystemLayer 基类

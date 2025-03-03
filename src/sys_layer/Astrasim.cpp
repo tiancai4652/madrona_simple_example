@@ -1,6 +1,6 @@
 #include "Astrasim.hpp"
 #include <iostream>
-
+#include "HelperTool.hpp"
 namespace AstraSim {
 
 SystemLayer::SystemLayer() 
@@ -9,8 +9,8 @@ SystemLayer::SystemLayer()
     parameters_.push_back({"simulationSpeed", 1.0f});
     parameters_.push_back({"accuracy", 0.95f});
     parameters_.push_back({"complexity", 3.0f});
-    
-    currentResult_ = {0.0f, 0.0f, "No simulation run yet"};
+    HelperTool::stringToIntArray("No simulation run yet", currentResult_.description);
+    // currentResult_ = {0.0f, 0.0f, "No simulation run yet"};
 }
 
 SystemLayer::~SystemLayer() {
@@ -66,9 +66,10 @@ void SystemLayer::runSimulation(float duration) {
     for (float t = 0; t < duration; t += timeStep) {
         update(timeStep);
     }
-    
-    currentResult_.description = "模拟完成，总时长: " + std::to_string(duration);
-    std::cout << "SystemLayer: 模拟完成" << std::endl;
+    std::string message = "模拟完成，总时长: " + std::to_string(duration);
+    HelperTool::stringToIntArray(message.c_str(), currentResult_.description);
+    // currentResult_.description = "模拟完成，总时长: " + std::to_string(duration);
+    // std::cout << "SystemLayer: 模拟完成" << std::endl;
 }
 
 SimulationData SystemLayer::getSimulationResult() const {

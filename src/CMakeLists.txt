@@ -7,6 +7,8 @@ set(SYS_LAYER_SRCS
     sys_layer/Astrasim.hpp
     sys_layer/Astrasim.cpp
     sys_layer/sysComponent.hpp
+    sys_layer/HelperTool.hpp
+    sys_layer/HelperTool.cpp
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC
