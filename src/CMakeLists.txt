@@ -2,8 +2,16 @@ set(SIMULATOR_SRCS
     types.hpp sim.hpp sim.cpp
 )
 
+# 添加系统层源文件
+set(SYS_LAYER_SRCS
+    sys_layer/Astrasim.hpp
+    sys_layer/Astrasim.cpp
+    sys_layer/sysComponent.hpp
+)
+
 add_library(madrona_simple_ex_cpu_impl STATIC
     ${SIMULATOR_SRCS}
+    ${SYS_LAYER_SRCS}  # 添加系统层源文件
 )
 
 target_link_libraries(madrona_simple_ex_cpu_impl
@@ -35,6 +43,7 @@ if (TARGET madrona_mw_gpu)
             SIMPLE_COMPILE_FLAGS 
         SRCS
             ${SIMULATOR_SRCS}
+            ${SYS_LAYER_SRCS}  # 添加系统层源文件到 GPU 编译
     )
 
     target_link_libraries(madrona_simple_ex_mgr PRIVATE
@@ -55,3 +64,4 @@ target_link_libraries(_madrona_simple_example_cpp PRIVATE
     madrona_hdrs
     madrona_simple_ex_mgr
 )
+

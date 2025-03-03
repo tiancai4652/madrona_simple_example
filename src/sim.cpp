@@ -1,5 +1,7 @@
 #include "sim.hpp"
 #include <madrona/mw_gpu_entry.hpp>
+#include "sys_layer/sysComponent.hpp"
+#include "sys_layer/Astrasim.hpp"
 
 using namespace madrona;
 using namespace madrona::math;
@@ -16,8 +18,16 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Reward>();
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
+    
 
     registry.registerArchetype<Agent>();
+
+    // 注册系统层组件和实体
+    
+    registry.registerComponent<SystemLayerComponent>();
+    registry.registerComponent<SystemConfig>();
+    registry.registerArchetype<SystemLayerAgent>();
+
 
     // Export tensors for pytorch
     registry.exportColumn<Agent, Reset>((uint32_t)ExportID::Reset);
