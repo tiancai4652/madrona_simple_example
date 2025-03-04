@@ -31,9 +31,7 @@ SystemLayer::~SystemLayer() {
 
 CUDA_HOST_DEVICE
 void SystemLayer::initialize() {
-    #ifndef __CUDACC__
-    std::cout << "SystemLayer: 初始化系统层..." << std::endl;
-    #endif
+    printf("SystemLayer: 初始化系统层...\n");
     initialized_ = true;
     status_.assign("Initialized");
 }
@@ -41,9 +39,7 @@ void SystemLayer::initialize() {
 CUDA_HOST_DEVICE
 void SystemLayer::update(float deltaTime) {
     if (!initialized_) {
-        #ifndef __CUDACC__
-        std::cout << "SystemLayer: 警告 - 尝试更新未初始化的系统" << std::endl;
-        #endif
+        printf("SystemLayer: 警告 - 尝试更新未初始化的系统\n");
         return;
     }
     
@@ -52,10 +48,8 @@ void SystemLayer::update(float deltaTime) {
     float accuracy = getParameter("accuracy");
     currentResult_.value += deltaTime * speed * accuracy;
     
-    #ifndef __CUDACC__
-    std::cout << "SystemLayer: 更新完成，当前时间: " << currentResult_.time 
-              << ", 当前值: " << currentResult_.value << std::endl;
-    #endif
+    printf("SystemLayer: 更新完成，当前时间: %f, 当前值: %f\n", 
+           currentResult_.time, currentResult_.value);
 }
 
 CUDA_HOST_DEVICE
@@ -64,9 +58,7 @@ void SystemLayer::shutdown() {
         return;
     }
     
-    #ifndef __CUDACC__
-    std::cout << "SystemLayer: 关闭系统层..." << std::endl;
-    #endif
+    printf("SystemLayer: 关闭系统层...\n");
     initialized_ = false;
     status_.assign("Shutdown");
 }
@@ -77,9 +69,7 @@ void SystemLayer::runSimulation(float duration) {
         initialize();
     }
     
-    #ifndef __CUDACC__
-    std::cout << "SystemLayer: 开始运行模拟，持续时间: " << duration << std::endl;
-    #endif
+    printf("SystemLayer: 开始运行模拟，持续时间: %f\n", duration);
     
     float timeStep = 0.1f;
     for (float t = 0; t < duration; t += timeStep) {
@@ -153,17 +143,13 @@ void SystemLayer::setParameter(const char* name, float value) {
     for (size_t i = 0; i < parameters_.size(); ++i) {
         if (parameters_[i].first == paramName) {
             parameters_[i].second = value;
-            #ifndef __CUDACC__
-            std::cout << "SystemLayer: 参数 '" << name << "' 设置为 " << value << std::endl;
-            #endif
+            printf("SystemLayer: 参数 '%s' 设置为 %f\n", name, value);
             return;
         }
     }
     
     parameters_.push_back(custom::Pair<custom::FixedString<64>, float>(paramName, value));
-    #ifndef __CUDACC__
-    std::cout << "SystemLayer: 添加新参数 '" << name << "' 值为 " << value << std::endl;
-    #endif
+    printf("SystemLayer: 添加新参数 '%s' 值为 %f\n", name, value);
 }
 
 CUDA_HOST_DEVICE
@@ -176,9 +162,7 @@ float SystemLayer::getParameter(const char* name) const {
         }
     }
     
-    #ifndef __CUDACC__
-    std::cout << "SystemLayer: 警告 - 参数 '" << name << "' 不存在，返回默认值0" << std::endl;
-    #endif
+    printf("SystemLayer: 警告 - 参数 '%s' 不存在，返回默认值0\n", name);
     return 0.0f;
 }
 
