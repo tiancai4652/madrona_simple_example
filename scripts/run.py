@@ -25,22 +25,15 @@ print(grid_world.observations.shape)
 
 for i in range(5):
     print("frame: ", i,"\n")
-    grid_world.step()
-    # print("Obs:")
-    # print(grid_world.observations)
-
-    # # "Policy"
-    # grid_world.actions[:, 0] = torch.randint(0, 4, size=(num_worlds,))
-    # #grid_world.actions[:, 0] = 3 # right to win given (4, 4) start
-
-    # print("Actions:")
-    # print(grid_world.actions)
-
-    # # Advance simulation across all worlds
-    # grid_world.step()
     
-    # print("Rewards: ")
-    # print(grid_world.rewards)
-    # print("Dones:   ")
-    # print(grid_world.dones)
-    # print()
+    # "Policy" - 随机选择动作
+    grid_world.actions[:, 0] = torch.randint(0, 4, size=(num_worlds,))
+    
+    # 执行动作并更新环境
+    grid_world.step()
+    
+    # 可选：打印调试信息
+    # print("Obs:", grid_world.observations)
+    # print("Actions:", grid_world.actions)
+    # print("Rewards:", grid_world.rewards)
+    # print("Dones:", grid_world.dones)

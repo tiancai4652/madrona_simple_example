@@ -129,29 +129,29 @@ inline void tick(Engine &ctx,
     // reward.r = cur_cell.reward;
 }
 
-// 添加一个处理系统层的函数
+// 处理系统层的函数
 inline void processSystemLayer(Engine &ctx,
                              SystemLayerComponent &sysComponent,
                              SystemConfig &config)
 {
-    // 如果系统层指针为空，则初始化它
-    if (sysComponent.systemLayerPtr == nullptr) {
-        sysComponent.systemLayerPtr = new AstraSim::SystemLayer();
-        sysComponent.systemLayerPtr->initialize();
+    // 如果系统层未初始化，则初始化它
+    if (!sysComponent.isInitialized) {
+        sysComponent.systemLayer.initialize();
         
         // 应用配置
-        sysComponent.systemLayerPtr->setParameter("simulationSpeed", config.simulationSpeed);
-        sysComponent.systemLayerPtr->setParameter("accuracy", config.accuracy);
+        sysComponent.systemLayer.setParameter("simulationSpeed", config.simulationSpeed);
+        sysComponent.systemLayer.setParameter("accuracy", config.accuracy);
         
+        sysComponent.isInitialized = true;
         printf("系统层已初始化\n");
     }
     
     // 更新系统层
     float deltaTime = 0.1f;
-    sysComponent.systemLayerPtr->update(deltaTime);
+    sysComponent.systemLayer.update(deltaTime);
     
     // 获取当前模拟结果
-    AstraSim::SimulationData result = sysComponent.systemLayerPtr->getSimulationResult();
+    AstraSim::SimulationData result = sysComponent.systemLayer.getSimulationResult();
     
     // 输出一些调试信息
     if (static_cast<int>(result.time * 10) % 10 == 0) {  // 每隔一段时间输出一次
@@ -159,19 +159,18 @@ inline void processSystemLayer(Engine &ctx,
     }
 }
 
-
-
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                      const Config &)
 {
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
-        // 添加原有的任务节点
-    auto tick_sys = builder.addToGraph<ParallelForNode<Engine, tick,
-        Action, Reset, GridPos, Reward, Done, CurStep>>({});
     
-    // 添加系统层处理任务节点
-    builder.addToGraph<ParallelForNode<Engine, processSystemLayer,
-        SystemLayerComponent, SystemConfig>>({tick_sys});
+    // 先执行系统层处理任务，不依赖于其他任务
+    auto sys_node = builder.addToGraph<ParallelForNode<Engine, processSystemLayer,
+        SystemLayerComponent, SystemConfig>>({});
+    
+    // tick任务依赖于系统层处理任务
+    builder.addToGraph<ParallelForNode<Engine, tick,
+        Action, Reset, GridPos, Reward, Done, CurStep>>({sys_node});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -202,8 +201,8 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     HelperTool::stringToIntArray( "advanced", config.simulationMode);
 
     // 初始化 SystemLayerComponent
-    SystemLayerComponent &sysComponent = ctx.get<SystemLayerComponent>(sysAgent);
-    sysComponent.systemLayerPtr = nullptr;  // 将在 processSystemLayer 中初始化
+    // SystemLayerComponent &sysComponent = ctx.get<SystemLayerComponent>(sysAgent);
+    // sysComponent.systemLayerPtr = nullptr;  // 将在 processSystemLayer 中初始化
    
     
     printf("已创建系统层实体\n");
