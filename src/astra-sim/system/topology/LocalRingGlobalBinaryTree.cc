@@ -7,6 +7,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 LocalRingGlobalBinaryTree::LocalRingGlobalBinaryTree(
     int id, int local_dim, BinaryTree::TreeType tree_type, int total_tree_nodes, int start, int stride) {
     this->local_dimension = new RingTopology(RingTopology::Dimension::Local, id, local_dim, id % local_dim, 1);
@@ -15,16 +16,19 @@ LocalRingGlobalBinaryTree::LocalRingGlobalBinaryTree(
         new RingTopology(RingTopology::Dimension::Horizontal, id, total_tree_nodes, id / local_dim, local_dim);
 }
 
+CUDA_HOST_DEVICE
 LocalRingGlobalBinaryTree::~LocalRingGlobalBinaryTree() {
     delete local_dimension;
     delete global_dimension_all_reduce;
     delete global_dimension_other;
 }
 
+CUDA_HOST_DEVICE
 int LocalRingGlobalBinaryTree::get_num_of_dimensions() {
     return 3;
 }
 
+CUDA_HOST_DEVICE
 int LocalRingGlobalBinaryTree::get_num_of_nodes_in_dimension(int dimension) {
     if (dimension == 0) {
         return local_dimension->get_num_of_nodes_in_dimension(0);
@@ -37,6 +41,7 @@ int LocalRingGlobalBinaryTree::get_num_of_nodes_in_dimension(int dimension) {
     }
 }
 
+CUDA_HOST_DEVICE
 BasicLogicalTopology* LocalRingGlobalBinaryTree::get_basic_topology_at_dimension(int dimension, ComType type) {
     if (dimension == 0) {
         return local_dimension;

@@ -4,15 +4,14 @@ LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
 #include "astra-sim/system/MemBus.hh"
-
 #include "astra-sim/system/LogGP.hh"
 #include "astra-sim/system/Sys.hh"
 
-using namespace std;
 using namespace AstraSim;
 
-MemBus::MemBus(string side1,
-               string side2,
+CUDA_HOST_DEVICE
+MemBus::MemBus(custom::FixedString side1,
+               custom::FixedString side2,
                Sys* sys,
                Tick L,
                Tick o,
@@ -31,15 +30,25 @@ MemBus::MemBus(string side1,
     if (attach) {
         NPU_side->attach_mem_bus(sys, L, o, g, 0.0038, model_shared_bus, communication_delay);
     }
+#ifndef __CUDA_ARCH__
+    std::cout << "Created MemBus with sides: " << side1.c_str() << " and " << side2.c_str() 
+              << ", communication_delay=" << communication_delay << std::endl;
+#endif
 }
 
+CUDA_HOST_DEVICE
 MemBus::~MemBus() {
     delete NPU_side;
     delete MA_side;
 }
 
+CUDA_HOST_DEVICE
 void MemBus::send_from_NPU_to_MA(
     MemBus::Transmition transmition, int bytes, bool processed, bool send_back, Callable* callable) {
+#ifndef __CUDA_ARCH__
+    std::cout << "Sending from NPU to MA: bytes=" << bytes 
+              << " processed=" << processed << " send_back=" << send_back << std::endl;
+#endif
     if (model_shared_bus && transmition == Transmition::Usual) {
         NPU_side->request_read(bytes, processed, send_back, callable);
     } else {
@@ -57,8 +66,13 @@ void MemBus::send_from_NPU_to_MA(
     }
 }
 
+CUDA_HOST_DEVICE
 void MemBus::send_from_MA_to_NPU(
     MemBus::Transmition transmition, int bytes, bool processed, bool send_back, Callable* callable) {
+#ifndef __CUDA_ARCH__
+    std::cout << "Sending from MA to NPU: bytes=" << bytes 
+              << " processed=" << processed << " send_back=" << send_back << std::endl;
+#endif
     if (model_shared_bus && transmition == Transmition::Usual) {
         MA_side->request_read(bytes, processed, send_back, callable);
     } else {

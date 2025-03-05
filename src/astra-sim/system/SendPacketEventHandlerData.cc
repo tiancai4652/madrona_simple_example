@@ -7,12 +7,14 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 SendPacketEventHandlerData::SendPacketEventHandlerData() {
     tag = 0;
     callable = nullptr;
     wlhd = nullptr;
 }
 
+CUDA_HOST_DEVICE
 SendPacketEventHandlerData::SendPacketEventHandlerData(Callable* callable, int tag)
     : BasicEventHandlerData(-1, EventType::PacketSent) {
     this->callable = callable;

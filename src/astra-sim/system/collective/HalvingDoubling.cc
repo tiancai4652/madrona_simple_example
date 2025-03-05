@@ -13,6 +13,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 HalvingDoubling::HalvingDoubling(ComType type, int id, RingTopology* ring_topology, uint64_t data_size) : Algorithm() {
     this->comType = type;
     this->id = id;
@@ -66,10 +67,7 @@ HalvingDoubling::HalvingDoubling(ComType type, int id, RingTopology* ring_topolo
         this->offset_multiplier = 2;
         break;
     default:
-        std::cerr << "######### Exiting because of unknown communication type for HalvingDoubling collective algorithm "
-                     "#########"
-                  << std::endl;
-        std::exit(1);
+        assert(false && "Unknown communication type for HalvingDoubling collective algorithm");
     }
     RingTopology::Direction direction = specify_direction();
     this->curr_receiver = id;
@@ -79,10 +77,12 @@ HalvingDoubling::HalvingDoubling(ComType type, int id, RingTopology* ring_topolo
     }
 }
 
+CUDA_HOST_DEVICE
 int HalvingDoubling::get_non_zero_latency_packets() {
     return log2(nodes_in_ring) - 1 * parallel_reduce;
 }
 
+CUDA_HOST_DEVICE
 RingTopology::Direction HalvingDoubling::specify_direction() {
     if (rank_offset == 0) {
         return RingTopology::Direction::Clockwise;
@@ -95,6 +95,7 @@ RingTopology::Direction HalvingDoubling::specify_direction() {
     }
 }
 
+CUDA_HOST_DEVICE
 void HalvingDoubling::run(EventType event, CallData* data) {
     if (event == EventType::General) {
         free_packets += 1;
@@ -110,6 +111,7 @@ void HalvingDoubling::run(EventType event, CallData* data) {
     }
 }
 
+CUDA_HOST_DEVICE
 void HalvingDoubling::release_packets() {
     for (auto packet : locked_packets) {
         packet->set_notifier(this);
@@ -124,11 +126,10 @@ void HalvingDoubling::release_packets() {
     locked_packets.clear();
 }
 
+CUDA_HOST_DEVICE
 void HalvingDoubling::process_stream_count() {
     if (remained_packets_per_message > 0) {
         remained_packets_per_message--;
-    }
-    if (id == 0) {
     }
     if (remained_packets_per_message == 0 && stream_count > 0) {
         stream_count--;
@@ -141,6 +142,7 @@ void HalvingDoubling::process_stream_count() {
     }
 }
 
+CUDA_HOST_DEVICE
 void HalvingDoubling::process_max_count() {
     if (remained_packets_per_max_count > 0) {
         remained_packets_per_max_count--;
@@ -165,6 +167,7 @@ void HalvingDoubling::process_max_count() {
     }
 }
 
+CUDA_HOST_DEVICE
 void HalvingDoubling::reduce() {
     process_stream_count();
     packets.pop_front();
@@ -172,23 +175,25 @@ void HalvingDoubling::reduce() {
     total_packets_sent++;
 }
 
+CUDA_HOST_DEVICE
 bool HalvingDoubling::iteratable() {
-    if (stream_count == 0 && free_packets == (parallel_reduce * 1)) {  // && not_delivered==0
+    if (stream_count == 0 && free_packets == parallel_reduce) {
         exit();
         return false;
     }
     return true;
 }
 
+CUDA_HOST_DEVICE
 void HalvingDoubling::insert_packet(Callable* sender) {
     if (zero_latency_packets == 0 && non_zero_latency_packets == 0) {
-        zero_latency_packets = parallel_reduce * 1;
-        non_zero_latency_packets = get_non_zero_latency_packets();  //(nodes_in_ring-1)*parallel_reduce*1;
+        zero_latency_packets = parallel_reduce;
+        non_zero_latency_packets = get_non_zero_latency_packets();
         toggle = !toggle;
     }
     if (zero_latency_packets > 0) {
         packets.push_back(MyPacket(msg_size, stream->current_queue_id, curr_sender,
-                                   curr_receiver));  // vnet Must be changed for alltoall topology
+                                   curr_receiver));
         packets.back().sender = sender;
         locked_packets.push_back(&packets.back());
         processed = false;
@@ -199,7 +204,7 @@ void HalvingDoubling::insert_packet(Callable* sender) {
         return;
     } else if (non_zero_latency_packets > 0) {
         packets.push_back(MyPacket(msg_size, stream->current_queue_id, curr_sender,
-                                   curr_receiver));  // vnet Must be changed for alltoall topology
+                                   curr_receiver));
         packets.back().sender = sender;
         locked_packets.push_back(&packets.back());
         if (comType == ComType::Reduce_Scatter || (comType == ComType::All_Reduce && toggle)) {
@@ -207,7 +212,7 @@ void HalvingDoubling::insert_packet(Callable* sender) {
         } else {
             processed = false;
         }
-        if (non_zero_latency_packets <= parallel_reduce * 1) {
+        if (non_zero_latency_packets <= parallel_reduce) {
             send_back = false;
         } else {
             send_back = true;
@@ -217,9 +222,10 @@ void HalvingDoubling::insert_packet(Callable* sender) {
         non_zero_latency_packets--;
         return;
     }
-    Sys::sys_panic("should not inject nothing!");
+    assert(false && "should not inject nothing!");
 }
 
+CUDA_HOST_DEVICE
 bool HalvingDoubling::ready() {
     if (stream->state == StreamState::Created || stream->state == StreamState::Ready) {
         stream->changeState(StreamState::Executing);
@@ -235,25 +241,20 @@ bool HalvingDoubling::ready() {
     snd_req.reqType = UINT8;
     snd_req.vnet = this->stream->current_queue_id;
     stream->owner->front_end_sim_send(0, Sys::dummy_data, packet.msg_size, UINT8, packet.preferred_dest,
-                                      stream->stream_id, &snd_req, &Sys::handleEvent,
-                                      nullptr);  // stream_id+(packet.preferred_dest*50)
+                                      stream->stream_id, &snd_req, &Sys::handleEvent, nullptr);
     sim_request rcv_req;
     rcv_req.vnet = this->stream->current_queue_id;
     RecvPacketEventHandlerData* ehd = new RecvPacketEventHandlerData(
         stream, stream->owner->id, EventType::PacketReceived, packet.preferred_vnet, packet.stream_id);
     stream->owner->front_end_sim_recv(0, Sys::dummy_data, packet.msg_size, UINT8, packet.preferred_src,
-                                      stream->stream_id, &rcv_req, &Sys::handleEvent,
-                                      ehd);  // stream_id+(owner->id*50)
+                                      stream->stream_id, &rcv_req, &Sys::handleEvent, ehd);
     reduce();
     return true;
 }
 
+CUDA_HOST_DEVICE
 void HalvingDoubling::exit() {
-    if (packets.size() != 0) {
-        packets.clear();
-    }
-    if (locked_packets.size() != 0) {
-        locked_packets.clear();
-    }
+    packets.clear();
+    locked_packets.clear();
     stream->owner->proceed_to_next_vnet_baseline((StreamBaseline*)stream);
 }

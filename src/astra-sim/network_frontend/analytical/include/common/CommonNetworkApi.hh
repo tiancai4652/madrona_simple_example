@@ -10,62 +10,59 @@ LICENSE file in the root directory of this source tree.
 #include <astra-network-analytical/common/EventQueue.h>
 #include <astra-sim/system/AstraNetworkAPI.hh>
 #include <astra-sim/system/Common.hh>
-#include <memory>
-#include <vector>
+#include "sys_layer/containers/FixedVector.hpp"
 
 using namespace AstraSim;
-using namespace AstraSimAnalytical;
 using namespace NetworkAnalytical;
 
 namespace AstraSimAnalytical {
 
 /**
- * CommonNetworkApi implements common AstraNetworkAPI interface
- * that both congestion_unaware and congestion_aware network API inherit.
+ * CommonNetworkApi实现了通用的AstraNetworkAPI接口，
+ * 该接口被拥塞感知和非拥塞感知的网络API继承。
  */
 class CommonNetworkApi : public AstraNetworkAPI {
   public:
     /**
-     * Set the event queue to be used.
-     *
-     * @param event_queue_ptr pointer to the event queue
+     * 设置要使用的事件队列
      */
-    static void set_event_queue(std::shared_ptr<EventQueue> event_queue_ptr) noexcept;
+    CUDA_HOST_DEVICE
+    static void set_event_queue(EventQueue* event_queue_ptr) noexcept;
 
     /**
-     * Get the reference to the callback tracker.
-     *
-     * @return reference to the callback tracker
+     * 获取回调跟踪器的引用
      */
-    static CallbackTracker& get_callback_tracker() noexcept;
+    CUDA_HOST_DEVICE
+    static CallbackTracker<1024>& get_callback_tracker() noexcept;
 
     /**
-     * Callback to be invoked when a chunk arrives its destination.
-     *
-     * @param args arguments of the callback function
+     * 当块到达目的地时要调用的回调
      */
+    CUDA_HOST_DEVICE
     static void process_chunk_arrival(void* args) noexcept;
 
     /**
-     * Constructor.
-     *
-     * @param rank id of the API
+     * 构造函数
      */
+    CUDA_HOST_DEVICE
     explicit CommonNetworkApi(int rank) noexcept;
 
     /**
-     * Implement sim_get_time of AstraNetworkAPI.
+     * 实现AstraNetworkAPI的sim_get_time
      */
+    CUDA_HOST_DEVICE
     [[nodiscard]] timespec_t sim_get_time() override;
 
     /**
-     * Implement sim_schedule of AstraNetworkAPI.
+     * 实现AstraNetworkAPI的sim_schedule
      */
+    CUDA_HOST_DEVICE
     void sim_schedule(timespec_t delta, void (*fun_ptr)(void* fun_arg), void* fun_arg) override;
 
     /**
-     * Implement sim_recv of AstraNetworkAPI.
+     * 实现AstraNetworkAPI的sim_recv
      */
+    CUDA_HOST_DEVICE
     int sim_recv(void* buffer,
                  uint64_t count,
                  int type,
@@ -76,24 +73,25 @@ class CommonNetworkApi : public AstraNetworkAPI {
                  void* fun_arg) override;
 
     /**
-     * Implement get_BW_at_dimension of AstraNetworkAPI.
+     * 实现AstraNetworkAPI的get_BW_at_dimension
      */
+    CUDA_HOST_DEVICE
     double get_BW_at_dimension(int dim) override;
 
   protected:
-    /// event queue
-    static std::shared_ptr<EventQueue> event_queue;
+    /// 事件队列
+    static EventQueue* event_queue;
 
-    /// chunk id generator
-    static ChunkIdGenerator chunk_id_generator;
+    /// 块ID生成器
+    static ChunkIdGenerator<1024> chunk_id_generator;
 
-    /// callback tracker
-    static CallbackTracker callback_tracker;
+    /// 回调跟踪器
+    static CallbackTracker<1024> callback_tracker;
 
-    /// bandwidth per each network dimension of the topology
-    static std::vector<Bandwidth> bandwidth_per_dim;
+    /// 拓扑中每个网络维度的带宽
+    static custom::FixedVector<double, 8> bandwidth_per_dim;
 
-    /// number of network dimensions of the topology
+    /// 拓扑的网络维度数量
     static int dims_count;
 };
 

@@ -3,69 +3,119 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#include "congestion_unaware/CongestionUnawareNetworkApi.hh"
+#include "CongestionUnawareNetworkApi.hh"
 #include <cassert>
 
-using namespace AstraSim;
-using namespace AstraSimAnalyticalCongestionUnaware;
-using namespace NetworkAnalytical;
-using namespace NetworkAnalyticalCongestionUnaware;
+namespace AstraSim {
 
-std::shared_ptr<Topology> CongestionUnawareNetworkApi::topology;
-
-void CongestionUnawareNetworkApi::set_topology(std::shared_ptr<Topology> topology_ptr) noexcept {
-    assert(topology_ptr != nullptr);
-
-    // move topology
-    CongestionUnawareNetworkApi::topology = std::move(topology_ptr);
-
-    // set topology-related values
-    CongestionUnawareNetworkApi::dims_count = CongestionUnawareNetworkApi::topology->get_dims_count();
-    CongestionUnawareNetworkApi::bandwidth_per_dim = CongestionUnawareNetworkApi::topology->get_bandwidth_per_dim();
+CUDA_HOST_DEVICE
+CongestionUnawareNetworkApi::CongestionUnawareNetworkApi(const int rank) noexcept
+    : rank_(rank),
+      initialized_(false),
+      next_chunk_id_(0)
+{
 }
 
-CongestionUnawareNetworkApi::CongestionUnawareNetworkApi(const int rank) noexcept : CommonNetworkApi(rank) {
-    assert(rank >= 0);
+CUDA_HOST_DEVICE
+CongestionUnawareNetworkApi::~CongestionUnawareNetworkApi() {
+    active_requests_.clear();
+    completed_requests_.clear();
 }
 
-int CongestionUnawareNetworkApi::sim_send(void* const buffer,
-                                          const uint64_t count,
-                                          const int type,
-                                          const int dst,
-                                          const int tag,
-                                          sim_request* const request,
-                                          void (*msg_handler)(void*),
-                                          void* const fun_arg) {
-    // query chunk id
-    const auto src = sim_comm_get_rank();
-    const auto chunk_id = CongestionUnawareNetworkApi::chunk_id_generator.create_send_chunk_id(tag, src, dst, count);
-
-    // search tracker
-    const auto entry = callback_tracker.search_entry(tag, src, dst, count, chunk_id);
-    if (entry.has_value()) {
-        // recv operation already issued.
-        // add send event handler to the tracker
-        entry.value()->register_send_callback(msg_handler, fun_arg);
-    } else {
-        // recv operation not issued yet
-        // create new entry and insert send callback
-        auto* const new_entry = callback_tracker.create_new_entry(tag, src, dst, count, chunk_id);
-        new_entry->register_send_callback(msg_handler, fun_arg);
+CUDA_HOST_DEVICE
+void CongestionUnawareNetworkApi::initialize(const NetworkConfig& config) {
+    if (initialized_) {
+        return;
     }
+    
+    config_ = config;
+    initialized_ = true;
+    
+    // 清空请求队列
+    active_requests_.clear();
+    completed_requests_.clear();
+}
 
-    // create chunk
-    auto chunk_arrival_arg = std::tuple(tag, src, dst, count, chunk_id);
-    auto arg = std::make_unique<decltype(chunk_arrival_arg)>(chunk_arrival_arg);
-    const auto arg_ptr = static_cast<void*>(arg.release());
-
-    // compute send communication delay (in AstraSim format)
-    const auto send_delay_ns = topology->send(src, dst, count);
-    const auto send_delay = static_cast<double>(send_delay_ns);
-    const auto delta = timespec_t({NS, send_delay});
-
-    // register chunk arrival event after send communication delay
-    sim_schedule(delta, CongestionUnawareNetworkApi::process_chunk_arrival, arg_ptr);
-
-    // return
+CUDA_HOST_DEVICE
+int CongestionUnawareNetworkApi::sim_send(const int dst, const uint64_t count) {
+    if (!initialized_ || dst < 0) {
+        return -1;
+    }
+    
+    // 创建新的请求
+    SimRequest req;
+    req.tag = 0;  // 简化版本使用固定tag
+    req.src = rank_;
+    req.dst = dst;
+    req.size = count;
+    req.chunk_id = next_chunk_id_++;
+    
+    // 添加到活动请求列表
+    if (!active_requests_.push_back(req)) {
+        return -1;
+    }
+    
     return 0;
 }
+
+CUDA_HOST_DEVICE
+int CongestionUnawareNetworkApi::sim_recv(const int src, const uint64_t count) {
+    if (!initialized_ || src < 0) {
+        return -1;
+    }
+    
+    // 检查是否有匹配的已完成请求
+    for (size_t i = 0; i < completed_requests_.size(); i++) {
+        const auto& req = completed_requests_[i];
+        if (req.src == src && req.dst == rank_ && req.size == count) {
+            // 找到匹配的请求，移除它
+            if (i < completed_requests_.size() - 1) {
+                completed_requests_[i] = completed_requests_[completed_requests_.size() - 1];
+            }
+            completed_requests_.clear();  // 简化版本，直接清空
+            return 0;
+        }
+    }
+    
+    return -1;
+}
+
+CUDA_HOST_DEVICE
+void CongestionUnawareNetworkApi::update(float deltaTime) {
+    if (!initialized_) {
+        return;
+    }
+    
+    // 简单的网络模拟：
+    // 1. 计算每个请求的传输进度
+    // 2. 将完成的请求移到completed_requests_
+    
+    float bandwidth_per_request = config_.bandwidth;
+    if (active_requests_.size() > config_.dims_count) {
+        // 简单的拥塞模型：如果连接数超过维度数，带宽平分
+        bandwidth_per_request = config_.bandwidth / active_requests_.size();
+    }
+    
+    // 处理所有活动请求
+    for (size_t i = 0; i < active_requests_.size(); ) {
+        auto& req = active_requests_[i];
+        float transfer_time = static_cast<float>(req.size) / bandwidth_per_request;
+        
+        // 假设这个时间步内可以完成传输
+        if (transfer_time <= deltaTime) {
+            // 将请求移到已完成列表
+            if (completed_requests_.push_back(req)) {
+                // 成功移动到已完成列表，从活动列表移除
+                if (i < active_requests_.size() - 1) {
+                    active_requests_[i] = active_requests_[active_requests_.size() - 1];
+                }
+                active_requests_.clear();  // 简化版本，直接清空
+            }
+        } else {
+            // 请求还在进行中
+            i++;
+        }
+    }
+}
+
+} // namespace AstraSim

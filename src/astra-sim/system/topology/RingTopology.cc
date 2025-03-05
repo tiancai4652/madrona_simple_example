@@ -11,6 +11,7 @@ LICENSE file in the root directory of this source tree.
 using namespace std;
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 RingTopology::RingTopology(Dimension dimension, int id, std::vector<int> NPUs)
     : BasicLogicalTopology(BasicLogicalTopology::BasicTopology::Ring) {
     name = "local";
@@ -37,6 +38,8 @@ RingTopology::RingTopology(Dimension dimension, int id, std::vector<int> NPUs)
 
     assert(index_in_ring >= 0);
 }
+
+CUDA_HOST_DEVICE
 RingTopology::RingTopology(Dimension dimension, int id, int total_nodes_in_ring, int index_in_ring, int offset)
     : BasicLogicalTopology(BasicLogicalTopology::BasicTopology::Ring) {
     name = "local";
@@ -64,6 +67,7 @@ RingTopology::RingTopology(Dimension dimension, int id, int total_nodes_in_ring,
     }
 }
 
+CUDA_HOST_DEVICE
 int RingTopology::get_receiver_homogeneous(int node_id, Direction direction, int offset) {
     assert(id_to_index.find(node_id) != id_to_index.end());
     int index = id_to_index[node_id];
@@ -104,6 +108,7 @@ int RingTopology::get_receiver_homogeneous(int node_id, Direction direction, int
     }
 }
 
+CUDA_HOST_DEVICE
 int RingTopology::get_receiver(int node_id, Direction direction) {
     assert(id_to_index.find(node_id) != id_to_index.end());
     int index = id_to_index[node_id];
@@ -122,6 +127,7 @@ int RingTopology::get_receiver(int node_id, Direction direction) {
     }
 }
 
+CUDA_HOST_DEVICE
 int RingTopology::get_sender(int node_id, Direction direction) {
     assert(id_to_index.find(node_id) != id_to_index.end());
     int index = id_to_index[node_id];
@@ -140,22 +146,27 @@ int RingTopology::get_sender(int node_id, Direction direction) {
     }
 }
 
+CUDA_HOST_DEVICE
 int RingTopology::get_index_in_ring() {
     return index_in_ring;
 }
 
+CUDA_HOST_DEVICE
 RingTopology::Dimension RingTopology::get_dimension() {
     return dimension;
 }
 
+CUDA_HOST_DEVICE
 int RingTopology::get_num_of_nodes_in_dimension(int dimension) {
     return get_nodes_in_ring();
 }
 
+CUDA_HOST_DEVICE
 int RingTopology::get_nodes_in_ring() {
     return total_nodes_in_ring;
 }
 
+CUDA_HOST_DEVICE
 bool RingTopology::is_enabled() {
     assert(offset > 0);
     int tmp_index = index_in_ring;

@@ -8,25 +8,32 @@ LICENSE file in the root directory of this source tree.
 using namespace std;
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 Torus3D::Torus3D(int id, int total_nodes, int local_dim, int vertical_dim) {
     int horizontal_dim = total_nodes / (vertical_dim * local_dim);
+    
     local_dimension = new RingTopology(RingTopology::Dimension::Local, id, local_dim, id % local_dim, 1);
+    
     vertical_dimension = new RingTopology(RingTopology::Dimension::Vertical, id, vertical_dim,
-                                          id / (local_dim * horizontal_dim), local_dim * horizontal_dim);
+                                        id / (local_dim * horizontal_dim), local_dim * horizontal_dim);
+                                        
     horizontal_dimension = new RingTopology(RingTopology::Dimension::Horizontal, id, horizontal_dim,
-                                            (id / local_dim) % horizontal_dim, local_dim);
+                                          (id / local_dim) % horizontal_dim, local_dim);
 }
 
+CUDA_HOST_DEVICE
 Torus3D::~Torus3D() {
     delete local_dimension;
     delete vertical_dimension;
     delete horizontal_dimension;
-};
+}
 
+CUDA_HOST_DEVICE
 int Torus3D::get_num_of_dimensions() {
     return 3;
 }
 
+CUDA_HOST_DEVICE
 int Torus3D::get_num_of_nodes_in_dimension(int dimension) {
     if (dimension == 0) {
         return local_dimension->get_num_of_nodes_in_dimension(0);
@@ -38,6 +45,7 @@ int Torus3D::get_num_of_nodes_in_dimension(int dimension) {
     return -1;
 }
 
+CUDA_HOST_DEVICE
 BasicLogicalTopology* Torus3D::get_basic_topology_at_dimension(int dimension, ComType type) {
     if (dimension == 0) {
         return local_dimension;
@@ -46,5 +54,5 @@ BasicLogicalTopology* Torus3D::get_basic_topology_at_dimension(int dimension, Co
     } else if (dimension == 2) {
         return horizontal_dimension;
     }
-    return NULL;
+    return nullptr;
 }

@@ -7,63 +7,61 @@ LICENSE file in the root directory of this source tree.
 
 #include "common/CallbackTrackerEntry.hh"
 #include "common/ChunkIdGenerator.hh"
-#include <map>
+#include "sys_layer/containers/FixedMap.hpp"
+#include "sys_layer/containers/FixedTuple.hpp"
 
 namespace AstraSimAnalytical {
 
 /**
- * CallbackTracker keeps track of sim_send() and sim_recv() callbacks of each
- * chunk identified by (tag, src, dest, chunk_size, chunk_id) tuple.
+ * CallbackTracker跟踪由(tag, src, dest, chunk_size, chunk_id)元组标识的
+ * 每个块的sim_send()和sim_recv()回调。
  */
+template<size_t MaxEntries>
 class CallbackTracker {
   public:
     /// Key = (tag, src, dest, chunk_size, chunk_id)
-    using Key = std::tuple<int, int, int, ChunkSize, int>;
-    CallbackTracker() noexcept;
+    using Key = custom::FixedTuple<int, int, int, ChunkSize, int>;
+
+    CUDA_HOST_DEVICE
+    CallbackTracker() noexcept {}
 
     /**
-     * Search for the entry identified by (tag, src, dest, chunk_size, chunk_id)
-     * tuple.
-     *
-     * @param tag tag of the sim_send() or sim_recv() call
-     * @param src src NPU ID of the sim_send() or sim_recv() call
-     * @param dest dest NPU ID of the sim_send() or sim_recv() call
-     * @param chunk_size chunk size of the sim_send() or sim_recv() call
-     * @param chunk_id id of the chunk
-     * @return the found entry if exists, std::nullopt otherwise
+     * 搜索由(tag, src, dest, chunk_size, chunk_id)元组标识的条目
      */
-    std::optional<CallbackTrackerEntry*> search_entry(
-        int tag, int src, int dest, ChunkSize chunk_size, int chunk_id) noexcept;
+    CUDA_HOST_DEVICE
+    custom::FixedOptional<CallbackTrackerEntry*> search_entry(
+        int tag, int src, int dest, ChunkSize chunk_size, int chunk_id) noexcept {
+        Key key(tag, src, dest, chunk_size, chunk_id);
+        auto* entry = tracker.find(key);
+        if (entry) {
+            return custom::FixedOptional<CallbackTrackerEntry*>(entry);
+        }
+        return custom::FixedOptional<CallbackTrackerEntry*>();
+    }
 
     /**
-     * Create a new entry identified by (tag, src, dest, chunk_size, chunk_id)
-     * tuple.
-     *
-     * @param tag tag of the sim_send() or sim_recv() call
-     * @param src src NPU ID of the sim_send() or sim_recv() call
-     * @param dest dest NPU ID of the sim_send() or sim_recv() call
-     * @param chunk_size chunk size of the sim_send() or sim_recv() call
-     * @param chunk_id id of the chunk
-     * @return the created entry
+     * 创建由(tag, src, dest, chunk_size, chunk_id)元组标识的新条目
      */
-    CallbackTrackerEntry* create_new_entry(int tag, int src, int dest, ChunkSize chunk_size, int chunk_id) noexcept;
+    CUDA_HOST_DEVICE
+    CallbackTrackerEntry* create_new_entry(
+        int tag, int src, int dest, ChunkSize chunk_size, int chunk_id) noexcept {
+        Key key(tag, src, dest, chunk_size, chunk_id);
+        auto [it, inserted] = tracker.insert(key, CallbackTrackerEntry());
+        return &(it->value);
+    }
 
     /**
-     * Remove the entry identified by (tag, src, dest, chunk_size, chunk_id)
-     * tuple.
-     *
-     * @param tag tag of the sim_send() or sim_recv() call
-     * @param src src NPU ID of the sim_send() or sim_recv() call
-     * @param dest dest NPU ID of the sim_send() or sim_recv() call
-     * @param chunk_size chunk size of the sim_send() or sim_recv() call
-     * @param chunk_id id of the chunk
+     * 移除由(tag, src, dest, chunk_size, chunk_id)元组标识的条目
      */
-    void pop_entry(int tag, int src, int dest, ChunkSize chunk_size, int chunk_id) noexcept;
+    CUDA_HOST_DEVICE
+    void pop_entry(int tag, int src, int dest, ChunkSize chunk_size, int chunk_id) noexcept {
+        Key key(tag, src, dest, chunk_size, chunk_id);
+        tracker.erase(key);
+    }
 
   private:
-    /// map from (tag, src, dest, chunk_size, chunk_id) tuple to
-    /// CallbackTrackerEntry
-    std::map<Key, CallbackTrackerEntry> tracker;
+    /// 从(tag, src, dest, chunk_size, chunk_id)元组到CallbackTrackerEntry的映射
+    custom::FixedMap<Key, CallbackTrackerEntry, MaxEntries> tracker;
 };
 
 }  // namespace AstraSimAnalytical

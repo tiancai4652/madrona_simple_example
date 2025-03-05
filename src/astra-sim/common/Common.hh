@@ -3,10 +3,16 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __COMMON_HH__
-#define __COMMON_HH__
+#pragma once
 
 #include <cstdint>
+
+// CUDA 相关的宏定义
+#ifdef __CUDACC__
+#define CUDA_HOST_DEVICE __host__ __device__
+#else
+#define CUDA_HOST_DEVICE
+#endif
 
 namespace AstraSim {
 
@@ -15,34 +21,63 @@ typedef unsigned long long Tick;
 constexpr uint64_t CLOCK_PERIOD = 1;           // 1ns
 constexpr uint64_t FREQ = 1000 * 1000 * 1000;  // 1GHz
 
-enum time_type_e { SE = 0, MS, US, NS, FS };
+// 时间类型枚举
+enum class TimeType { 
+    SE = 0, 
+    MS, 
+    US, 
+    NS, 
+    FS 
+};
 
-enum req_type_e { UINT8 = 0, BFLOAT16, FP32 };
+// 请求类型枚举
+enum class ReqType { 
+    UINT8 = 0, 
+    BFLOAT16, 
+    FP32 
+};
 
-struct timespec_t {
-    time_type_e time_res;
+// 时间规格结构
+struct alignas(8) TimeSpec {
+    TimeType time_res;
     long double time_val;
 };
 
-struct sim_request {
+// 模拟请求结构
+struct alignas(8) SimRequest {
     uint32_t srcRank;
     uint32_t dstRank;
     uint32_t tag;
-    req_type_e reqType;
+    ReqType reqType;
     uint64_t reqCount;
     uint32_t vnet;
     uint32_t layerNum;
 };
 
+// 元数据基类
 class MetaData {
-  public:
-    timespec_t timestamp;
+public:
+    CUDA_HOST_DEVICE virtual ~MetaData() = default;
+    TimeSpec timestamp;
 };
 
-enum class ComType { None = 0, Reduce_Scatter, All_Gather, All_Reduce, All_to_All, All_Reduce_All_to_All };
+// 通信类型枚举
+enum class ComType { 
+    None = 0, 
+    Reduce_Scatter, 
+    All_Gather, 
+    All_Reduce, 
+    All_to_All, 
+    All_Reduce_All_to_All 
+};
 
-enum class CollectiveOptimization { Baseline = 0, LocalBWAware };
+// 集合通信优化枚举
+enum class CollectiveOptimization { 
+    Baseline = 0, 
+    LocalBWAware 
+};
 
+// 集合通信实现类型枚举
 enum class CollectiveImplType {
     Ring = 0,
     OneRing,
@@ -54,25 +89,73 @@ enum class CollectiveImplType {
     HierarchicalRing,
     DoubleBinaryTree,
     HalvingDoubling,
-    OneHalvingDoubling,
+    OneHalvingDoubling
 };
 
-enum class CollectiveBarrier { Blocking = 0, Non_Blocking };
+// 集合通信屏障枚举
+enum class CollectiveBarrier { 
+    Blocking = 0, 
+    Non_Blocking 
+};
 
-enum class SchedulingPolicy { LIFO = 0, FIFO, EXPLICIT, None };
+// 调度策略枚举
+enum class SchedulingPolicy { 
+    LIFO = 0, 
+    FIFO, 
+    EXPLICIT, 
+    None 
+};
 
-enum class IntraDimensionScheduling { FIFO = 0, RG, SmallestFirst, LessRemainingPhaseFirst };
+// 维度内调度枚举
+enum class IntraDimensionScheduling { 
+    FIFO = 0, 
+    RG, 
+    SmallestFirst, 
+    LessRemainingPhaseFirst 
+};
 
-enum class InterDimensionScheduling { Ascending = 0, OnlineGreedy, RoundRobin, OfflineGreedy, OfflineGreedyFlex };
+// 维度间调度枚举
+enum class InterDimensionScheduling { 
+    Ascending = 0, 
+    OnlineGreedy, 
+    RoundRobin, 
+    OfflineGreedy, 
+    OfflineGreedyFlex 
+};
 
-enum class InjectionPolicy { Infinite = 0, Aggressive, SemiAggressive, ExtraAggressive, Normal };
+// 注入策略枚举
+enum class InjectionPolicy { 
+    Infinite = 0, 
+    Aggressive, 
+    SemiAggressive, 
+    ExtraAggressive, 
+    Normal 
+};
 
-enum class PacketRouting { Hardware = 0, Software };
+// 数据包路由枚举
+enum class PacketRouting { 
+    Hardware = 0, 
+    Software 
+};
 
-enum class BusType { Both = 0, Shared, Mem };
+// 总线类型枚举
+enum class BusType { 
+    Both = 0, 
+    Shared, 
+    Mem 
+};
 
-enum class StreamState { Created = 0, Transferring, Ready, Executing, Zombie, Dead };
+// 流状态枚举
+enum class StreamState { 
+    Created = 0, 
+    Transferring, 
+    Ready, 
+    Executing, 
+    Zombie, 
+    Dead 
+};
 
+// 事件类型枚举
 enum class EventType {
     CallEvents = 0,
     General,
@@ -96,36 +179,40 @@ enum class EventType {
     MemStoreFinished
 };
 
+// 克隆接口基类
 class CloneInterface {
-  public:
-    virtual CloneInterface* clone() const = 0;
-    virtual ~CloneInterface() = default;
+public:
+    CUDA_HOST_DEVICE virtual CloneInterface* clone() const = 0;
+    CUDA_HOST_DEVICE virtual ~CloneInterface() = default;
 };
 
+// 集合通信实现基类
 class CollectiveImpl : public CloneInterface {
-  public:
-    CollectiveImpl(CollectiveImplType type) {
+public:
+    CUDA_HOST_DEVICE CollectiveImpl(CollectiveImplType type) {
         this->type = type;
-    };
-    virtual CloneInterface* clone() const {
+    }
+    
+    CUDA_HOST_DEVICE virtual CloneInterface* clone() const override {
         return new CollectiveImpl(*this);
     }
 
     CollectiveImplType type;
 };
 
+// 直接集合通信实现类
 class DirectCollectiveImpl : public CollectiveImpl {
-  public:
-    CloneInterface* clone() const {
+public:
+    CUDA_HOST_DEVICE CloneInterface* clone() const override {
         return new DirectCollectiveImpl(*this);
-    };
-    DirectCollectiveImpl(CollectiveImplType type, int direct_collective_window) : CollectiveImpl(type) {
+    }
+    
+    CUDA_HOST_DEVICE DirectCollectiveImpl(CollectiveImplType type, int direct_collective_window) 
+        : CollectiveImpl(type) {
         this->direct_collective_window = direct_collective_window;
     }
 
     int direct_collective_window;
 };
 
-}  // namespace AstraSim
-
-#endif /* __COMMON_HH__ */
+} // namespace AstraSim

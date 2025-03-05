@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 DoubleBinaryTreeAllReduce::DoubleBinaryTreeAllReduce(int id, BinaryTree* tree, uint64_t data_size) : Algorithm() {
     this->id = id;
     this->logical_topo = tree;
@@ -25,6 +26,7 @@ DoubleBinaryTreeAllReduce::DoubleBinaryTreeAllReduce(int id, BinaryTree* tree, u
     this->name = Name::DoubleBinaryTree;
 }
 
+CUDA_HOST_DEVICE
 void DoubleBinaryTreeAllReduce::run(EventType event, CallData* data) {
     if (state == State::Begin && type == BinaryTree::Type::Leaf) {  // leaf.1
         (new PacketBundle(stream->owner, stream, false, false, data_size, MemBus::Transmition::Usual))->send_to_MA();

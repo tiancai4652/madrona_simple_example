@@ -7,52 +7,58 @@ LICENSE file in the root directory of this source tree.
 
 #include "common/ChunkIdGeneratorEntry.hh"
 #include <astra-network-analytical/common/Type.h>
-#include <map>
-#include <tuple>
+#include "sys_layer/containers/FixedMap.hpp"
+#include "sys_layer/containers/FixedTuple.hpp"
 
 using namespace NetworkAnalytical;
 
 namespace AstraSimAnalytical {
 
 /**
- * ChunkIdGenerator generates unique chunk id for sim_send() and sim_recv()
- * calls given (tag, src, dest, chunk_size) tuple.
+ * ChunkIdGenerator为给定的(tag, src, dest, chunk_size)元组
+ * 生成sim_send()和sim_recv()调用的唯一块ID。
  */
+template<size_t MaxEntries>
 class ChunkIdGenerator {
   public:
     /// Key = (tag, src, dest, chunk_size)
-    using Key = std::tuple<int, int, int, ChunkSize>;
+    using Key = custom::FixedTuple<int, int, int, ChunkSize>;
 
     /**
-     * Constructor.
+     * 构造函数
      */
-    ChunkIdGenerator() noexcept;
+    CUDA_HOST_DEVICE
+    ChunkIdGenerator() noexcept {}
 
     /**
-     * Create unique chunk id for sim_send() call.
-     *
-     * @param tag tag of the sim_send() call
-     * @param src src NPU ID of the sim_send() call
-     * @param dest dest NPU ID of the sim_send() call
-     * @param chunk_size chunk size of the sim_send() call
-     * @return unique sim_send() chunk id
+     * 为sim_send()调用创建唯一块ID
      */
-    [[nodiscard]] int create_send_chunk_id(int tag, int src, int dest, ChunkSize chunk_size) noexcept;
+    CUDA_HOST_DEVICE
+    [[nodiscard]] int create_send_chunk_id(int tag, int src, int dest, ChunkSize chunk_size) noexcept {
+        Key key(tag, src, dest, chunk_size);
+        auto [it, inserted] = chunk_id_map.insert(key, ChunkIdGeneratorEntry());
+        auto* entry = &(it->value);
+        const auto chunk_id = entry->get_send_id();
+        entry->increment_send_id();
+        return chunk_id;
+    }
 
     /**
-     * Create unique chunk id for sim_recv call.
-     *
-     * @param tag tag of the sim_recv call
-     * @param src src NPU ID of the sim_recv call
-     * @param dest dest NPU ID of the sim_recv call
-     * @param chunk_size chunk size of the sim_recv call
-     * @return unique sim_recv chunk id
+     * 为sim_recv()调用创建唯一块ID
      */
-    [[nodiscard]] int create_recv_chunk_id(int tag, int src, int dest, ChunkSize chunk_size) noexcept;
+    CUDA_HOST_DEVICE
+    [[nodiscard]] int create_recv_chunk_id(int tag, int src, int dest, ChunkSize chunk_size) noexcept {
+        Key key(tag, src, dest, chunk_size);
+        auto [it, inserted] = chunk_id_map.insert(key, ChunkIdGeneratorEntry());
+        auto* entry = &(it->value);
+        const auto chunk_id = entry->get_recv_id();
+        entry->increment_recv_id();
+        return chunk_id;
+    }
 
   private:
-    /// map from (tag, src, dest, chunk_size) tuple to ChunkIdGeneratorEntry
-    std::map<Key, ChunkIdGeneratorEntry> chunk_id_map;
+    /// 从(tag, src, dest, chunk_size)元组到ChunkIdGeneratorEntry的映射
+    custom::FixedMap<Key, ChunkIdGeneratorEntry, MaxEntries> chunk_id_map;
 };
 
 }  // namespace AstraSimAnalytical

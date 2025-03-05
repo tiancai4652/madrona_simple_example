@@ -3,8 +3,7 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __ALL_TO_ALL_HH__
-#define __ALL_TO_ALL_HH__
+#pragma once
 
 #include "astra-sim/system/CallData.hh"
 #include "astra-sim/system/collective/Ring.hh"
@@ -12,8 +11,15 @@ LICENSE file in the root directory of this source tree.
 
 namespace AstraSim {
 
+/**
+ * 全对全集体通信算法实现
+ */
 class AllToAll : public Ring {
   public:
+    /**
+     * 构造函数
+     */
+    CUDA_HOST_DEVICE
     AllToAll(ComType type,
              int window,
              int id,
@@ -21,12 +27,26 @@ class AllToAll : public Ring {
              uint64_t data_size,
              RingTopology::Direction direction,
              InjectionPolicy injection_policy);
-    void run(EventType event, CallData* data);
-    void process_max_count();
-    int get_non_zero_latency_packets();
-    int middle_point;
+
+    /**
+     * 运行算法
+     */
+    CUDA_HOST_DEVICE
+    void run(EventType event, CallData* data) override;
+
+    /**
+     * 处理最大计数
+     */
+    CUDA_HOST_DEVICE
+    void process_max_count() override;
+
+    /**
+     * 获取非零延迟包的数量
+     */
+    CUDA_HOST_DEVICE
+    int get_non_zero_latency_packets() override;
+
+    int middle_point;  ///< 中间点
 };
 
 }  // namespace AstraSim
-
-#endif /* __ALL_TO_ALL_HH__ */

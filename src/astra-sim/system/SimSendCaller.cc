@@ -8,6 +8,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 SimSendCaller::SimSendCaller(Sys* sys,
                              void* buffer,
                              int count,
@@ -30,8 +31,11 @@ SimSendCaller::SimSendCaller(Sys* sys,
     this->should_cleanup = should_cleanup;
 }
 
+CUDA_HOST_DEVICE
 void SimSendCaller::call(EventType type, CallData* data) {
-    // std::cout<<"sysid: "<<sys->id<<std::endl;
+#ifndef __CUDA_ARCH__
+    std::cout<<"sysid: "<<sys->id<<std::endl;
+#endif
     sys->comm_NI->sim_send(this->buffer, this->count, this->type, this->dst, this->tag, &this->request,
                            this->msg_handler, this->fun_arg);
     if (should_cleanup) {

@@ -7,6 +7,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 RendezvousRecvData::RendezvousRecvData(int sys_id,
                                        Sys* sys,
                                        void* buffer,
@@ -18,4 +19,9 @@ RendezvousRecvData::RendezvousRecvData(int sys_id,
                                        void (*msg_handler)(void* fun_arg),
                                        void* fun_arg)
     : BasicEventHandlerData(sys_id, EventType::RendezvousRecv),
-      recv(sys, buffer, count, type, src, tag, request, msg_handler, fun_arg, false) {}
+      recv(sys, buffer, count, type, src, tag, request, msg_handler, fun_arg, false) {
+#ifndef __CUDA_ARCH__
+    std::cout << "Creating RendezvousRecvData for sys_id: " << sys_id 
+              << " src: " << src << " tag: " << tag << std::endl;
+#endif
+}

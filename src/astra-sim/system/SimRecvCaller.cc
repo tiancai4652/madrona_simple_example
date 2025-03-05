@@ -8,6 +8,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 SimRecvCaller::SimRecvCaller(Sys* sys,
                              void* buffer,
                              int count,
@@ -30,6 +31,7 @@ SimRecvCaller::SimRecvCaller(Sys* sys,
     this->should_cleanup = should_cleanup;
 }
 
+CUDA_HOST_DEVICE
 void SimRecvCaller::call(EventType type, CallData* data) {
     sys->comm_NI->sim_recv(this->buffer, this->count, this->type, this->src, this->tag, &this->request,
                            this->msg_handler, this->fun_arg);

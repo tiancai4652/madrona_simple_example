@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 using namespace std;
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 BinaryTree::BinaryTree(int id, TreeType tree_type, int total_tree_nodes, int start, int stride)
     : BasicLogicalTopology(BasicLogicalTopology::BasicTopology::BinaryTree) {
     this->total_tree_nodes = total_tree_nodes;
@@ -17,12 +18,14 @@ BinaryTree::BinaryTree(int id, TreeType tree_type, int total_tree_nodes, int sta
     this->tree_type = tree_type;
     this->stride = stride;
     tree = new Node(-1, nullptr, nullptr, nullptr);
+    
     int depth = 1;
     int tmp = total_tree_nodes;
     while (tmp > 1) {
         depth++;
         tmp /= 2;
     }
+    
     if (tree_type == TreeType::RootMin) {
         tree->right_child = initialize_tree(depth - 1, tree);
     } else {
@@ -31,12 +34,14 @@ BinaryTree::BinaryTree(int id, TreeType tree_type, int total_tree_nodes, int sta
     build_tree(tree);
 }
 
+CUDA_HOST_DEVICE
 BinaryTree::~BinaryTree() {
     for (auto n : node_list) {
         delete n.second;
     }
 }
 
+CUDA_HOST_DEVICE
 Node* BinaryTree::initialize_tree(int depth, Node* parent) {
     Node* tmp = new Node(-1, parent, nullptr, nullptr);
     if (depth > 1) {
@@ -46,6 +51,7 @@ Node* BinaryTree::initialize_tree(int depth, Node* parent) {
     return tmp;
 }
 
+CUDA_HOST_DEVICE
 void BinaryTree::build_tree(Node* node) {
     if (node->left_child != nullptr) {
         build_tree(node->left_child);
@@ -56,9 +62,9 @@ void BinaryTree::build_tree(Node* node) {
     if (node->right_child != nullptr) {
         build_tree(node->right_child);
     }
-    return;
 }
 
+CUDA_HOST_DEVICE
 int BinaryTree::get_parent_id(int id) {
     Node* parent = this->node_list[id]->parent;
     if (parent != nullptr) {
@@ -67,6 +73,7 @@ int BinaryTree::get_parent_id(int id) {
     return -1;
 }
 
+CUDA_HOST_DEVICE
 int BinaryTree::get_right_child_id(int id) {
     Node* child = this->node_list[id]->right_child;
     if (child != nullptr) {
@@ -75,6 +82,7 @@ int BinaryTree::get_right_child_id(int id) {
     return -1;
 }
 
+CUDA_HOST_DEVICE
 int BinaryTree::get_left_child_id(int id) {
     Node* child = this->node_list[id]->left_child;
     if (child != nullptr) {
@@ -83,6 +91,7 @@ int BinaryTree::get_left_child_id(int id) {
     return -1;
 }
 
+CUDA_HOST_DEVICE
 BinaryTree::Type BinaryTree::get_node_type(int id) {
     Node* node = this->node_list[id];
     if (node->parent == nullptr) {
@@ -94,7 +103,9 @@ BinaryTree::Type BinaryTree::get_node_type(int id) {
     }
 }
 
+CUDA_HOST_DEVICE
 void BinaryTree::print(Node* node) {
+    #ifndef __CUDA_ARCH__
     cout << "I am node: " << node->id;
     if (node->left_child != nullptr) {
         cout << " and my left child is: " << node->left_child->id;
@@ -114,6 +125,8 @@ void BinaryTree::print(Node* node) {
         cout << " and I am Leaf ";
     }
     cout << endl;
+    #endif
+    
     if (node->left_child != nullptr) {
         print(node->left_child);
     }

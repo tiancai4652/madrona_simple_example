@@ -7,6 +7,9 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 WorkloadLayerHandlerData::WorkloadLayerHandlerData() {
     node_id = 0;
+    sys_id = 0;
+    workload = nullptr;
 }

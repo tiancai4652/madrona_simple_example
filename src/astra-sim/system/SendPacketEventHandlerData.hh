@@ -3,8 +3,7 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __SEND_PACKET_EVENT_HANDLER_DATA_HH__
-#define __SEND_PACKET_EVENT_HANDLER_DATA_HH__
+#pragma once
 
 #include "astra-sim/system/BasicEventHandlerData.hh"
 #include "astra-sim/system/Callable.hh"
@@ -13,15 +12,26 @@ LICENSE file in the root directory of this source tree.
 
 namespace AstraSim {
 
+/**
+ * 发送数据包事件处理器数据类
+ */
 class SendPacketEventHandlerData : public BasicEventHandlerData {
   public:
-    int tag;
-    Callable* callable;
-    WorkloadLayerHandlerData* wlhd;
+    int tag;                            ///< 消息标签
+    Callable* callable;                 ///< 可调用对象
+    WorkloadLayerHandlerData* wlhd;     ///< 工作负载层处理器数据
+
+    /**
+     * 默认构造函数
+     */
+    CUDA_HOST_DEVICE
     SendPacketEventHandlerData();
+
+    /**
+     * 带参数构造函数
+     */
+    CUDA_HOST_DEVICE
     SendPacketEventHandlerData(Callable* callable, int tag);
 };
 
 }  // namespace AstraSim
-
-#endif /* __SEND_PACKET_EVENT_HANDLER_DATA_HH__ */

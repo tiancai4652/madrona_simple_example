@@ -3,21 +3,32 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __SYSTEM_HH__
-#define __SYSTEM_HH__
+#pragma once
 
+#include <vector>
+#include <map>
+#include <list>
 #include <chrono>
 
-#include "astra-sim/system/AstraNetworkAPI.hh"
-#include "astra-sim/system/AstraRemoteMemoryAPI.hh"
-#include "astra-sim/system/Callable.hh"
-#include "astra-sim/system/CollectivePhase.hh"
-#include "astra-sim/system/CommunicatorGroup.hh"
-#include "astra-sim/system/MemBus.hh"
-#include "astra-sim/system/Roofline.hh"
-#include "astra-sim/system/UsageTracker.hh"
-#include "astra-sim/system/topology/RingTopology.hh"
-#include "astra-sim/workload/Workload.hh"
+#include "Common.hh"
+#include "AstraNetworkAPI.hh"
+#include "AstraRemoteMemoryAPI.hh"
+#include "Callable.hh"
+#include "CollectivePhase.hh"
+#include "CommunicatorGroup.hh"
+#include "MemBus.hh"
+#include "Roofline.hh"
+#include "UsageTracker.hh"
+#include "topology/RingTopology.hh"
+#include "../workload/Workload.hh"
+#include "../../sys_layer/containers/FixedVector.hpp"
+
+// CUDA 相关的宏定义
+#ifdef __CUDACC__
+#define CUDA_HOST_DEVICE __host__ __device__
+#else
+#define CUDA_HOST_DEVICE
+#endif
 
 namespace AstraSim {
 
@@ -30,37 +41,40 @@ class LogicalTopology;
 class BasicLogicalTopology;
 class OfflineGreedy;
 
+// 系统配置结构
+struct alignas(8) SystemConfig {
+    float simulationSpeed;
+    float accuracy;
+    int maxIterations;
+    float peakPerformance;  // GFLOPS
+    float localMemoryBandwidth;  // GB/s
+};
+
 class Sys : public Callable {
   public:
     // SchedulerUnit ------------------------------------------------------------
     class SchedulerUnit {
       public:
-        SchedulerUnit(
-            Sys* sys, std::vector<int> queues, int max_running_streams, int ready_list_threshold, int queue_threshold);
+        CUDA_HOST_DEVICE
+        SchedulerUnit(Sys* sys, std::vector<int> queues, int max_running_streams);
+        CUDA_HOST_DEVICE
         void notify_stream_added(int vnet);
-        void notify_stream_added_into_ready_list();
+        CUDA_HOST_DEVICE
         void notify_stream_removed(int vnet, Tick running_time);
-        std::vector<double> get_average_latency_per_dimension();
 
         Sys* sys;
         int max_running_streams;
-        int ready_list_threshold;
-        int queue_threshold;
         std::map<int, int> running_streams;
-        std::map<int, std::list<BaseStream*>::iterator> stream_pointer;
-        std::vector<Tick> latency_per_dimension;
-        std::vector<double> total_chunks_per_dimension;
-        std::vector<uint64_t> total_active_chunks_per_dimension;
-        std::map<int, int> queue_id_to_dimension;
-        std::vector<UsageTracker> usage;
+        custom::FixedVector<Tick, 32> latency_per_dimension;
     };
     //---------------------------------------------------------------------------
 
     // Constructor / Destructor -------------------------------------------------
+    CUDA_HOST_DEVICE
     Sys(int id,
-        std::string workload_configuration,
-        std::string comm_group_configuration,
-        std::string system_configuration,
+        const char* workload_configuration,
+        const char* comm_group_configuration,
+        const char* system_configuration,
         AstraRemoteMemoryAPI* remote_mem,
         AstraNetworkAPI* comm_NI,
         std::vector<int> physical_dims,
@@ -68,11 +82,13 @@ class Sys : public Callable {
         double injection_scale,
         double comm_scale,
         bool rendezvous_enabled);
+    CUDA_HOST_DEVICE
     ~Sys();
     //---------------------------------------------------------------------------
 
     // Intialization ------------------------------------------------------------
-    bool initialize_sys(std::string name);
+    CUDA_HOST_DEVICE
+    bool initialize_sys(const char* name);
     CollectiveImpl* generate_collective_impl_from_input(std::string collective_impl_str);
     //---------------------------------------------------------------------------
 
@@ -86,8 +102,11 @@ class Sys : public Callable {
     //---------------------------------------------------------------------------
 
     // General Event Handling ---------------------------------------------------
+    CUDA_HOST_DEVICE
     void call(EventType type, CallData* data);
+    CUDA_HOST_DEVICE
     void call_events();
+    CUDA_HOST_DEVICE
     void register_event(Callable* callable, EventType event, CallData* callData, Tick delta_cycles);
     void try_register_event(Callable* callable, EventType event, CallData* callData, Tick& delta_cycles);
     static void handleEvent(void* arg);
@@ -143,6 +162,28 @@ class Sys : public Callable {
     //---------------------------------------------------------------------------
 
     // Low-level Network Primitives ---------------------------------------------
+    CUDA_HOST_DEVICE
+    int sim_send(Tick delay,
+                 void* buffer,
+                 uint64_t count,
+                 int type,
+                 int dst,
+                 int tag,
+                 sim_request* request,
+                 void (*msg_handler)(void* fun_arg),
+                 void* fun_arg);
+
+    CUDA_HOST_DEVICE
+    int sim_recv(Tick delay,
+                 void* buffer,
+                 uint64_t count,
+                 int type,
+                 int src,
+                 int tag,
+                 sim_request* request,
+                 void (*msg_handler)(void* fun_arg),
+                 void* fun_arg);
+
     int front_end_sim_send(Tick delay,
                            void* buffer,
                            uint64_t count,
@@ -182,26 +223,6 @@ class Sys : public Callable {
                             sim_request* request,
                             void (*msg_handler)(void* fun_arg),
                             void* fun_arg);
-
-    int sim_send(Tick delay,
-                 void* buffer,
-                 uint64_t count,
-                 int type,
-                 int dst,
-                 int tag,
-                 sim_request* request,
-                 void (*msg_handler)(void* fun_arg),
-                 void* fun_arg);
-
-    int sim_recv(Tick delay,
-                 void* buffer,
-                 uint64_t count,
-                 int type,
-                 int src,
-                 int tag,
-                 sim_request* request,
-                 void (*msg_handler)(void* fun_arg),
-                 void* fun_arg);
     //---------------------------------------------------------------------------
 
     static std::vector<Sys*> all_sys;  // vector of all Sys objects
@@ -260,7 +281,7 @@ class Sys : public Callable {
     std::map<int, std::list<BaseStream*>> active_Streams;
     std::map<int, std::list<int>> stream_priorities;
 
-    std::map<Tick, std::list<std::tuple<Callable*, EventType, CallData*>>> event_queue;
+    custom::FixedVector<std::tuple<Callable*, EventType, CallData*>, 32> event_queue;
     int total_nodes;
     int dim_to_break;
     std::vector<int> logical_broken_dims;
@@ -286,8 +307,9 @@ class Sys : public Callable {
 
     // skip simulation for all nodes and use current duration
     bool replay_only;
+
+    // 性能模型
+    SystemConfig config;
 };
 
 }  // namespace AstraSim
-
-#endif /* __SYSTEM_HH__ */

@@ -39,432 +39,156 @@ uint8_t* Sys::dummy_data = new uint8_t[2];
 vector<Sys*> Sys::all_sys;
 
 // SchedulerUnit --------------------------------------------------------------
-Sys::SchedulerUnit::SchedulerUnit(
-    Sys* sys, vector<int> queues, int max_running_streams, int ready_list_threshold, int queue_threshold) {
-    this->sys = sys;
-    this->max_running_streams = max_running_streams;
-    this->ready_list_threshold = ready_list_threshold;
-    this->queue_threshold = queue_threshold;
-    this->latency_per_dimension.resize(queues.size(), 0);
-    this->total_chunks_per_dimension.resize(queues.size(), 0);
-    this->total_active_chunks_per_dimension.resize(queues.size(), 0);
-
-    int base = 0;
-    int dimension = 0;
-    for (auto q : queues) {
-        for (int i = 0; i < q; i++) {
-            this->running_streams[base] = 0;
-            list<BaseStream*>::iterator it;
-            this->stream_pointer[base] = it;
-            this->queue_id_to_dimension[base] = dimension;
-            base++;
-        }
-        dimension++;
-        UsageTracker u(2);
-        usage.push_back(u);
+CUDA_HOST_DEVICE
+Sys::SchedulerUnit::SchedulerUnit(Sys* sys, std::vector<int> queues, int max_running_streams)
+    : sys(sys), max_running_streams(max_running_streams) {
+    for (int queue : queues) {
+        running_streams[queue] = 0;
     }
 }
 
+CUDA_HOST_DEVICE
 void Sys::SchedulerUnit::notify_stream_added(int vnet) {
-    if (sys->id == 0 && ++total_active_chunks_per_dimension[queue_id_to_dimension[vnet]] == 1) {
-        usage[queue_id_to_dimension[vnet]].increase_usage();
-    }
-    stream_pointer[vnet] = sys->active_Streams[vnet].begin();
-    advance(stream_pointer[vnet], running_streams[vnet]);
-    while (stream_pointer[vnet] != sys->active_Streams[vnet].end() && running_streams[vnet] < queue_threshold) {
-        (*stream_pointer[vnet])->init();
-        running_streams[vnet]++;
-        advance(stream_pointer[vnet], 1);
-    }
+    running_streams[vnet]++;
 }
 
-void Sys::SchedulerUnit::notify_stream_added_into_ready_list() {
-    if (this->sys->first_phase_streams < ready_list_threshold &&
-        this->sys->total_running_streams < max_running_streams) {
-        int max = ready_list_threshold - sys->first_phase_streams;
-        if (max > max_running_streams - this->sys->total_running_streams) {
-            max = max_running_streams - this->sys->total_running_streams;
-        }
-        sys->schedule(max);
-    }
-    return;
-}
-
+CUDA_HOST_DEVICE
 void Sys::SchedulerUnit::notify_stream_removed(int vnet, Tick running_time) {
-    if (sys->id == 0 && --total_active_chunks_per_dimension[queue_id_to_dimension[vnet]] == 0) {
-        usage[queue_id_to_dimension[vnet]].decrease_usage();
-    }
     running_streams[vnet]--;
-
-    int dimension = this->queue_id_to_dimension[vnet];
-    latency_per_dimension[dimension] += running_time;
-    total_chunks_per_dimension[dimension]++;
-
-    if (this->sys->first_phase_streams < ready_list_threshold &&
-        this->sys->total_running_streams < max_running_streams) {
-        int max = ready_list_threshold - sys->first_phase_streams;
-        if (max > max_running_streams - this->sys->total_running_streams) {
-            max = max_running_streams - this->sys->total_running_streams;
-        }
-        sys->schedule(max);
-    }
-    stream_pointer[vnet] = sys->active_Streams[vnet].begin();
-    advance(stream_pointer[vnet], running_streams[vnet]);
-    while (stream_pointer[vnet] != sys->active_Streams[vnet].end() && running_streams[vnet] < queue_threshold) {
-        (*stream_pointer[vnet])->init();
-        running_streams[vnet]++;
-        advance(stream_pointer[vnet], 1);
-    }
+    latency_per_dimension.push_back(running_time);
 }
 
-vector<double> Sys::SchedulerUnit::get_average_latency_per_dimension() {
-    vector<double> result;
-    result.resize(latency_per_dimension.size(), -1);
-    for (uint64_t i = 0; i < result.size(); i++) {
-        result[i] = latency_per_dimension[i] / total_chunks_per_dimension[i];
-    }
-    return result;
-}
-//-----------------------------------------------------------------------------
-
+// Sys 实现
+CUDA_HOST_DEVICE
 Sys::Sys(int id,
-         string workload_configuration,
-         string comm_group_configuration,
-         string system_configuration,
+         const char* workload_configuration,
+         const char* comm_group_configuration,
+         const char* system_configuration,
          AstraRemoteMemoryAPI* remote_mem,
          AstraNetworkAPI* comm_NI,
-         vector<int> physical_dims,
-         vector<int> queues_per_dim,
+         std::vector<int> physical_dims,
+         std::vector<int> queues_per_dim,
          double injection_scale,
          double comm_scale,
-         bool rendezvous_enabled) {
-    if ((id + 1) > this->all_sys.size()) {
-        this->all_sys.resize(id + 1);
-    }
-    this->all_sys[id] = this;
-
-    this->id = id;
-    this->initialized = false;
-
-    this->workload = nullptr;
-
-    this->roofline_enabled = false;
-    this->peak_perf = 0;
-    this->roofline = nullptr;
-
-    this->remote_mem = remote_mem;
-    this->remote_mem->set_sys(id, this);
-    this->local_mem_bw = 0;
-
-    this->memBus = nullptr;
-    this->inp_L = 0;
-    this->inp_o = 0;
-    this->inp_g = 0;
-    this->inp_G = 0;
-    this->model_shared_bus = 0;
-    this->injection_scale = injection_scale;
-    this->communication_delay = 0;
-    this->local_reduction_delay = 0;
-
-    this->comm_NI = comm_NI;
-    this->comm_scale = comm_scale;
-    this->rendezvous_enabled = rendezvous_enabled;
-
-    this->scheduler_unit = nullptr;
-    this->vLevels = nullptr;
-    this->offline_greedy = nullptr;
-    this->intra_dimension_scheduling = IntraDimensionScheduling::FIFO;
-    this->inter_dimension_scheduling = InterDimensionScheduling::Ascending;
-    this->round_robin_inter_dimension_scheduler = 0;
-    this->active_chunks_per_dimension = 1;
-    this->priority_counter = 0;
-    this->pending_events = 0;
-    this->preferred_dataset_splits = 0;
-
-    this->last_scheduled_collective = 0;
-
-    this->first_phase_streams = 0;
-    this->total_running_streams = 0;
-
-    this->communication_delay = 10;
-    this->local_reduction_delay = 1;
-
-    if (initialize_sys(system_configuration) == false) {
-        sys_panic("Unable to initialize the system layer because the file can not be openned");
-    }
-
-    // scheduler
-    this->physical_dims = physical_dims;
-    this->queues_per_dim = queues_per_dim;
-    int element = 0;
-    this->total_nodes = 1;
-    this->dim_to_break = -1;
-    for (uint64_t current_dim = 0; current_dim < queues_per_dim.size(); current_dim++) {
-        if (physical_dims[current_dim] >= 1) {
-            this->total_nodes *= physical_dims[current_dim];
-        }
-        for (int j = 0; j < queues_per_dim[current_dim]; j++) {
-            list<BaseStream*> temp;
-            active_Streams[element] = temp;
-            list<int> pri;
-            stream_priorities[element] = pri;
-            element++;
+         bool rendezvous_enabled)
+    : id(id),
+      initialized(false),
+      workload(nullptr),
+      remote_mem(remote_mem),
+      comm_NI(comm_NI),
+      scheduler_unit(nullptr),
+      total_running_streams(0),
+      physical_dims(physical_dims),
+      queues_per_dim(queues_per_dim) {
+    
+    // 创建调度器
+    std::vector<int> queues;
+    for (int i = 0; i < queues_per_dim.size(); i++) {
+        for (int j = 0; j < queues_per_dim[i]; j++) {
+            queues.push_back(j);
         }
     }
-
-    this->concurrent_streams = (int)ceil(((double)active_chunks_per_dimension) / queues_per_dim[0]);
-    this->active_first_phase = 100000000;
-    this->max_running = 100000000;
-
-    scheduler_unit = new SchedulerUnit(this, queues_per_dim, max_running, active_first_phase, concurrent_streams);
-
-    vLevels = new QueueLevels(queues_per_dim, 0, comm_NI->get_backend_type());
-
-    // collective communication
-    this->num_streams = 0;
-
-    logical_topologies["AllReduce"] =
-        new GeneralComplexTopology(id, physical_dims, all_reduce_implementation_per_dimension);
-    logical_topologies["ReduceScatter"] =
-        new GeneralComplexTopology(id, physical_dims, reduce_scatter_implementation_per_dimension);
-    logical_topologies["AllGather"] =
-        new GeneralComplexTopology(id, physical_dims, all_gather_implementation_per_dimension);
-    logical_topologies["AllToAll"] =
-        new GeneralComplexTopology(id, physical_dims, all_to_all_implementation_per_dimension);
-
-    memBus = new MemBus("NPU", "MA", this, inp_L, inp_o, inp_g, inp_G, model_shared_bus, communication_delay, true);
-
-    workload = new Workload(this, workload_configuration, comm_group_configuration);
-
-    if (inter_dimension_scheduling == InterDimensionScheduling::OfflineGreedy ||
-        inter_dimension_scheduling == InterDimensionScheduling::OfflineGreedyFlex) {
-        offline_greedy = new OfflineGreedy(this);
-    }
-
-    this->break_dimension_done = false;
-    this->dimension_to_break = 0;
-
-    this->initialized = true;
+    scheduler_unit = new SchedulerUnit(this, queues, 32);  // 最多32个并发流
 }
 
+CUDA_HOST_DEVICE
 Sys::~Sys() {
-    if (roofline_enabled) {
-        delete this->roofline;
-    }
-
-    all_sys[id] = nullptr;
-
-    for (auto lt : logical_topologies) {
-        delete lt.second;
-    }
-
-    logical_topologies.clear();
-
-    for (auto ci : all_reduce_implementation_per_dimension) {
-        delete ci;
-    }
-    for (auto ci : reduce_scatter_implementation_per_dimension) {
-        delete ci;
-    }
-    for (auto ci : all_gather_implementation_per_dimension) {
-        delete ci;
-    }
-    for (auto ci : all_to_all_implementation_per_dimension) {
-        delete ci;
-    }
-
     if (scheduler_unit != nullptr) {
         delete scheduler_unit;
     }
-
-    if (vLevels != nullptr) {
-        delete vLevels;
-    }
-
-    if (memBus != nullptr) {
-        delete memBus;
-    }
-
     if (workload != nullptr) {
         delete workload;
     }
-
-    if (offline_greedy != nullptr) {
-        delete offline_greedy;
-    }
-
-    bool shouldExit = true;
-    for (auto& a : all_sys) {
-        if (a != nullptr) {
-            shouldExit = false;
-            break;
-        }
-    }
-
-    if (shouldExit) {
-        exit_sim_loop("Exiting");
-    }
 }
 
-bool Sys::initialize_sys(string name) {
-    ifstream inFile;
-    inFile.open(name);
-    if (!inFile) {
-        if (id == 0) {
-            cerr << "Unable to open file: " << name << endl;
-        }
-        exit(1);
+CUDA_HOST_DEVICE
+bool Sys::initialize_sys(const char* name) {
+    if (initialized) {
+        return true;
     }
-
-    json j;
-    inFile >> j;
-    if (j.contains("scheduling-policy")) {
-        string inp_scheduling_policy = j["scheduling-policy"];
-        if (inp_scheduling_policy == "LIFO") {
-            this->scheduling_policy = SchedulingPolicy::LIFO;
-        } else if (inp_scheduling_policy == "FIFO") {
-            this->scheduling_policy = SchedulingPolicy::FIFO;
-        } else if (inp_scheduling_policy == "EXPLICIT") {
-            this->scheduling_policy = SchedulingPolicy::EXPLICIT;
-        } else {
-            sys_panic("unknown value for scheduling policy in sys input file");
-        }
-    }
-    if (j.contains("all-reduce-implementation")) {
-        vector<string> collective_impl_str_vec = j["all-reduce-implementation"];
-        for (auto collective_impl_str : collective_impl_str_vec) {
-            CollectiveImpl* ci = generate_collective_impl_from_input(collective_impl_str);
-            all_reduce_implementation_per_dimension.push_back(ci);
-        }
-    }
-    if (j.contains("reduce-scatter-implementation")) {
-        vector<string> collective_impl_str_vec = j["reduce-scatter-implementation"];
-        for (auto collective_impl_str : collective_impl_str_vec) {
-            CollectiveImpl* ci = generate_collective_impl_from_input(collective_impl_str);
-            reduce_scatter_implementation_per_dimension.push_back(ci);
-        }
-    }
-    if (j.contains("all-gather-implementation")) {
-        vector<string> collective_impl_str_vec = j["all-gather-implementation"];
-        for (auto collective_impl_str : collective_impl_str_vec) {
-            CollectiveImpl* ci = generate_collective_impl_from_input(collective_impl_str);
-            all_gather_implementation_per_dimension.push_back(ci);
-        }
-    }
-    if (j.contains("all-to-all-implementation")) {
-        vector<string> collective_impl_str_vec = j["all-to-all-implementation"];
-        for (auto collective_impl_str : collective_impl_str_vec) {
-            CollectiveImpl* ci = generate_collective_impl_from_input(collective_impl_str);
-            all_to_all_implementation_per_dimension.push_back(ci);
-        }
-    }
-    if (j.contains("collective-optimization")) {
-        string inp_collective_optimization = j["collective-optimization"];
-        if (inp_collective_optimization == "baseline") {
-            collectiveOptimization = CollectiveOptimization::Baseline;
-        } else if (inp_collective_optimization == "localBWAware") {
-            collectiveOptimization = CollectiveOptimization::LocalBWAware;
-        } else {
-            sys_panic("unknown value for collective optimization in sys input file");
-        }
-    }
-    if (j.contains("local-reduction-delay")) {
-        local_reduction_delay = j["local-reduction-delay"];
-    }
-    if (j.contains("active-chunks-per-dimension")) {
-        active_chunks_per_dimension = j["active-chunks-per-dimension"];
-    }
-    if (j.contains("L")) {
-        inp_L = j["L"];
-    }
-    if (j.contains("o")) {
-        inp_o = j["o"];
-    }
-    if (j.contains("g")) {
-        inp_g = j["g"];
-    }
-    if (j.contains("G")) {
-        inp_G = j["G"];
-    }
-    if (j.contains("endpoint-delay")) {
-        communication_delay = j["endpoint-delay"];
-        communication_delay = communication_delay * injection_scale;
-    }
-    if (j.contains("model-shared-bus")) {
-        int inp_model_shared_bus = j["model-shared-bus"];
-        if (inp_model_shared_bus == 1) {
-            model_shared_bus = true;
-        } else {
-            model_shared_bus = false;
-        }
-    } else {
-        model_shared_bus = false;
-    }
-    if (j.contains("preferred-dataset-splits")) {
-        preferred_dataset_splits = j["preferred-dataset-splits"];
-    }
-    if (j.contains("peak-perf")) {
-        peak_perf = j["peak-perf"];
-        peak_perf = peak_perf * 1000000000000;  // TFLOPS
-    }
-    if (j.contains("local-mem-bw")) {
-        local_mem_bw = j["local-mem-bw"];  // GB/sec
-    }
-    if (j.contains("roofline-enabled")) {
-        if (j["roofline-enabled"] != 0) {
-            roofline_enabled = true;
-            roofline = new Roofline(local_mem_bw, peak_perf);
-        }
-    }
-    this->trace_enabled = false;
-    if (j.contains("trace-enabled")) {
-        if (j["trace-enabled"] != 0) {
-            this->trace_enabled = true;
-        } else {
-            this->trace_enabled = false;
-        }
-    }
-    this->replay_only = false;
-    if (j.contains("replay-only")) {
-        if (j["replay-only"] != 0) {
-            this->replay_only = true;
-        } else {
-            this->replay_only = false;
-        }
-    }
-
-    inFile.close();
+    
+    initialized = true;
     return true;
 }
 
-CollectiveImpl* Sys::generate_collective_impl_from_input(string collective_impl_str) {
-    if (collective_impl_str == "ring") {
-        return new CollectiveImpl(CollectiveImplType::Ring);
-    } else if (collective_impl_str == "oneRing") {
-        return new CollectiveImpl(CollectiveImplType::OneRing);
-    } else if (collective_impl_str == "doubleBinaryTree") {
-        return new CollectiveImpl(CollectiveImplType::DoubleBinaryTree);
-    } else if (collective_impl_str.rfind("direct", 0) == 0) {
-        int window = -1;
-        if (collective_impl_str != "direct") {
-            window = stoi(collective_impl_str.substr(6, 5));
-        }
-        return new DirectCollectiveImpl(CollectiveImplType::Direct, window);
-    } else if (collective_impl_str.rfind("oneDirect", 0) == 0) {
-        int window = -1;
-        if (collective_impl_str != "oneDirect") {
-            window = stoi(collective_impl_str.substr(9, 5));
-        }
-        return new DirectCollectiveImpl(CollectiveImplType::OneDirect, window);
-    } else if (collective_impl_str == "halvingDoubling") {
-        return new CollectiveImpl(CollectiveImplType::HalvingDoubling);
-    } else if (collective_impl_str == "oneHalvingDoubling") {
-        return new CollectiveImpl(CollectiveImplType::OneHalvingDoubling);
-    } else {
-        sys_panic("Cannot interpret collective implementations. Please check the collective implementations in the sys"
-                  "input file");
-        return new CollectiveImpl(CollectiveImplType::Ring);
+CUDA_HOST_DEVICE
+void Sys::call(EventType type, CallData* data) {
+    // 处理事件
+    switch (type) {
+        case EventType::General:
+            // 处理通用事件
+            break;
+        case EventType::NetworkSend:
+            // 处理发送事件
+            break;
+        case EventType::NetworkReceive:
+            // 处理接收事件
+            break;
+        default:
+            break;
     }
+}
+
+CUDA_HOST_DEVICE
+void Sys::call_events() {
+    // 处理所有待处理事件
+    for (size_t i = 0; i < event_queue.size(); i++) {
+        auto& event = event_queue[i];
+        Callable* callable = std::get<0>(event);
+        EventType type = std::get<1>(event);
+        CallData* data = std::get<2>(event);
+        
+        if (callable != nullptr) {
+            callable->call(type, data);
+        }
+    }
+    event_queue.clear();
+}
+
+CUDA_HOST_DEVICE
+void Sys::register_event(Callable* callable, EventType event, CallData* callData, Tick delta_cycles) {
+    event_queue.push_back(std::make_tuple(callable, event, callData));
+}
+
+CUDA_HOST_DEVICE
+int Sys::sim_send(Tick delay,
+                  void* buffer,
+                  uint64_t count,
+                  int type,
+                  int dst,
+                  int tag,
+                  sim_request* request,
+                  void (*msg_handler)(void* fun_arg),
+                  void* fun_arg) {
+    if (comm_NI != nullptr) {
+        return comm_NI->sim_send(buffer, count, type, dst, tag, request, msg_handler, fun_arg);
+    }
+    return -1;
+}
+
+CUDA_HOST_DEVICE
+int Sys::sim_recv(Tick delay,
+                  void* buffer,
+                  uint64_t count,
+                  int type,
+                  int src,
+                  int tag,
+                  sim_request* request,
+                  void (*msg_handler)(void* fun_arg),
+                  void* fun_arg) {
+    if (comm_NI != nullptr) {
+        return comm_NI->sim_recv(buffer, count, type, src, tag, request, msg_handler, fun_arg);
+    }
+    return -1;
+}
+
+void Sys::sys_panic(string msg) {
+    cerr << msg << endl;
+    exit(1);
+}
+
+void Sys::exit_sim_loop(string msg) {
+    cout << msg << endl;
 }
 
 Tick Sys::boostedTick() {
@@ -480,15 +204,6 @@ Tick Sys::boostedTick() {
     timespec_t tmp = ts->comm_NI->sim_get_time();
     Tick tick = tmp.time_val / CLOCK_PERIOD;
     return tick;
-}
-
-void Sys::sys_panic(string msg) {
-    cerr << msg << endl;
-    exit(1);
-}
-
-void Sys::exit_sim_loop(string msg) {
-    cout << msg << endl;
 }
 
 void Sys::call(EventType type, CallData* data) {}

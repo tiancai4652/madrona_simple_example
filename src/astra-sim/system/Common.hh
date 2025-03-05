@@ -3,14 +3,21 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __COMMON_HH__
-#define __COMMON_HH__
+#pragma once
 
 #include <cstdint>
 
+// CUDA 相关的宏定义
+#ifdef __CUDACC__
+#define CUDA_HOST_DEVICE __host__ __device__
+#else
+#define CUDA_HOST_DEVICE
+#endif
+
 namespace AstraSim {
 
-typedef unsigned long long Tick;
+// 基本类型定义
+using Tick = uint64_t;
 
 constexpr uint64_t CLOCK_PERIOD = 1;           // 1ns
 constexpr uint64_t FREQ = 1000 * 1000 * 1000;  // 1GHz
@@ -24,22 +31,65 @@ struct timespec_t {
     long double time_val;
 };
 
-struct sim_request {
-    uint32_t srcRank;
-    uint32_t dstRank;
-    uint32_t tag;
-    req_type_e reqType;
-    uint64_t reqCount;
-    uint32_t vnet;
-    uint32_t layerNum;
+// 事件类型
+enum class EventType : uint8_t {
+    General = 0,
+    NetworkSend = 1,
+    NetworkReceive = 2,
+    MemoryAccess = 3,
+    Compute = 4,
+    Max
 };
 
+// 通信类型
+enum class ComType : uint8_t {
+    None = 0,
+    Send = 1,
+    Recv = 2,
+    AllReduce = 3,
+    AllGather = 4,
+    ReduceScatter = 5,
+    AllToAll = 6,
+    Max
+};
+
+// 调度策略
+enum class SchedulingPolicy : uint8_t {
+    FIFO = 0,
+    LIFO = 1,
+    EXPLICIT = 2,
+    Max
+};
+
+// 流状态
+enum class StreamState : uint8_t {
+    Created = 0,
+    Ready = 1,
+    Executing = 2,
+    Finished = 3,
+    Max
+};
+
+// 基本请求结构
+struct alignas(8) sim_request {
+    void* buffer;
+    uint64_t size;
+    int tag;
+    bool active;
+};
+
+// 元数据基类
 class MetaData {
-  public:
+public:
     timespec_t timestamp;
+    CUDA_HOST_DEVICE virtual ~MetaData() = default;
 };
 
-enum class ComType { None = 0, Reduce_Scatter, All_Gather, All_Reduce, All_to_All, All_Reduce_All_to_All };
+// 调用数据基类
+class CallData {
+public:
+    CUDA_HOST_DEVICE virtual ~CallData() = default;
+};
 
 enum class CollectiveOptimization { Baseline = 0, LocalBWAware };
 
@@ -59,8 +109,6 @@ enum class CollectiveImplType {
 
 enum class CollectiveBarrier { Blocking = 0, Non_Blocking };
 
-enum class SchedulingPolicy { LIFO = 0, FIFO, EXPLICIT, None };
-
 enum class IntraDimensionScheduling { FIFO = 0, RG, SmallestFirst, LessRemainingPhaseFirst };
 
 enum class InterDimensionScheduling { Ascending = 0, OnlineGreedy, RoundRobin, OfflineGreedy, OfflineGreedyFlex };
@@ -70,31 +118,6 @@ enum class InjectionPolicy { Infinite = 0, Aggressive, SemiAggressive, ExtraAggr
 enum class PacketRouting { Hardware = 0, Software };
 
 enum class BusType { Both = 0, Shared, Mem };
-
-enum class StreamState { Created = 0, Transferring, Ready, Executing, Zombie, Dead };
-
-enum class EventType {
-    CallEvents = 0,
-    General,
-    RendezvousSend,
-    RendezvousRecv,
-    PacketReceived,
-    PacketSent,
-    Rec_Finished,
-    Send_Finished,
-    Processing_Finished,
-    NPU_to_MA,
-    MA_to_NPU,
-    Consider_Process,
-    Consider_Retire,
-    Consider_Send_Back,
-    StreamInit,
-    CommProcessingFinished,
-    CollectiveCommunicationFinished,
-    CompFinished,
-    MemLoadFinished,
-    MemStoreFinished
-};
 
 class CloneInterface {
   public:
@@ -127,5 +150,3 @@ class DirectCollectiveImpl : public CollectiveImpl {
 };
 
 }  // namespace AstraSim
-
-#endif /* __COMMON_HH__ */

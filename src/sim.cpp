@@ -142,6 +142,9 @@ inline void processSystemLayer(Engine &ctx,
         sysComponent.systemLayer.setParameter("simulationSpeed", config.simulationSpeed);
         sysComponent.systemLayer.setParameter("accuracy", config.accuracy);
         
+        // 初始化网络API
+        sysComponent.networkApi.initialize(config.networkConfig);
+        
         sysComponent.isInitialized = true;
         printf("系统层已初始化\n");
     }
@@ -150,12 +153,16 @@ inline void processSystemLayer(Engine &ctx,
     float deltaTime = 0.1f;
     sysComponent.systemLayer.update(deltaTime);
     
+    // 更新网络
+    sysComponent.networkApi.update(deltaTime);
+    
     // 获取当前模拟结果
     AstraSim::SimulationData result = sysComponent.systemLayer.getSimulationResult();
     
     // 输出一些调试信息
     if (static_cast<int>(result.time * 10) % 10 == 0) {  // 每隔一段时间输出一次
-        printf("系统层更新: 时间=%f, 值=%f\n", result.time, result.value);
+        printf("系统层更新: 时间=%f, 值=%f, 网络拥塞=%d\n", 
+               result.time, result.value, sysComponent.networkApi.is_congested());
     }
 }
 

@@ -4,11 +4,11 @@ LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
 #include "astra-sim/system/CollectivePhase.hh"
-
 #include "astra-sim/system/collective/Algorithm.hh"
 
-using namespace AstraSim;
+namespace AstraSim {
 
+CUDA_HOST_DEVICE
 CollectivePhase::CollectivePhase(Sys* sys, int queue_id, Algorithm* algorithm) {
     this->sys = sys;
     this->queue_id = queue_id;
@@ -18,16 +18,32 @@ CollectivePhase::CollectivePhase(Sys* sys, int queue_id, Algorithm* algorithm) {
     this->final_data_size = algorithm->final_data_size;
     this->comm_type = algorithm->comType;
     this->enabled = algorithm->enabled;
+#ifndef __CUDA_ARCH__
+    std::cout << "Created CollectivePhase with queue_id=" << queue_id 
+              << ", initial_size=" << initial_data_size 
+              << ", final_size=" << final_data_size << std::endl;
+#endif
 }
 
+CUDA_HOST_DEVICE
 CollectivePhase::CollectivePhase() {
     queue_id = -1;
     sys = nullptr;
     algorithm = nullptr;
+#ifndef __CUDA_ARCH__
+    std::cout << "Created empty CollectivePhase" << std::endl;
+#endif
 }
 
+CUDA_HOST_DEVICE
 void CollectivePhase::init(BaseStream* stream) {
     if (algorithm != nullptr) {
+#ifndef __CUDA_ARCH__
+        std::cout << "Initializing CollectivePhase algorithm for queue_id=" 
+                  << queue_id << std::endl;
+#endif
         algorithm->init(stream);
     }
 }
+
+} // namespace AstraSim

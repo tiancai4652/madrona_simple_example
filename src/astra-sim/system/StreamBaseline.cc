@@ -9,8 +9,13 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 StreamBaseline::StreamBaseline(
-    Sys* owner, DataSet* dataset, int stream_id, std::list<CollectivePhase> phases_to_go, int priority)
+    Sys* owner, 
+    DataSet* dataset, 
+    int stream_id, 
+    custom::FixedList<CollectivePhase, 32> phases_to_go, 
+    int priority)
     : BaseStream(stream_id, owner, phases_to_go) {
     this->owner = owner;
     this->stream_id = stream_id;
@@ -21,6 +26,7 @@ StreamBaseline::StreamBaseline(
     initial_data_size = phases_to_go.front().initial_data_size;
 }
 
+CUDA_HOST_DEVICE
 void StreamBaseline::init() {
     initialized = true;
     last_init = Sys::boostedTick();
@@ -35,6 +41,7 @@ void StreamBaseline::init() {
     total_packets_sent = 1;
 }
 
+CUDA_HOST_DEVICE
 void StreamBaseline::call(EventType event, CallData* data) {
     SharedBusStat* sharedBusStat = (SharedBusStat*)data;
     update_bus_stats(BusType::Both, sharedBusStat);
@@ -44,8 +51,9 @@ void StreamBaseline::call(EventType event, CallData* data) {
     }
 }
 
+CUDA_HOST_DEVICE
 void StreamBaseline::consume(RecvPacketEventHandlerData* message) {
-    net_message_latency.back() += Sys::boostedTick() - message->ready_time;  // not accurate
+    net_message_latency.back() += Sys::boostedTick() - message->ready_time;
     net_message_counter++;
     my_current_phase.algorithm->run(EventType::PacketReceived, message);
 }

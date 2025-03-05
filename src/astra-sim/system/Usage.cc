@@ -7,6 +7,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 Usage::Usage(int level, uint64_t start, uint64_t end) {
     this->level = level;
     this->start = start;

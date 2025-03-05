@@ -7,78 +7,79 @@ LICENSE file in the root directory of this source tree.
 
 #include <astra-network-analytical/common/Event.h>
 #include <astra-network-analytical/common/Type.h>
-#include <optional>
+#include "sys_layer/containers/FixedOptional.hpp"
 
 using namespace NetworkAnalytical;
+
+#ifdef __CUDACC__
+#define CUDA_HOST_DEVICE __host__ __device__
+#else
+#define CUDA_HOST_DEVICE
+#endif
 
 namespace AstraSimAnalytical {
 
 /**
- * CallbackTrackerEntry manages sim_send() and sim_recv() callbacks
- * per each unique chunk.
+ * CallbackTrackerEntry管理每个唯一块的sim_send()和sim_recv()回调
  */
 class CallbackTrackerEntry {
   public:
     /**
-     * Constructor.
+     * 构造函数
      */
+    CUDA_HOST_DEVICE
     CallbackTrackerEntry() noexcept;
 
     /**
-     * Register a callback for sim_send() call.
-     *
-     * @param callback callback function pointer
-     * @param arg argument of the callback function
+     * 注册sim_send()调用的回调
      */
+    CUDA_HOST_DEVICE
     void register_send_callback(Callback callback, CallbackArg arg) noexcept;
 
     /**
-     * Register a callback for sim_recv() call.
-     *
-     * @param callback callback function pointer
-     * @param arg argument of the callback function
+     * 注册sim_recv()调用的回调
      */
+    CUDA_HOST_DEVICE
     void register_recv_callback(Callback callback, CallbackArg arg) noexcept;
 
     /**
-     * Check if the transmission of the chunk is finished.
-     *
-     * @return true if the transmission of the chunk is alread finished,
-     *         false otherwise
+     * 检查块的传输是否已完成
      */
+    CUDA_HOST_DEVICE
     [[nodiscard]] bool is_transmission_finished() const noexcept;
 
     /**
-     * Mark the transmission of the chunk as finished.
+     * 将块的传输标记为已完成
      */
+    CUDA_HOST_DEVICE
     void set_transmission_finished() noexcept;
 
     /**
-     * Check the existence of both sim_send() and sim_recv() callbacks.
-     *
-     * @return true if both sim_send() and sim_recv() callbacks are registered,
-     *         false otherwise
+     * 检查是否同时注册了sim_send()和sim_recv()回调
      */
+    CUDA_HOST_DEVICE
     [[nodiscard]] bool both_callbacks_registered() const noexcept;
 
     /**
-     * Invoke the sim_send() callback.
+     * 调用sim_send()回调
      */
+    CUDA_HOST_DEVICE
     void invoke_send_handler() noexcept;
 
     /**
-     * Invoke the sim_recv() callback.
+     * 调用sim_recv()回调
      */
+    CUDA_HOST_DEVICE
     void invoke_recv_handler() noexcept;
 
   private:
-    /// sim_send() callback event
-    std::optional<Event> send_event;
+    /// sim_send()回调事件
+    custom::FixedOptional<Event> send_event;
 
-    /// sim_recv() callback event
-    std::optional<Event> recv_event;
+    /// sim_recv()回调事件
+    custom::FixedOptional<Event> recv_event;
 
-    /// true if the transmission of the chunk is already finished, false otherwise
+    /// 块的传输是否已完成
     bool transmission_finished;
 };
 

@@ -5,15 +5,20 @@ LICENSE file in the root directory of this source tree.
 
 #include "common/CallbackTracker.hh"
 #include <cassert>
+#include "sys_layer/containers/FixedMap.hpp"
+#include "sys_layer/containers/FixedTuple.hpp"
+#include "sys_layer/containers/FixedOptional.hpp"
 
 using namespace AstraSimAnalytical;
 
+CUDA_HOST_DEVICE
 CallbackTracker::CallbackTracker() noexcept {
-    // initialize tracker
-    tracker = {};
+    // 初始化跟踪器
+    tracker.clear();
 }
 
-std::optional<CallbackTrackerEntry*> CallbackTracker::search_entry(
+CUDA_HOST_DEVICE
+FixedOptional<CallbackTrackerEntry*> CallbackTracker::search_entry(
     const int tag, const int src, const int dest, const ChunkSize chunk_size, const int chunk_id) noexcept {
     assert(tag >= 0);
     assert(src >= 0);
@@ -21,19 +26,20 @@ std::optional<CallbackTrackerEntry*> CallbackTracker::search_entry(
     assert(chunk_size > 0);
     assert(chunk_id >= 0);
 
-    // create key and search entry
-    const auto key = std::make_tuple(tag, src, dest, chunk_size, chunk_id);
-    const auto entry = tracker.find(key);
+    // 创建键并搜索条目
+    const auto key = make_fixed_tuple(tag, src, dest, chunk_size, chunk_id);
+    CallbackTrackerEntry* entry = tracker.find(key);
 
-    // no entry exists
-    if (entry == tracker.end()) {
-        return std::nullopt;
+    // 条目不存在
+    if (!entry) {
+        return make_nullopt<CallbackTrackerEntry*>();
     }
 
-    // return pointer to entry
-    return &(entry->second);
+    // 返回条目指针
+    return make_optional(entry);
 }
 
+CUDA_HOST_DEVICE
 CallbackTrackerEntry* CallbackTracker::create_new_entry(
     const int tag, const int src, const int dest, const ChunkSize chunk_size, const int chunk_id) noexcept {
     assert(tag >= 0);
@@ -42,16 +48,18 @@ CallbackTrackerEntry* CallbackTracker::create_new_entry(
     assert(chunk_size > 0);
     assert(chunk_id >= 0);
 
-    // create key
-    const auto key = std::make_tuple(tag, src, dest, chunk_size, chunk_id);
+    // 创建键
+    const auto key = make_fixed_tuple(tag, src, dest, chunk_size, chunk_id);
 
-    // create new emtpy entry
-    const auto entry = tracker.emplace(key, CallbackTrackerEntry()).first;
+    // 创建新的空条目
+    bool success = tracker.insert(key, CallbackTrackerEntry());
+    assert(success);
 
-    // return pointer to entry
-    return &(entry->second);
+    // 返回条目指针
+    return tracker.find(key);
 }
 
+CUDA_HOST_DEVICE
 void CallbackTracker::pop_entry(
     const int tag, const int src, const int dest, const ChunkSize chunk_size, const int chunk_id) noexcept {
     assert(tag >= 0);
@@ -60,13 +68,14 @@ void CallbackTracker::pop_entry(
     assert(chunk_size > 0);
     assert(chunk_id >= 0);
 
-    // create key
-    const auto key = std::make_tuple(tag, src, dest, chunk_size, chunk_id);
+    // 创建键
+    const auto key = make_fixed_tuple(tag, src, dest, chunk_size, chunk_id);
 
-    // find entry
-    const auto entry = tracker.find(key);
-    assert(entry != tracker.end());  // entry must exist
+    // 查找条目
+    CallbackTrackerEntry* entry = tracker.find(key);
+    assert(entry != nullptr);  // 条目必须存在
 
-    // erase entry from the tracker
-    tracker.erase(entry);
+    // 从跟踪器中删除条目
+    bool success = tracker.erase(key);
+    assert(success);
 }

@@ -7,6 +7,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 LocalRingNodeA2AGlobalDBT::LocalRingNodeA2AGlobalDBT(
     int id, int local_dim, int node_dim, int total_tree_nodes, int start, int stride) {
     this->global_dimension_all_reduce = new DoubleBinaryTreeTopology(id, total_tree_nodes, start, stride);
@@ -17,6 +18,7 @@ LocalRingNodeA2AGlobalDBT::LocalRingNodeA2AGlobalDBT(
                                             (id % (local_dim * node_dim)) / local_dim, local_dim);
 }
 
+CUDA_HOST_DEVICE
 LocalRingNodeA2AGlobalDBT::~LocalRingNodeA2AGlobalDBT() {
     delete global_dimension_all_reduce;
     delete local_dimension;
@@ -24,10 +26,12 @@ LocalRingNodeA2AGlobalDBT::~LocalRingNodeA2AGlobalDBT() {
     delete global_dimension_other;
 }
 
+CUDA_HOST_DEVICE
 int LocalRingNodeA2AGlobalDBT::get_num_of_dimensions() {
     return 3;
 }
 
+CUDA_HOST_DEVICE
 int LocalRingNodeA2AGlobalDBT::get_num_of_nodes_in_dimension(int dimension) {
     if (dimension == 0) {
         return local_dimension->get_num_of_nodes_in_dimension(0);
@@ -39,7 +43,8 @@ int LocalRingNodeA2AGlobalDBT::get_num_of_nodes_in_dimension(int dimension) {
     return -1;
 }
 
-BasicLogicalTopology* LocalRingNodeA2AGlobalDBT ::get_basic_topology_at_dimension(int dimension, ComType type) {
+CUDA_HOST_DEVICE
+BasicLogicalTopology* LocalRingNodeA2AGlobalDBT::get_basic_topology_at_dimension(int dimension, ComType type) {
     if (dimension == 0) {
         return local_dimension;
     } else if (dimension == 1) {

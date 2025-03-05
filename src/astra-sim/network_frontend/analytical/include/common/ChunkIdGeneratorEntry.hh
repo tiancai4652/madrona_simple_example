@@ -5,49 +5,55 @@ LICENSE file in the root directory of this source tree.
 
 #pragma once
 
+#ifdef __CUDACC__
+#define CUDA_HOST_DEVICE __host__ __device__
+#else
+#define CUDA_HOST_DEVICE
+#endif
+
 namespace AstraSimAnalytical {
 
 /**
- * ChunkIdGeneratorEntry tracks the chunk id generated
- * for sim_send() and sim_recv() calls
- * per each (tag, src, dest, chunk_size) tuple.
+ * ChunkIdGeneratorEntry跟踪为每个(tag, src, dest, chunk_size)元组
+ * 生成的sim_send()和sim_recv()调用的块ID。
  */
 class ChunkIdGeneratorEntry {
   public:
     /**
-     * Constructur.
+     * 构造函数
      */
+    CUDA_HOST_DEVICE
     ChunkIdGeneratorEntry() noexcept;
 
     /**
-     * Get the chunk id for sim_send() call.
-     *
-     * @return chunk id for sim_send() call
+     * 获取sim_send()调用的块ID
      */
+    CUDA_HOST_DEVICE
     [[nodiscard]] int get_send_id() const noexcept;
 
     /**
-     * Get the chunk id for sim_recv() call.
-     *
-     * @return chunk id for sim_recv() call
+     * 获取sim_recv()调用的块ID
      */
+    CUDA_HOST_DEVICE
     [[nodiscard]] int get_recv_id() const noexcept;
 
     /**
-     * Increment the chunk id for sim_send() call.
+     * 增加sim_send()调用的块ID
      */
+    CUDA_HOST_DEVICE
     void increment_send_id() noexcept;
 
     /**
-     * Increment the chunk id for sim_recv() call.
+     * 增加sim_recv()调用的块ID
      */
+    CUDA_HOST_DEVICE
     void increment_recv_id() noexcept;
 
   private:
-    /// current available chunk id for sim_send() call
+    /// sim_send()调用的当前可用块ID
     int send_id;
 
-    /// current available chunk id for sim_recv() call
+    /// sim_recv()调用的当前可用块ID
     int recv_id;
 };
 

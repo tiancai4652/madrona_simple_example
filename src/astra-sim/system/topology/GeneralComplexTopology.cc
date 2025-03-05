@@ -14,6 +14,7 @@ LICENSE file in the root directory of this source tree.
 using namespace std;
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 GeneralComplexTopology::GeneralComplexTopology(int id,
                                                std::vector<int> dimension_size,
                                                std::vector<CollectiveImpl*> collective_impl) {
@@ -52,25 +53,31 @@ GeneralComplexTopology::GeneralComplexTopology(int id,
     }
 }
 
+CUDA_HOST_DEVICE
 GeneralComplexTopology::~GeneralComplexTopology() {
     for (uint64_t i = 0; i < dimension_topology.size(); i++) {
         delete dimension_topology[i];
     }
 }
 
+CUDA_HOST_DEVICE
 int GeneralComplexTopology::get_num_of_dimensions() {
     return dimension_topology.size();
 }
 
+CUDA_HOST_DEVICE
 int GeneralComplexTopology::get_num_of_nodes_in_dimension(int dimension) {
     if (static_cast<uint64_t>(dimension) >= dimension_topology.size()) {
+        #ifndef __CUDA_ARCH__
         std::cout << "dim: " << dimension << " requested! but max dim is: " << dimension_topology.size() - 1
                   << std::endl;
+        #endif
     }
     assert(static_cast<uint64_t>(dimension) < dimension_topology.size());
     return dimension_topology[dimension]->get_num_of_nodes_in_dimension(0);
 }
 
+CUDA_HOST_DEVICE
 BasicLogicalTopology* GeneralComplexTopology::get_basic_topology_at_dimension(int dimension, ComType type) {
     return dimension_topology[dimension]->get_basic_topology_at_dimension(0, type);
 }

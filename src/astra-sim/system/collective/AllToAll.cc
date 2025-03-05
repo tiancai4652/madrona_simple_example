@@ -4,9 +4,11 @@ LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
 #include "astra-sim/system/collective/AllToAll.hh"
+#include <algorithm>
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 AllToAll::AllToAll(ComType type,
                    int window,
                    int id,
@@ -20,13 +22,14 @@ AllToAll::AllToAll(ComType type,
     if (window == -1) {
         parallel_reduce = nodes_in_ring - 1;
     } else {
-        parallel_reduce = (int)std::min(window, nodes_in_ring - 1);
+        parallel_reduce = window < nodes_in_ring - 1 ? window : nodes_in_ring - 1;
     }
     if (type == ComType::All_to_All) {
         this->stream_count = nodes_in_ring - 1;
     }
 }
 
+CUDA_HOST_DEVICE
 void AllToAll::run(EventType event, CallData* data) {
     if (event == EventType::General) {
         free_packets += 1;
@@ -54,6 +57,7 @@ void AllToAll::run(EventType event, CallData* data) {
     }
 }
 
+CUDA_HOST_DEVICE
 void AllToAll::process_max_count() {
     if (remained_packets_per_max_count > 0) {
         remained_packets_per_max_count--;
@@ -76,10 +80,11 @@ void AllToAll::process_max_count() {
     }
 }
 
+CUDA_HOST_DEVICE
 int AllToAll::get_non_zero_latency_packets() {
     if (((RingTopology*)logical_topo)->get_dimension() != RingTopology::Dimension::Local) {
-        return parallel_reduce * 1;
+        return parallel_reduce;
     } else {
-        return (nodes_in_ring - 1) * parallel_reduce * 1;
+        return (nodes_in_ring - 1) * parallel_reduce;
     }
 }

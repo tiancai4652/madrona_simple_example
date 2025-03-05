@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 
 using namespace AstraSim;
 
+CUDA_HOST_DEVICE
 Ring::Ring(ComType type,
            int id,
            RingTopology* ring_topology,
@@ -84,14 +85,17 @@ Ring::Ring(ComType type,
         this->final_data_size = data_size;
         this->msg_size = data_size / nodes_in_ring;
         break;
-    default:;
+    default:
+        assert(false && "Unknown communication type for Ring collective algorithm");
     }
 }
 
+CUDA_HOST_DEVICE
 int Ring::get_non_zero_latency_packets() {
-    return (nodes_in_ring - 1) * parallel_reduce * 1;
+    return (nodes_in_ring - 1) * parallel_reduce;
 }
 
+CUDA_HOST_DEVICE
 void Ring::run(EventType event, CallData* data) {
     if (event == EventType::General) {
         free_packets += 1;
@@ -107,6 +111,7 @@ void Ring::run(EventType event, CallData* data) {
     }
 }
 
+CUDA_HOST_DEVICE
 void Ring::release_packets() {
     for (auto packet : locked_packets) {
         packet->set_notifier(this);
@@ -121,11 +126,10 @@ void Ring::release_packets() {
     locked_packets.clear();
 }
 
+CUDA_HOST_DEVICE
 void Ring::process_stream_count() {
     if (remained_packets_per_message > 0) {
         remained_packets_per_message--;
-    }
-    if (id == 0) {
     }
     if (remained_packets_per_message == 0 && stream_count > 0) {
         stream_count--;
@@ -138,6 +142,7 @@ void Ring::process_stream_count() {
     }
 }
 
+CUDA_HOST_DEVICE
 void Ring::process_max_count() {
     if (remained_packets_per_max_count > 0) {
         remained_packets_per_max_count--;
@@ -149,6 +154,7 @@ void Ring::process_max_count() {
     }
 }
 
+CUDA_HOST_DEVICE
 void Ring::reduce() {
     process_stream_count();
     packets.pop_front();
@@ -156,23 +162,25 @@ void Ring::reduce() {
     total_packets_sent++;
 }
 
+CUDA_HOST_DEVICE
 bool Ring::iteratable() {
-    if (stream_count == 0 && free_packets == (parallel_reduce * 1)) {  // && not_delivered==0
+    if (stream_count == 0 && free_packets == parallel_reduce) {
         exit();
         return false;
     }
     return true;
 }
 
+CUDA_HOST_DEVICE
 void Ring::insert_packet(Callable* sender) {
     if (zero_latency_packets == 0 && non_zero_latency_packets == 0) {
-        zero_latency_packets = parallel_reduce * 1;
-        non_zero_latency_packets = get_non_zero_latency_packets();  //(nodes_in_ring-1)*parallel_reduce*1;
+        zero_latency_packets = parallel_reduce;
+        non_zero_latency_packets = get_non_zero_latency_packets();
         toggle = !toggle;
     }
     if (zero_latency_packets > 0) {
         packets.push_back(MyPacket(stream->current_queue_id, curr_sender,
-                                   curr_receiver));  // vnet Must be changed for alltoall topology
+                                   curr_receiver));
         packets.back().sender = sender;
         locked_packets.push_back(&packets.back());
         processed = false;
@@ -183,7 +191,7 @@ void Ring::insert_packet(Callable* sender) {
         return;
     } else if (non_zero_latency_packets > 0) {
         packets.push_back(MyPacket(stream->current_queue_id, curr_sender,
-                                   curr_receiver));  // vnet Must be changed for alltoall topology
+                                   curr_receiver));
         packets.back().sender = sender;
         locked_packets.push_back(&packets.back());
         if (comType == ComType::Reduce_Scatter || (comType == ComType::All_Reduce && toggle)) {
@@ -191,7 +199,7 @@ void Ring::insert_packet(Callable* sender) {
         } else {
             processed = false;
         }
-        if (non_zero_latency_packets <= parallel_reduce * 1) {
+        if (non_zero_latency_packets <= parallel_reduce) {
             send_back = false;
         } else {
             send_back = true;
@@ -201,9 +209,10 @@ void Ring::insert_packet(Callable* sender) {
         non_zero_latency_packets--;
         return;
     }
-    Sys::sys_panic("should not inject nothing!");
+    assert(false && "should not inject nothing!");
 }
 
+CUDA_HOST_DEVICE
 bool Ring::ready() {
     if (stream->state == StreamState::Created || stream->state == StreamState::Ready) {
         stream->changeState(StreamState::Executing);
@@ -219,26 +228,20 @@ bool Ring::ready() {
     snd_req.reqType = UINT8;
     snd_req.vnet = this->stream->current_queue_id;
     stream->owner->front_end_sim_send(0, Sys::dummy_data, msg_size, UINT8, packet.preferred_dest, stream->stream_id,
-                                      &snd_req, &Sys::handleEvent,
-                                      nullptr);  // stream_id+(packet.preferred_dest*50)
+                                      &snd_req, &Sys::handleEvent, nullptr);
     sim_request rcv_req;
     rcv_req.vnet = this->stream->current_queue_id;
     RecvPacketEventHandlerData* ehd = new RecvPacketEventHandlerData(
         stream, stream->owner->id, EventType::PacketReceived, packet.preferred_vnet, packet.stream_id);
     stream->owner->front_end_sim_recv(0, Sys::dummy_data, msg_size, UINT8, packet.preferred_src, stream->stream_id,
-                                      &rcv_req, &Sys::handleEvent,
-                                      ehd);  // stream_id+(owner->id*50)
+                                      &rcv_req, &Sys::handleEvent, ehd);
     reduce();
     return true;
 }
 
+CUDA_HOST_DEVICE
 void Ring::exit() {
-    if (packets.size() != 0) {
-        packets.clear();
-    }
-    if (locked_packets.size() != 0) {
-        locked_packets.clear();
-    }
+    packets.clear();
+    locked_packets.clear();
     stream->owner->proceed_to_next_vnet_baseline((StreamBaseline*)stream);
-    return;
 }

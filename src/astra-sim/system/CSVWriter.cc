@@ -4,34 +4,36 @@ LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
 #include "astra-sim/system/CSVWriter.hh"
-
 #include "astra-sim/system/Common.hh"
 
 #include <cassert>
 #include <cmath>
 #include <fcntl.h>
-#include <iostream>
 #include <unistd.h>
-#include <utility>
-#include <vector>
 
-using namespace std;
-using namespace AstraSim;
+namespace AstraSim {
 
-CSVWriter::CSVWriter(std::string path, std::string name) {
+CUDA_HOST_DEVICE
+CSVWriter::CSVWriter(custom::FixedString path, custom::FixedString name) {
     this->path = path;
     this->name = name;
+#ifndef __CUDA_ARCH__
+    std::cout << "Created CSVWriter with path=" << path.c_str() 
+              << ", name=" << name.c_str() << std::endl;
+#endif
 }
 
+CUDA_HOST_DEVICE
 void CSVWriter::initialize_csv(int rows, int cols) {
-    std::cout << "CSV path and filename: " << path + name << std::endl;
+#ifndef __CUDA_ARCH__
+    std::cout << "CSV path and filename: " << (path + name).c_str() << std::endl;
     int trial = 10000;
     do {
-        myFile.open(path + name, std::fstream::out);
+        myFile.open((path + name).c_str(), std::fstream::out);
         trial--;
     } while (!myFile.is_open() && trial > 0);
     if (trial == 0) {
-        std::cerr << "Unable to create file: " << path << std::endl;
+        std::cerr << "Unable to create file: " << path.c_str() << std::endl;
         std::cerr << "This error is fatal. Please make sure the CSV write path exists." << std::endl;
         exit(1);
     }
@@ -40,11 +42,11 @@ void CSVWriter::initialize_csv(int rows, int cols) {
     } while (myFile.is_open());
 
     do {
-        myFile.open(path + name, std::fstream::out | std::fstream::in);
+        myFile.open((path + name).c_str(), std::fstream::out | std::fstream::in);
     } while (!myFile.is_open());
 
     if (!myFile) {
-        std::cerr << "Unable to open file: " << path << std::endl;
+        std::cerr << "Unable to open file: " << path.c_str() << std::endl;
         std::cerr << "This error is fatal. Please make sure the CSV write path exists." << std::endl;
         exit(1);
     } else {
@@ -62,17 +64,20 @@ void CSVWriter::initialize_csv(int rows, int cols) {
     do {
         myFile.close();
     } while (myFile.is_open());
+#endif
 }
 
-void CSVWriter::finalize_csv(std::list<std::list<std::pair<uint64_t, double>>> dims) {
-    std::cout << "path to create csvs is: " << path << std::endl;
+CUDA_HOST_DEVICE
+void CSVWriter::finalize_csv(custom::FixedList<custom::FixedList<custom::FixedPair<uint64_t, double>, 32>, 32> dims) {
+#ifndef __CUDA_ARCH__
+    std::cout << "Path to create CSVs is: " << path.c_str() << std::endl;
     int trial = 10000;
     do {
-        myFile.open(path + name, std::fstream::out);
+        myFile.open((path + name).c_str(), std::fstream::out);
         trial--;
     } while (!myFile.is_open() && trial > 0);
     if (trial == 0) {
-        std::cerr << "Unable to create file: " << path + name << std::endl;
+        std::cerr << "Unable to create file: " << (path + name).c_str() << std::endl;
         std::cerr << "This error is fatal. Please make sure the CSV write path exists." << std::endl;
         exit(1);
     }
@@ -81,24 +86,27 @@ void CSVWriter::finalize_csv(std::list<std::list<std::pair<uint64_t, double>>> d
     } while (myFile.is_open());
 
     do {
-        myFile.open(path + name, std::fstream::out | std::fstream::in);
+        myFile.open((path + name).c_str(), std::fstream::out | std::fstream::in);
     } while (!myFile.is_open());
 
     if (!myFile) {
-        std::cerr << "Unable to open file: " << path + name << std::endl;
+        std::cerr << "Unable to open file: " << (path + name).c_str() << std::endl;
         std::cerr << "This error is fatal. Please make sure the CSV write path exists." << std::endl;
         exit(1);
     } else {
-        std::cout << "success in openning file" << std::endl;
+        std::cout << "Success in opening file" << std::endl;
     }
+
     myFile.seekp(0, std::ios_base::beg);
     myFile.seekg(0, std::ios_base::beg);
-    std::vector<std::list<std::pair<uint64_t, double>>::iterator> dims_it;
-    std::vector<std::list<std::pair<uint64_t, double>>::iterator> dims_it_end;
+    custom::FixedVector<typename custom::FixedList<custom::FixedPair<uint64_t, double>, 32>::iterator, 32> dims_it;
+    custom::FixedVector<typename custom::FixedList<custom::FixedPair<uint64_t, double>, 32>::iterator, 32> dims_it_end;
+    
     for (auto& dim : dims) {
         dims_it.push_back(dim.begin());
         dims_it_end.push_back(dim.end());
     }
+
     int dim_num = 1;
     myFile << " time (us) ";
     myFile << ",";
@@ -108,6 +116,7 @@ void CSVWriter::finalize_csv(std::list<std::list<std::pair<uint64_t, double>>> d
         dim_num++;
     }
     myFile << '\n';
+
     while (true) {
         uint64_t finished = 0;
         uint64_t compare;
@@ -128,7 +137,7 @@ void CSVWriter::finalize_csv(std::list<std::list<std::pair<uint64_t, double>>> d
             } else {
                 myFile << std::to_string((*dims_it[i]).second);
                 myFile << ',';
-                std::advance(dims_it[i], 1);
+                ++dims_it[i];
             }
         }
         myFile << '\n';
@@ -137,11 +146,14 @@ void CSVWriter::finalize_csv(std::list<std::list<std::pair<uint64_t, double>>> d
         }
     }
     myFile.close();
+#endif
 }
 
-void CSVWriter::write_cell(int row, int column, std::string data) {
-    std::string str = "";
-    std::string tmp;
+CUDA_HOST_DEVICE
+void CSVWriter::write_cell(int row, int column, custom::FixedString data) {
+#ifndef __CUDA_ARCH__
+    custom::FixedString str;
+    custom::FixedString tmp;
 
     int status = 1;
     int fildes = -1;
@@ -152,6 +164,7 @@ void CSVWriter::write_cell(int row, int column, std::string data) {
     do {
         status = lockf(fildes, F_TLOCK, (off_t)1000000);
     } while (status != 0);
+
     char buf[1];
     while (row > 0) {
         status = read(fildes, buf, 1);
@@ -167,7 +180,7 @@ void CSVWriter::write_cell(int row, int column, std::string data) {
             column--;
         }
         if (*buf == '\n') {
-            std::cerr << "fatal error in inserting cewll!" << std::endl;
+            std::cerr << "Fatal error in inserting cell!" << std::endl;
             exit(1);
         }
     }
@@ -192,5 +205,7 @@ void CSVWriter::write_cell(int row, int column, std::string data) {
     do {
         status = close(fildes);
     } while (status == -1);
-    return;
+#endif
 }
+
+} // namespace AstraSim

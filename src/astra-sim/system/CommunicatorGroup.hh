@@ -3,35 +3,35 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __COMMUNICATOR_GROUP_HH__
-#define __COMMUNICATOR_GROUP_HH__
+#pragma once
 
 #include <assert.h>
-#include <map>
-#include <vector>
-
+#include "sys_layer/containers/FixedVector.hpp"
+#include "sys_layer/containers/FixedMap.hpp"
 #include "astra-sim/system/Common.hh"
 
 namespace AstraSim {
 
 class Sys;
 class CollectivePlan;
+
+/**
+ * 通信器组类，用于管理集体通信
+ */
 class CommunicatorGroup {
-  public:
-    CommunicatorGroup(int id, std::vector<int> involved_NPUs, Sys* generator);
-    CollectivePlan* get_collective_plan(ComType comm_type);
-    void set_id(int id);
-    ~CommunicatorGroup();
+public:
+    CUDA_HOST_DEVICE CommunicatorGroup(int id, custom::FixedVector<int, 32> involved_NPUs, Sys* generator);
+    CUDA_HOST_DEVICE CollectivePlan* get_collective_plan(ComType comm_type);
+    CUDA_HOST_DEVICE void set_id(int id);
+    CUDA_HOST_DEVICE ~CommunicatorGroup();
 
-    std::vector<int> involved_NPUs;
-    int num_streams;
+    custom::FixedVector<int, 32> involved_NPUs;  ///< 参与的NPU列表
+    int num_streams;                             ///< 流的数量
 
-  private:
-    int id;
-    Sys* generator;
-    std::map<ComType, CollectivePlan*> comm_plans;
+private:
+    int id;                                      ///< 通信器组ID
+    Sys* generator;                              ///< 系统生成器
+    custom::FixedMap<ComType, CollectivePlan*, 32> comm_plans;  ///< 通信计划映射
 };
 
 }  // namespace AstraSim
-
-#endif /* __COMMUNICATOR_GROUP_HH__ */

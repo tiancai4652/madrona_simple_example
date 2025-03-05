@@ -3,8 +3,7 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __USAGE_TRACKER_HH__
-#define __USAGE_TRACKER_HH__
+#pragma once
 
 #include <cstdint>
 
@@ -12,24 +11,56 @@ LICENSE file in the root directory of this source tree.
 #include "astra-sim/system/Callable.hh"
 #include "astra-sim/system/Common.hh"
 #include "astra-sim/system/Usage.hh"
+#include "sys_layer/containers/FixedList.hpp"
+#include "sys_layer/containers/FixedVector.hpp"
 
 namespace AstraSim {
 
+/**
+ * 使用率追踪器类
+ */
 class UsageTracker {
   public:
+    /**
+     * 构造函数
+     */
+    CUDA_HOST_DEVICE
     UsageTracker(int levels);
-    void increase_usage();
-    void decrease_usage();
-    void set_usage(int level);
-    void report(CSVWriter* writer, int offset);
-    std::list<std::pair<uint64_t, double>> report_percentage(uint64_t cycles);
 
-    int levels;
-    int current_level;
-    Tick last_tick;
-    std::list<Usage> usage;
+    /**
+     * 增加使用率
+     */
+    CUDA_HOST_DEVICE
+    void increase_usage();
+
+    /**
+     * 减少使用率
+     */
+    CUDA_HOST_DEVICE
+    void decrease_usage();
+
+    /**
+     * 设置使用率
+     */
+    CUDA_HOST_DEVICE
+    void set_usage(int level);
+
+    /**
+     * 生成报告
+     */
+    CUDA_HOST_DEVICE
+    void report(CSVWriter* writer, int offset);
+
+    /**
+     * 生成百分比报告
+     */
+    CUDA_HOST_DEVICE
+    custom::FixedList<std::pair<uint64_t, double>, 1024> report_percentage(uint64_t cycles);
+
+    int levels;                                  ///< 级别数
+    int current_level;                          ///< 当前级别
+    Tick last_tick;                             ///< 上次时钟
+    custom::FixedList<Usage, 1024> usage;       ///< 使用记录
 };
 
 }  // namespace AstraSim
-
-#endif /* __USAGE_TRACKER_HH__ */
