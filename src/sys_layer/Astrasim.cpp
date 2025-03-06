@@ -4,7 +4,7 @@
 
 namespace AstraSim {
 
-CUDA_HOST_DEVICE
+
 SystemLayer::SystemLayer() 
     : initialized_(false) {
     status_.assign("Not initialized");
@@ -22,21 +22,21 @@ SystemLayer::SystemLayer()
     currentResult_.value = 0.0f;
 }
 
-CUDA_HOST_DEVICE
+
 SystemLayer::~SystemLayer() {
     if (initialized_) {
         shutdown();
     }
 }
 
-CUDA_HOST_DEVICE
+
 void SystemLayer::initialize() {
     printf("SystemLayer: 初始化系统层...\n");
     initialized_ = true;
     status_.assign("Initialized");
 }
 
-CUDA_HOST_DEVICE
+
 void SystemLayer::update(float deltaTime) {
     if (!initialized_) {
         printf("SystemLayer: 警告 - 尝试更新未初始化的系统\n");
@@ -52,7 +52,7 @@ void SystemLayer::update(float deltaTime) {
            currentResult_.time, currentResult_.value);
 }
 
-CUDA_HOST_DEVICE
+
 void SystemLayer::shutdown() {
     if (!initialized_) {
         return;
@@ -63,7 +63,7 @@ void SystemLayer::shutdown() {
     status_.assign("Shutdown");
 }
 
-CUDA_HOST_DEVICE
+
 void SystemLayer::runSimulation(float duration) {
     if (!initialized_) {
         initialize();
@@ -121,22 +121,22 @@ void SystemLayer::runSimulation(float duration) {
     HelperTool::stringToIntArray(message.c_str(), currentResult_.description);
 }
 
-CUDA_HOST_DEVICE
+
 SimulationData SystemLayer::getSimulationResult() const {
     return currentResult_;
 }
 
-CUDA_HOST_DEVICE
+
 bool SystemLayer::isInitialized() const {
     return initialized_;
 }
 
-CUDA_HOST_DEVICE
+
 const char* SystemLayer::getStatus() const {
     return status_.c_str();
 }
 
-CUDA_HOST_DEVICE
+
 void SystemLayer::setParameter(const char* name, float value) {
     custom::FixedString<64> paramName(name);
     
@@ -152,7 +152,7 @@ void SystemLayer::setParameter(const char* name, float value) {
     printf("SystemLayer: 添加新参数 '%s' 值为 %f\n", name, value);
 }
 
-CUDA_HOST_DEVICE
+
 float SystemLayer::getParameter(const char* name) const {
     custom::FixedString<64> paramName(name);
     
