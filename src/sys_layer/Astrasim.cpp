@@ -7,8 +7,10 @@ namespace AstraSim {
 
 SystemLayer::SystemLayer() 
     : initialized_(false),
-      chunkIdGenerator_(),
-      currentResult_() {
+    //   chunkIdGenerator_()
+    //   ,
+      currentResult_() 
+      {
     status_.assign("Not initialized");
     
     // 初始化一些默认参数
@@ -37,9 +39,17 @@ void SystemLayer::initialize() {
     initialized_ = true;
     status_.assign("Initialized");
     
-    // 使用成员变量，不要创建新的局部变量
-    // chunkIdGenerator_.increment_send_id();
+    // 使用成员变量，不要创建新的局部变量    
+    AstraSimAnalytical::ChunkIdGeneratorEntry chunkIdGenerator_;
+    chunkIdGenerator_.increment_send_id();
+    printf("chunkIdGenerator_.send_id:%d\n", chunkIdGenerator_.get_send_id());
     // chunkIdGenerator_.increment_recv_id();
+
+    SimulationData simulationData;
+    simulationData.time = 0.0f;
+    simulationData.value = 0.0f;
+    // simulationData.description = "No simulation run yet";
+    printf("simulationData.value:%f\n", simulationData.value);
 }
 
 
