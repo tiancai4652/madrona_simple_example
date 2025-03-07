@@ -6,7 +6,9 @@ namespace AstraSim {
 
 
 SystemLayer::SystemLayer() 
-    : initialized_(false) {
+    : initialized_(false),
+      chunkIdGenerator_(),
+      currentResult_() {
     status_.assign("Not initialized");
     
     // 初始化一些默认参数
@@ -34,6 +36,10 @@ void SystemLayer::initialize() {
     printf("SystemLayer: 初始化系统层...\n");
     initialized_ = true;
     status_.assign("Initialized");
+    
+    // 使用成员变量，不要创建新的局部变量
+    // chunkIdGenerator_.increment_send_id();
+    // chunkIdGenerator_.increment_recv_id();
 }
 
 

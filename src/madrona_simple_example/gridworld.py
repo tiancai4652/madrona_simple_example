@@ -28,7 +28,7 @@ class GridWorld:
                 max_episode_length = 0, # No max
                 exec_mode = madrona.ExecMode.CUDA if gpu_sim else madrona.ExecMode.CPU,
                 num_worlds = num_worlds,
-                gpu_id = 0,
+                gpu_id = gpu_id,
             )
 
         self.force_reset = self.sim.reset_tensor().to_torch()

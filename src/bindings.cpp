@@ -91,6 +91,7 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                             madrona::py::PyExecMode exec_mode,
                             int64_t num_worlds,
                             int64_t gpu_id) {
+            printf("gpu_id:%ld\n", gpu_id);
             int64_t grid_y = (int64_t)walls.shape(0);
             int64_t grid_x = (int64_t)walls.shape(1);
 

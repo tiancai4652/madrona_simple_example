@@ -3,6 +3,7 @@
 // #include <string>
 // #include <vector>
 #include "cuda_compatible_containers.hpp"
+#include "ChunkIdGeneratorEntry.hh"
 
 namespace AstraSim {
 
@@ -51,6 +52,7 @@ private:
     custom::FixedVector<custom::Pair<custom::FixedString<64>, float>, 32> parameters_;
 
     SimulationData currentResult_;
+    AstraSimAnalytical::ChunkIdGeneratorEntry chunkIdGenerator_;
 };
 
 } // namespace AstraSim 

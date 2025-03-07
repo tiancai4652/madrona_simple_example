@@ -4,6 +4,7 @@ LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
 #pragma once
+#include <cassert>
 
 namespace AstraSimAnalytical {
 
@@ -15,39 +16,38 @@ namespace AstraSimAnalytical {
 class ChunkIdGeneratorEntry {
   public:
     /**
-     * Constructur.
+     * Constructor.
      */
     ChunkIdGeneratorEntry() noexcept;
 
     /**
-     * Get the chunk id for sim_send() call.
+     * Get send id.
      *
-     * @return chunk id for sim_send() call
+     * @return send id
      */
     [[nodiscard]] int get_send_id() const noexcept;
 
     /**
-     * Get the chunk id for sim_recv() call.
+     * Get recv id.
      *
-     * @return chunk id for sim_recv() call
+     * @return recv id
      */
     [[nodiscard]] int get_recv_id() const noexcept;
 
     /**
-     * Increment the chunk id for sim_send() call.
+     * Increment send id.
      */
     void increment_send_id() noexcept;
 
     /**
-     * Increment the chunk id for sim_recv() call.
+     * Increment recv id.
      */
     void increment_recv_id() noexcept;
 
   private:
-    /// current available chunk id for sim_send() call
+    /// send id
     int send_id;
-
-    /// current available chunk id for sim_recv() call
+    /// recv id
     int recv_id;
 };
 

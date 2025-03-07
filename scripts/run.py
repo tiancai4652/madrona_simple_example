@@ -18,7 +18,7 @@ end_cell = np.array([[4,5]])
 rewards[4, 0] = -1
 rewards[4, 5] = 1
 
-grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, 0)
+grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, 1)
 #grid_world.vis_world()
 
 print(grid_world.observations.shape)

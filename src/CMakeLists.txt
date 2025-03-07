@@ -9,11 +9,18 @@ set(SYS_LAYER_SRCS
     sys_layer/sysComponent.hpp
     sys_layer/HelperTool.hpp
     sys_layer/HelperTool.cpp
+    sys_layer/ChunkIdGeneratorEntry.hh
+    sys_layer/ChunkIdGeneratorEntry.cc
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC
     ${SIMULATOR_SRCS}
-    ${SYS_LAYER_SRCS}  # 添加系统层源文件
+    ${SYS_LAYER_SRCS}
+)
+
+target_include_directories(madrona_simple_ex_cpu_impl
+    PUBLIC
+        ${INCLUDE_DIRS}
 )
 
 target_link_libraries(madrona_simple_ex_cpu_impl
@@ -43,9 +50,11 @@ if (TARGET madrona_mw_gpu)
             SIMPLE_SRC_LIST
         FLAGS_DEFN
             SIMPLE_COMPILE_FLAGS 
+        INCLUDE_DIRS
+            ${INCLUDE_DIRS}
         SRCS
             ${SIMULATOR_SRCS}
-            ${SYS_LAYER_SRCS}  # 添加系统层源文件到 GPU 编译
+            ${SYS_LAYER_SRCS}
     )
 
     target_link_libraries(madrona_simple_ex_mgr PRIVATE
