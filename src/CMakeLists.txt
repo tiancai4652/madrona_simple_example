@@ -9,8 +9,8 @@ set(SYS_LAYER_SRCS
     sys_layer/sysComponent.hpp
     sys_layer/HelperTool.hpp
     sys_layer/HelperTool.cpp
-    sys_layer/ChunkIdGeneratorEntry.hpp
-    sys_layer/ChunkIdGeneratorEntry.cpp
+    sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.cpp
+    sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.hpp
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC

@@ -3,7 +3,7 @@
 // #include <string>
 // #include <vector>
 #include "cuda_compatible_containers.hpp"
-#include "ChunkIdGeneratorEntry.hpp"
+#include "astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.hpp"
 
 namespace AstraSim {
 
