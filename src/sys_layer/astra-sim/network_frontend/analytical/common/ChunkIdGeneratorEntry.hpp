@@ -2,8 +2,11 @@
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
-
+#define CUDA_HPP
 #pragma once
+
+
+
 #include <cassert>
 
 namespace AstraSimAnalytical {
