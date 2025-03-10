@@ -7,7 +7,7 @@ LICENSE file in the root directory of this source tree.
 #define CUDA_HPP
 
 #include "ChunkIdGeneratorEntry.hpp"
-#include "Type.h"
+#include "Type.hpp"
 #include "../../../../../sys_layer/containers/FixedMap.hpp"
 #include "../../../../../sys_layer/containers/FixedTuple.hpp"
 
