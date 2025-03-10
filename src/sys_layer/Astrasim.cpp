@@ -50,6 +50,10 @@ void SystemLayer::initialize() {
     simulationData.value = 0.0f;
     // simulationData.description = "No simulation run yet";
     printf("simulationData.value:%f\n", simulationData.value);
+
+    AstraSimAnalytical::ChunkIdGenerator chunkIdGenerator;
+    chunkIdGenerator.create_send_chunk_id(1, 2, 3, 4);
+    printf("chunkIdGenerator.create_send_chunk_id:%d\n", chunkIdGenerator.create_send_chunk_id(1, 2, 3, 4));
 }
 
 

@@ -1,3 +1,13 @@
+# 在文件开始处添加include路径定义
+set(INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_layer
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_layer/astra-sim
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_layer/astra-sim/network_frontend/analytical
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys_layer/astra-sim/containers
+)
+
+
 set(SIMULATOR_SRCS
     types.hpp sim.hpp sim.cpp
 )
@@ -9,8 +19,12 @@ set(SYS_LAYER_SRCS
     sys_layer/sysComponent.hpp
     sys_layer/HelperTool.hpp
     sys_layer/HelperTool.cpp
+    sys_layer/containers/FixedTuple.hpp
+    sys_layer/containers/FixedMap.hpp
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.cpp
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.hpp
+    sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGenerator.cpp
+    sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGenerator.hpp
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC

@@ -3,7 +3,7 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#include "ChunkIdGenerator.hh"
+#include "ChunkIdGenerator.hpp"
 #include <cassert>
 
 using namespace AstraSimAnalytical;
@@ -22,7 +22,7 @@ int ChunkIdGenerator::create_send_chunk_id(const int tag,
     assert(chunk_size > 0);
 
     // create key
-    const auto key = std::make_tuple(tag, src, dest, chunk_size);
+    const auto key = custom::makeTuple(tag, src, dest, chunk_size);
 
     // search whether the key exists
     auto entry = chunk_id_map.find(key);
@@ -47,7 +47,7 @@ int ChunkIdGenerator::create_recv_chunk_id(const int tag,
     assert(chunk_size > 0);
 
     // create key
-    const auto key = std::make_tuple(tag, src, dest, chunk_size);
+    const auto key = custom::makeTuple(tag, src, dest, chunk_size);
 
     // search whether the key exists
     auto entry = chunk_id_map.find(key);

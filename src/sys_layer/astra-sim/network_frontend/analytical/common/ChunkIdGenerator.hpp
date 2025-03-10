@@ -5,10 +5,12 @@ LICENSE file in the root directory of this source tree.
 
 #pragma once
 
-#include "common/ChunkIdGeneratorEntry.hh"
-#include <astra-network-analytical/common/Type.h>
-#include <map>
-#include <tuple>
+#include "ChunkIdGeneratorEntry.hpp"
+#include "Type.h"
+#include "../../../../containers/FixedMap.hpp"
+#include "../../../../containers/FixedTuple.hpp"
+
+#define CHUNK_ID_MAP_SIZE 100
 
 using namespace NetworkAnalytical;
 
@@ -21,7 +23,7 @@ namespace AstraSimAnalytical {
 class ChunkIdGenerator {
   public:
     /// Key = (tag, src, dest, chunk_size)
-    using Key = std::tuple<int, int, int, ChunkSize>;
+    using Key = custom::FixedTuple<int, int, int, ChunkSize>;
 
     /**
      * Constructor.
@@ -52,7 +54,7 @@ class ChunkIdGenerator {
 
   private:
     /// map from (tag, src, dest, chunk_size) tuple to ChunkIdGeneratorEntry
-    std::map<Key, ChunkIdGeneratorEntry> chunk_id_map;
+    custom::FixedMap<Key, ChunkIdGeneratorEntry,CHUNK_ID_MAP_SIZE> chunk_id_map;
 };
 
 }  // namespace AstraSimAnalytical
