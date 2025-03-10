@@ -54,6 +54,30 @@ void SystemLayer::initialize() {
     AstraSimAnalytical::ChunkIdGenerator chunkIdGenerator;
     chunkIdGenerator.create_send_chunk_id(1, 2, 3, 4);
     printf("chunkIdGenerator.create_send_chunk_id:%d\n", chunkIdGenerator.create_send_chunk_id(1, 2, 3, 4));
+
+    // 测试回调功能
+    AstraSimAnalytical::CallbackTrackerEntry callbackTrackerEntry;
+    
+    // 用于测试的回调函数
+    int send_data = 42;
+    int recv_data = 24;
+    
+    auto send_callback = [](void* arg) {
+        printf("Send callback with data: %d\n", *(int*)arg);
+    };
+    
+    auto recv_callback = [](void* arg) {
+        printf("Receive callback with data: %d\n", *(int*)arg);
+    };
+
+    // 注册回调
+    callbackTrackerEntry.register_send_callback(send_callback, &send_data);
+    callbackTrackerEntry.register_recv_callback(recv_callback, &recv_data);
+
+    // 触发回调
+    printf("Invoking callbacks:\n");
+    callbackTrackerEntry.invoke_send_handler();
+    callbackTrackerEntry.invoke_recv_handler();
 }
 
 

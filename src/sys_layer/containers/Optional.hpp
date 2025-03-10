@@ -1,38 +1,39 @@
 #pragma once
 #define CUDA_HPP
 
+#include <new>
+
 namespace custom {
 
 template<typename T>
 class Optional {
+private:
+    alignas(T) unsigned char storage_[sizeof(T)];
+    bool has_value_;
+
 public:
-    // 默认构造函数 - 创建一个空的Optional
-    __host__ __device__
-    Optional() noexcept : has_value_(false) {}
+    // 默认构造函数
+    Optional() : has_value_(false) {}
 
     // 从值构造
-    __host__ __device__
-    Optional(const T& value) noexcept : has_value_(true) {
+    Optional(const T& value) : has_value_(true) {
         new (&storage_) T(value);
     }
 
     // 移动构造
-    __host__ __device__
-    Optional(T&& value) noexcept : has_value_(true) {
+    Optional(T&& value) : has_value_(true) {
         new (&storage_) T(static_cast<T&&>(value));
     }
 
     // 拷贝构造函数
-    __host__ __device__
-    Optional(const Optional& other) noexcept : has_value_(other.has_value_) {
+    Optional(const Optional& other) : has_value_(other.has_value_) {
         if (has_value_) {
             new (&storage_) T(other.value());
         }
     }
 
     // 移动构造函数
-    __host__ __device__
-    Optional(Optional&& other) noexcept : has_value_(other.has_value_) {
+    Optional(Optional&& other) : has_value_(other.has_value_) {
         if (has_value_) {
             new (&storage_) T(static_cast<T&&>(other.value()));
             other.reset();
@@ -40,14 +41,12 @@ public:
     }
 
     // 析构函数
-    __host__ __device__
     ~Optional() {
         reset();
     }
 
     // 赋值操作符
-    __host__ __device__
-    Optional& operator=(const Optional& other) noexcept {
+    Optional& operator=(const Optional& other) {
         if (this != &other) {
             reset();
             has_value_ = other.has_value_;
@@ -59,8 +58,7 @@ public:
     }
 
     // 移动赋值操作符
-    __host__ __device__
-    Optional& operator=(Optional&& other) noexcept {
+    Optional& operator=(Optional&& other) {
         if (this != &other) {
             reset();
             has_value_ = other.has_value_;
@@ -73,8 +71,7 @@ public:
     }
 
     // 直接赋值操作符
-    __host__ __device__
-    Optional& operator=(const T& value) noexcept {
+    Optional& operator=(const T& value) {
         reset();
         has_value_ = true;
         new (&storage_) T(value);
@@ -82,8 +79,7 @@ public:
     }
 
     // 移动赋值操作符
-    __host__ __device__
-    Optional& operator=(T&& value) noexcept {
+    Optional& operator=(T&& value) {
         reset();
         has_value_ = true;
         new (&storage_) T(static_cast<T&&>(value));
@@ -91,42 +87,27 @@ public:
     }
 
     // 检查是否有值
-    __host__ __device__
-    bool has_value() const noexcept {
+    bool has_value() const {
         return has_value_;
     }
 
     // 获取值的引用
-    __host__ __device__
-    T& value() & noexcept {
+    T& value() {
         return *reinterpret_cast<T*>(&storage_);
     }
 
     // 获取值的const引用
-    __host__ __device__
-    const T& value() const & noexcept {
+    const T& value() const {
         return *reinterpret_cast<const T*>(&storage_);
     }
 
-    // 获取值的右值引用
-    __host__ __device__
-    T&& value() && noexcept {
-        return static_cast<T&&>(*reinterpret_cast<T*>(&storage_));
-    }
-
     // 重置Optional
-    __host__ __device__
-    void reset() noexcept {
+    void reset() {
         if (has_value_) {
             value().~T();
             has_value_ = false;
         }
     }
-
-private:
-    // 使用aligned_storage来存储T类型的值
-    alignas(T) unsigned char storage_[sizeof(T)];
-    bool has_value_;
 };
 
 } // namespace custom 

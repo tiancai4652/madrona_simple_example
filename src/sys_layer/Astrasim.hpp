@@ -5,6 +5,7 @@
 #include "cuda_compatible_containers.hpp"
 #include "astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.hpp"
 #include "astra-sim/network_frontend/analytical/common/ChunkIdGenerator.hpp"
+#include "astra-sim/network_frontend/analytical/common/CallbackTrackerEntry.hpp"
 
 
 

@@ -10,8 +10,8 @@ using namespace NetworkAnalytical;
 using namespace AstraSimAnalytical;
 
 CallbackTrackerEntry::CallbackTrackerEntry() noexcept
-    : send_event(std::nullopt),
-      recv_event(std::nullopt),
+    : send_event(),
+      recv_event(),
       transmission_finished(false) {}
 
 void CallbackTrackerEntry::register_send_callback(const Callback callback, const CallbackArg arg) noexcept {

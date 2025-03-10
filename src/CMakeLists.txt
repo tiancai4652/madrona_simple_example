@@ -21,10 +21,13 @@ set(SYS_LAYER_SRCS
     sys_layer/HelperTool.cpp
     sys_layer/containers/FixedTuple.hpp
     sys_layer/containers/FixedMap.hpp
+    sys_layer/containers/Optional.hpp
+    sys_layer/containers/Pair.hpp
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.cpp
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.hpp
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGenerator.cpp
-    sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGenerator.hpp
+    sys_layer/astra-sim/network_frontend/analytical/common/CallbackTrackerEntry.cpp
+    sys_layer/astra-sim/network_frontend/analytical/common/CallbackTrackerEntry.hpp
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC

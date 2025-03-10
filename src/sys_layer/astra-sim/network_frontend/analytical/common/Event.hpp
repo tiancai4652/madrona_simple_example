@@ -5,8 +5,10 @@ LICENSE file in the root directory of this source tree.
 
 #pragma once
 
-#include "common/Type.h"
-#include <tuple>
+#include "Type.hpp"
+#include "../../../../../sys_layer/containers/FixedTuple.hpp"
+#include "../../../../../sys_layer/containers/Pair.hpp"
+
 
 namespace NetworkAnalytical {
 
@@ -33,7 +35,7 @@ class Event {
      *
      * @return callback function and its argument
      */
-    [[nodiscard]] std::pair<Callback, CallbackArg> get_handler_arg() const noexcept;
+    [[nodiscard]] custom::Pair<Callback, CallbackArg> get_handler_arg() const noexcept;
 
   private:
     /// pointer to the callback function

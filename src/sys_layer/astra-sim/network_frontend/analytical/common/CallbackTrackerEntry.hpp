@@ -7,7 +7,7 @@ LICENSE file in the root directory of this source tree.
 
 #include "Event.hpp"
 #include "Type.hpp"
-#include <optional>
+#include "../../../../../sys_layer/containers/Optional.hpp"
 
 using namespace NetworkAnalytical;
 
@@ -73,10 +73,10 @@ class CallbackTrackerEntry {
 
   private:
     /// sim_send() callback event
-    std::optional<Event> send_event;
+    custom::Optional<Event> send_event;
 
     /// sim_recv() callback event
-    std::optional<Event> recv_event;
+    custom::Optional<Event> recv_event;
 
     /// true if the transmission of the chunk is already finished, false otherwise
     bool transmission_finished;
