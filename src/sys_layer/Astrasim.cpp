@@ -4,6 +4,16 @@
 
 namespace AstraSim {
 
+// 定义静态回调函数
+static void send_callback_func(void* arg) {
+    int* data = static_cast<int*>(arg);
+    printf("Send callback with data: %d\n", *data);
+}
+
+static void recv_callback_func(void* arg) {
+    int* data = static_cast<int*>(arg);
+    printf("Receive callback with data: %d\n", *data);
+}
 
 SystemLayer::SystemLayer() 
     : initialized_(false),
@@ -58,21 +68,13 @@ void SystemLayer::initialize() {
     // 测试回调功能
     AstraSimAnalytical::CallbackTrackerEntry callbackTrackerEntry;
     
-    // 用于测试的回调函数
-    int send_data = 42;
-    int recv_data = 24;
-    
-    auto send_callback = [](void* arg) {
-        printf("Send callback with data: %d\n", *(int*)arg);
-    };
-    
-    auto recv_callback = [](void* arg) {
-        printf("Receive callback with data: %d\n", *(int*)arg);
-    };
+    // 用于测试的回调数据
+    static int send_data = 42;
+    static int recv_data = 24;
 
     // 注册回调
-    callbackTrackerEntry.register_send_callback(send_callback, &send_data);
-    callbackTrackerEntry.register_recv_callback(recv_callback, &recv_data);
+    callbackTrackerEntry.register_send_callback(send_callback_func, &send_data);
+    callbackTrackerEntry.register_recv_callback(recv_callback_func, &recv_data);
 
     // 触发回调
     printf("Invoking callbacks:\n");

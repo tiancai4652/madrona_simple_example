@@ -23,6 +23,13 @@ set(SYS_LAYER_SRCS
     sys_layer/containers/FixedMap.hpp
     sys_layer/containers/Optional.hpp
     sys_layer/containers/Pair.hpp
+
+
+    sys_layer/astra-sim/network_frontend/analytical/common/Event.hpp
+    sys_layer/astra-sim/network_frontend/analytical/common/Event.cpp
+    sys_layer/astra-sim/network_frontend/analytical/common/Type.hpp
+
+    
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.cpp
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGeneratorEntry.hpp
     sys_layer/astra-sim/network_frontend/analytical/common/ChunkIdGenerator.cpp
