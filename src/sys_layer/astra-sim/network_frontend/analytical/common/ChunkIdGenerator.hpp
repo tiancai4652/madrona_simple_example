@@ -4,11 +4,12 @@ LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
 #pragma once
+#define CUDA_HPP
 
 #include "ChunkIdGeneratorEntry.hpp"
 #include "Type.h"
-#include "../../../../containers/FixedMap.hpp"
-#include "../../../../containers/FixedTuple.hpp"
+#include "../../../../../sys_layer/containers/FixedMap.hpp"
+#include "../../../../../sys_layer/containers/FixedTuple.hpp"
 
 #define CHUNK_ID_MAP_SIZE 100
 
