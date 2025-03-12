@@ -43,11 +43,30 @@ SystemLayer::~SystemLayer() {
     }
 }
 
+void TestMap() {
+    custom::CustomMap<int, float> map;
+    map.insert(1, 1.0f);
+    map.insert(2, 2.0f);
+    map[3] = 3.0f;
+
+    printf("test map:\n");  
+    // 测试size()
+    printf("Map size: %zu\n", map.size());  // 应输出3
+
+    // 测试迭代器
+    for (auto it = map.begin(); it != map.end(); ++it) {
+        auto pair = *it;
+        printf("Key: %d, Value: %.1f\n", pair.key, pair.value);
+    }
+}
+
 
 void SystemLayer::initialize() {
     printf("SystemLayer: 初始化系统层...\n");
     initialized_ = true;
     status_.assign("Initialized");
+
+    TestMap();
     
     // 使用成员变量，不要创建新的局部变量    
     AstraSimAnalytical::ChunkIdGeneratorEntry chunkIdGenerator_;

@@ -23,7 +23,7 @@ set(SYS_LAYER_SRCS
     sys_layer/containers/FixedMap.hpp
     sys_layer/containers/Optional.hpp
     sys_layer/containers/Pair.hpp
-
+    sys_layer/containers/CustomMap.hpp
 
     sys_layer/astra-sim/network_frontend/analytical/common/Event.hpp
     sys_layer/astra-sim/network_frontend/analytical/common/Event.cpp
