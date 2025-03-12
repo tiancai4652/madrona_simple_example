@@ -60,6 +60,17 @@ void TestMap() {
     }
 }
 
+void TestOptional() {
+    custom::CustomOptional<int> opt1;
+    custom::CustomOptional<int> opt2(42);
+    custom::CustomOptional<int> opt3(opt2);
+    printf("test optional:\n");
+    printf("opt1 has value: %d\n", opt1.has_value());
+    printf("opt2 value: %d\n", opt2.value());
+    printf("opt3 value: %d\n", opt3.value());
+}
+
+
 
 void SystemLayer::initialize() {
     printf("SystemLayer: 初始化系统层...\n");
@@ -67,6 +78,7 @@ void SystemLayer::initialize() {
     status_.assign("Initialized");
 
     TestMap();
+    TestOptional();
     
     // 使用成员变量，不要创建新的局部变量    
     AstraSimAnalytical::ChunkIdGeneratorEntry chunkIdGenerator_;

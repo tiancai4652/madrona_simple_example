@@ -7,5 +7,6 @@
 #include "containers/FixedVector.hpp"
 #include "containers/Pair.hpp"
 #include "containers/CustomMap.hpp"
+#include "containers/CustomOptional.hpp"
 
 
