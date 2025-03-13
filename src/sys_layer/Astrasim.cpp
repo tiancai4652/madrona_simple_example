@@ -15,6 +15,124 @@ static void recv_callback_func(void* arg) {
     printf("Receive callback with data: %d\n", *data);
 }
 
+enum class CollectiveImplType {
+    Ring = 0,
+    OneRing,
+    Direct,
+    OneDirect,
+    AllToAll,
+    DoubleBinaryTreeLocalAllToAll,
+    LocalRingNodeA2AGlobalDBT,
+    HierarchicalRing,
+    DoubleBinaryTree,
+    HalvingDoubling,
+    OneHalvingDoubling,
+};
+
+
+
+class CloneInterface {
+  public:
+    virtual CloneInterface* clone() const = 0;
+    virtual ~CloneInterface() = default;
+   
+};
+
+
+
+class CollectivePhase {
+  public:
+    CollectivePhase() = default;
+    virtual ~CollectivePhase() = default;
+    virtual void run() = 0;
+};
+
+class Ring : public CollectivePhase {
+  public:
+    Ring() : CollectivePhase() {}
+    
+    void run() override {
+        printf("ring run\n");
+    }
+};
+
+class OneRing : public CollectivePhase {
+  public:
+    OneRing() : CollectivePhase() {}
+    
+    void run() override {
+        printf("OneRing run\n");
+    }
+};
+
+class Direct : public CollectivePhase {
+  public:
+    Direct() : CollectivePhase() {}
+    
+    void run() override {
+        printf("Direct run\n");
+    }
+};
+
+
+class CollectiveImpl : public CloneInterface {
+  public:
+    CollectiveImpl(CollectiveImplType type) {
+        this->type = type;
+    };
+    virtual CloneInterface* clone() const {
+        return new CollectiveImpl(*this);
+    }
+
+    CollectiveImplType type;
+};
+
+class DirectCollectiveImpl : public CollectiveImpl {
+  public:
+    CloneInterface* clone() const {
+        return new DirectCollectiveImpl(*this);
+    };
+    DirectCollectiveImpl(CollectiveImplType type, int direct_collective_window) : CollectiveImpl(type) {
+        this->direct_collective_window = direct_collective_window;
+    }
+
+    int direct_collective_window;
+};
+
+CollectiveImpl* generate_collective_impl_from_input(int collective_impl_str) {
+    if (collective_impl_str == 0) {
+        return new CollectiveImpl(CollectiveImplType::Ring);
+    } 
+    else if (collective_impl_str == 1) {
+        return new CollectiveImpl(CollectiveImplType::OneRing);
+    }
+    else {
+        return new DirectCollectiveImpl(CollectiveImplType::Direct, 10);
+    }
+}
+
+void TestCollectiveImpl() {
+    CollectiveImpl collective_impl_array[2] = {
+        CollectiveImpl(CollectiveImplType::Ring),
+        CollectiveImpl(CollectiveImplType::OneRing)
+    };
+
+    // 使用指针数组来存储派生类对象
+    CollectivePhase* collective_phase_array[3] = {
+        new Ring(),
+        new OneRing(),
+        new Direct()
+    };
+   
+    printf("test collective impl:\n");
+    collective_phase_array[0]->run();
+    collective_phase_array[1]->run();
+    collective_phase_array[2]->run();
+
+}
+
+
+
 SystemLayer::SystemLayer() 
     : initialized_(false),
     //   chunkIdGenerator_()
@@ -44,6 +162,9 @@ SystemLayer::~SystemLayer() {
 }
 
 void TestMap() {
+
+   
+
     custom::CustomMap<int, float> map;
     map.insert(1, 1.0f);
     map.insert(2, 2.0f);
@@ -77,6 +198,7 @@ void SystemLayer::initialize() {
     initialized_ = true;
     status_.assign("Initialized");
 
+    TestCollectiveImpl();
     TestMap();
     TestOptional();
     
