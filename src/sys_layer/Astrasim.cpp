@@ -45,6 +45,9 @@ SystemLayer::~SystemLayer() {
 
 void TestMap() {
     custom::CustomMap<int, float> map;
+    for (int i = 0; i < 1000; i++) {
+        map.insert(i, i * 1.0f);
+    }
     map.insert(1, 1.0f);
     map.insert(2, 2.0f);
     map[3] = 3.0f;
