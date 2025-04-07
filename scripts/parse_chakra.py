@@ -100,10 +100,6 @@ def parse_json_data(json_string: str) -> List[Node]:
         print(f"解析过程中发生错误: {e}")
         return []
 
-# --- 主要执行逻辑 ---
-
-
-
 def test():
     # 1. 定义 JSON 文件路径
     #    请将 'your_file.json' 替换为你的实际文件名和路径
@@ -164,8 +160,7 @@ def test():
                 print(f"第一个节点第三个属性的 boolList 值: {first_node.attr[2].boolList.values}")
     else:
         print("未能成功解析节点数据。")
-        
-        
+                
 def Parse(json_file_path):
     try:
         # 使用 'with' 语句确保文件被正确关闭
@@ -178,3 +173,5 @@ def Parse(json_file_path):
         print(f"错误：找不到文件 '{json_file_path}'")
     except Exception as e:
         print(f"读取或解析文件时发生错误: {e}")
+        
+# 2 int

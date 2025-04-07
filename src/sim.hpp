@@ -6,15 +6,18 @@
 
 #include "types.hpp"
 #include "init.hpp"
-
+#define ChakraDataLength 35*1024*6000
 namespace madsimple {
 
 class Engine;
+
+
 
 struct Sim : public madrona::WorldBase {
     struct Config {
         uint32_t maxEpisodeLength;
         bool enableViewer;
+        uint64_t chakraNodesData[ChakraDataLength];
     };
 
     static void registerTypes(madrona::ECSRegistry &registry,
