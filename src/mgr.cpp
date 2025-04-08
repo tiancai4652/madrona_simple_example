@@ -1,5 +1,6 @@
 #include "mgr.hpp"
-#include "sim.hpp"
+// chakraNodes
+// #include "sim.hpp"
 
 #include <madrona/utils.hpp>
 #include <madrona/importer.hpp>
@@ -147,6 +148,11 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
         .maxEpisodeLength = cfg.maxEpisodeLength,
         .enableViewer = false,
     };
+
+    // chakraNodes
+    for (size_t i = 0; i < ChakraDataLength; ++i) {
+        sim_cfg.chakraNodesData[i] = cfg.chakraNodesData[i];
+    }
 
     switch (cfg.execMode) {
     case ExecMode::CPU: {

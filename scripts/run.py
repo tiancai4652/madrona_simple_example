@@ -18,7 +18,14 @@ end_cell = np.array([[4,5]])
 rewards[4, 0] = -1
 rewards[4, 5] = 1
 
-grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, 0)
+# 定义数组的长度
+array_length = 47 * 1024 * 6000
+# 初始化数组
+chakraNodesData = [0] * array_length
+chakraNodesData[0]=4399
+chakraNodesData = np.array(chakraNodesData, dtype=np.uint64) # 转换为 NumPy ndarray
+
+grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, chakraNodesData,enable_gpu_sim, 0)
 
 #grid_world.vis_world()
 

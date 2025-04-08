@@ -10,8 +10,10 @@ class GridWorld:
                  end_cells,
                  rewards,
                  walls,
+                 chakraNodesData,
                  gpu_sim = False,
                  gpu_id = 0,
+                 
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -29,6 +31,7 @@ class GridWorld:
                 exec_mode = madrona.ExecMode.CUDA if gpu_sim else madrona.ExecMode.CPU,
                 num_worlds = num_worlds,
                 gpu_id = 0,
+                chakraNodesData=chakraNodesData
             )
 
         self.force_reset = self.sim.reset_tensor().to_torch()

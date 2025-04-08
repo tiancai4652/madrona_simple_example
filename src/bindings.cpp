@@ -90,7 +90,10 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                             int64_t max_episode_length,
                             madrona::py::PyExecMode exec_mode,
                             int64_t num_worlds,
-                            int64_t gpu_id) {
+                            int64_t gpu_id,
+                            // chakraNodes
+                            nb::ndarray<uint64_t, nb::shape<-1>, nb::c_contig, nb::device::cpu> chakraNodesData) {
+                            
             int64_t grid_y = (int64_t)walls.shape(0);
             int64_t grid_x = (int64_t)walls.shape(1);
 
@@ -102,11 +105,20 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
             Cell *cells =
                 setupCellData(walls, rewards, end_cells, grid_x, grid_y);
 
+            // chakraNodes
+            // 将 chakraNodesData 转换为指针
+            uint64_t *chakraNodesPtr = new uint64_t[ChakraDataLength];
+            for (size_t i = 0; i < ChakraDataLength; ++i) {
+                chakraNodesPtr[i] = chakraNodesData(i);
+            }
+
             new (self) Manager(Manager::Config {
                 .maxEpisodeLength = (uint32_t)max_episode_length,
                 .execMode = exec_mode,
                 .numWorlds = (uint32_t)num_worlds,
                 .gpuID = (int)gpu_id,
+                // chakraNodes
+                .chakraNodesData=chakraNodesPtr,
             }, GridState {
                 .cells = cells,
                 .startX = (int32_t)start_x,
@@ -124,7 +136,8 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
            nb::arg("max_episode_length"),
            nb::arg("exec_mode"),
            nb::arg("num_worlds"),
-           nb::arg("gpu_id") = -1)
+           nb::arg("gpu_id") = -1,
+           nb::arg("chakraNodesData"))
         .def("step", &Manager::step)
         .def("reset_tensor", &Manager::resetTensor)
         .def("action_tensor", &Manager::actionTensor)

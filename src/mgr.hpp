@@ -11,6 +11,8 @@
 #include <madrona/exec_mode.hpp>
 
 #include "grid.hpp"
+// chakraNodes
+#include "sim.hpp"
 
 namespace madsimple {
 
@@ -21,6 +23,7 @@ public:
         madrona::ExecMode execMode;
         uint32_t numWorlds;
         int gpuID;
+        uint64_t *chakraNodesData;
     };
 
     MGR_EXPORT Manager(const Config &cfg, const GridState &src_grid);

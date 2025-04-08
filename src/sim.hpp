@@ -6,7 +6,8 @@
 
 #include "types.hpp"
 #include "init.hpp"
-#define ChakraDataLength 35*1024*6000
+// chakraNodes
+#define ChakraDataLength 47*1024*6000
 namespace madsimple {
 
 class Engine;
