@@ -10,6 +10,7 @@ enum class ExportID : uint32_t {
     GridPos,
     Reward,
     Done,
+    ChakraNodesData,
     NumExports,
 };
 
@@ -42,13 +43,18 @@ struct CurStep {
     uint32_t step;
 };
 
+struct ChakraNodesData {
+    uint32_t data[10000];
+};
+
 struct Agent : public madrona::Archetype<
     Reset,
     Action,
     GridPos,
     Reward,
     Done,
-    CurStep
+    CurStep,
+    ChakraNodesData
 > {};
 
 }

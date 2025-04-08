@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from madrona_simple_example import GridWorld
 
-num_worlds = int(sys.argv[1])
+num_worlds = 1
 
 enable_gpu_sim = False
 if len(sys.argv) >= 3 and sys.argv[2] == '--gpu':
@@ -21,24 +21,26 @@ rewards[4, 5] = 1
 grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_gpu_sim, 0)
 #grid_world.vis_world()
 
-print(grid_world.observations.shape)
+# --------------------------
+chakra_nodes_data_length=10000 
+def empty_tensor(max_len=chakra_nodes_data_length):
+    tensor = torch.zeros(max_len, dtype=torch.int32)
+    return tensor
+
+def ints_to_tensor(int_array, max_len=chakra_nodes_data_length):
+     encoded = int_array
+     tensor = torch.zeros(max_len, dtype=torch.int32)
+     tensor[:len(encoded)] = torch.tensor(encoded, dtype=torch.int32)
+     return tensor
+def tensor_to_ints(tensor):
+     encoded = tensor.cpu().numpy().tolist() 
+     return encoded
+#  -----------------------------
 
 for i in range(5):
-    print("Obs:")
-    print(grid_world.observations)
-
-    # "Policy"
-    grid_world.actions[:, 0] = torch.randint(0, 4, size=(num_worlds,))
-    #grid_world.actions[:, 0] = 3 # right to win given (4, 4) start
-
-    print("Actions:")
-    print(grid_world.actions)
-
-    # Advance simulation across all worlds
+    data=empty_tensor()
+    data[0]=1+i
+    data[1]=2+i
+    # int_tensor=ints_to_tensor(grid_world.chakra_nodes_data)
+    grid_world.chakra_nodes_data.copy_(data)
     grid_world.step()
-    
-    print("Rewards: ")
-    print(grid_world.rewards)
-    print("Dones:   ")
-    print(grid_world.dones)
-    print()

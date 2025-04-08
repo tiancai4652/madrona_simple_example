@@ -16,7 +16,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Reward>();
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
-
+    registry.registerComponent<ChakraNodesData>();
     registry.registerArchetype<Agent>();
 
     // Export tensors for pytorch
@@ -25,6 +25,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, GridPos>((uint32_t)ExportID::GridPos);
     registry.exportColumn<Agent, Reward>((uint32_t)ExportID::Reward);
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
+    registry.exportColumn<Agent, ChakraNodesData>((uint32_t)ExportID::ChakraNodesData);
 }
 
 inline void tick(Engine &ctx,
@@ -33,90 +34,95 @@ inline void tick(Engine &ctx,
                  GridPos &grid_pos,
                  Reward &reward,
                  Done &done,
-                 CurStep &episode_step)
+                 CurStep &episode_step,
+                 ChakraNodesData &chakra_nodes_data)
 {
-    const GridState *grid = ctx.data().grid;
 
-    GridPos new_pos = grid_pos;
+    printf("inside:\n");
+    printf("chakra_nodes_data[0]%d:\n",chakra_nodes_data.data[0]);
+    printf("chakra_nodes_data[1]%d:\n",chakra_nodes_data.data[1]);
+    // const GridState *grid = ctx.data().grid;
 
-    switch (action) {
-        case Action::Up: {
-            new_pos.y += 1;
-        } break;
-        case Action::Down: {
-            new_pos.y -= 1;
-        } break;
-        case Action::Left: {
-            new_pos.x -= 1;
-        } break;
-        case Action::Right: {
-            new_pos.x += 1;
-        } break;
-        default: break;
-    }
+    // GridPos new_pos = grid_pos;
 
-    action = Action::None;
+    // switch (action) {
+    //     case Action::Up: {
+    //         new_pos.y += 1;
+    //     } break;
+    //     case Action::Down: {
+    //         new_pos.y -= 1;
+    //     } break;
+    //     case Action::Left: {
+    //         new_pos.x -= 1;
+    //     } break;
+    //     case Action::Right: {
+    //         new_pos.x += 1;
+    //     } break;
+    //     default: break;
+    // }
 
-    if (new_pos.x < 0) {
-        new_pos.x = 0;
-    }
+    // action = Action::None;
 
-    if (new_pos.x >= grid->width) {
-        new_pos.x = grid->width - 1;
-    }
+    // if (new_pos.x < 0) {
+    //     new_pos.x = 0;
+    // }
 
-    if (new_pos.y < 0) {
-        new_pos.y = 0;
-    }
+    // if (new_pos.x >= grid->width) {
+    //     new_pos.x = grid->width - 1;
+    // }
 
-    if (new_pos.y >= grid->height) {
-        new_pos.y = grid->height -1;
-    }
+    // if (new_pos.y < 0) {
+    //     new_pos.y = 0;
+    // }
+
+    // if (new_pos.y >= grid->height) {
+    //     new_pos.y = grid->height -1;
+    // }
 
 
-    {
-        const Cell &new_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
+    // {
+    //     const Cell &new_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
 
-        if ((new_cell.flags & CellFlag::Wall)) {
-            new_pos = grid_pos;
-        }
-    }
+    //     if ((new_cell.flags & CellFlag::Wall)) {
+    //         new_pos = grid_pos;
+    //     }
+    // }
 
-    const Cell &cur_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
+    // const Cell &cur_cell = grid->cells[new_pos.y * grid->width + new_pos.x];
 
-    bool episode_done = false;
-    if (reset.resetNow != 0) {
-        reset.resetNow = 0;
-        episode_done = true;
-    }
+    // bool episode_done = false;
+    // if (reset.resetNow != 0) {
+    //     reset.resetNow = 0;
+    //     episode_done = true;
+    // }
 
-    if ((cur_cell.flags & CellFlag::End)) {
-        episode_done = true;
-    }
+    // if ((cur_cell.flags & CellFlag::End)) {
+    //     episode_done = true;
+    // }
 
-    uint32_t cur_step = episode_step.step;
+    // uint32_t cur_step = episode_step.step;
 
-    if (cur_step == ctx.data().maxEpisodeLength - 1) {
-        episode_done = true;
-    }
+    // if (cur_step == ctx.data().maxEpisodeLength - 1) {
+    //     episode_done = true;
+    // }
 
-    if (episode_done) {
-        done.episodeDone = 1.f;
+    // if (episode_done) {
+    //     done.episodeDone = 1.f;
 
-        new_pos = GridPos {
-            grid->startY,
-            grid->startX,
-        };
+    //     new_pos = GridPos {
+    //         grid->startY,
+    //         grid->startX,
+    //     };
 
-        episode_step.step = 0;
-    } else {
-        done.episodeDone = 0.f;
-        episode_step.step = cur_step + 1;
-    }
+    //     episode_step.step = 0;
+    // } else {
+    //     done.episodeDone = 0.f;
+    //     episode_step.step = cur_step + 1;
+    // }
 
-    // Commit new position
-    grid_pos = new_pos;
-    reward.r = cur_cell.reward;
+    // // Commit new position
+    // grid_pos = new_pos;
+    // reward.r = cur_cell.reward;
 }
 
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
@@ -124,7 +130,7 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
 {
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
     builder.addToGraph<ParallelForNode<Engine, tick,
-        Action, Reset, GridPos, Reward, Done, CurStep>>({});
+        Action, Reset, GridPos, Reward, Done, CurStep,ChakraNodesData>>({});
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -142,6 +148,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Reward>(agent).r = 0.f;
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
+    printf("1");
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);

@@ -36,6 +36,7 @@ class GridWorld:
         self.observations = self.sim.observation_tensor().to_torch()
         self.rewards = self.sim.reward_tensor().to_torch()
         self.dones = self.sim.done_tensor().to_torch()
+        self.chakra_nodes_data = self.sim.chakra_nodes_data_tensor().to_torch()
 
     def step(self):
         self.sim.step()
