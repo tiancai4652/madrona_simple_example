@@ -39,8 +39,8 @@ inline void tick(Engine &ctx,
 {
 
     printf("inside:\n");
-    printf("chakra_nodes_data[0]%d:\n",chakra_nodes_data.data[0]);
-    printf("chakra_nodes_data[1]%d:\n",chakra_nodes_data.data[1]);
+    printf("chakra_nodes_data[0]%d:\n",chakra_nodes_data.data[0][0]);
+    printf("chakra_nodes_data[1]%d:\n",chakra_nodes_data.data[1][0]);
     // const GridState *grid = ctx.data().grid;
 
     // GridPos new_pos = grid_pos;

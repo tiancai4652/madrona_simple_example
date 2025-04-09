@@ -24,15 +24,22 @@ grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_
 #grid_world.vis_world()
 
 # --------------------------
+
+# params
 chakra_nodes_data_length=10000000 
-def empty_tensor(max_len=chakra_nodes_data_length):
-    tensor = torch.zeros(max_len, dtype=torch.int32)
+chakra_nodes_num=2
+# 
+
+def empty_tensor(rows= chakra_nodes_num,max_len=chakra_nodes_data_length):
+    tensor = torch.zeros((rows,max_len), dtype=torch.int32)
     return tensor
 
-def ints_to_tensor(int_array, max_len=chakra_nodes_data_length):
-     encoded = int_array
-     tensor = torch.zeros(max_len, dtype=torch.int32)
-     tensor[:len(encoded)] = torch.tensor(encoded, dtype=torch.int32)
+def ints_to_tensor(int_array, rows= chakra_nodes_num,max_len=chakra_nodes_data_length):
+     i=0
+     tensor = torch.zeros((rows,max_len), dtype=torch.int32)
+     for array in int_array:
+        tensor[i,:len(array)] = torch.tensor(array, dtype=torch.int32)
+        i+=1
      return tensor
 def tensor_to_ints(tensor):
      encoded = tensor.cpu().numpy().tolist() 
@@ -55,9 +62,9 @@ def tensor_to_ints(tensor):
 folder_path = '/home/zhangran/madrona2/2/madrona_simple_example/scripts/input'
 for i in range(5):
     data=folder_to_int_array(folder_path)
-    data[0]=1+i
-    data[1]=2+i
-    data_tensor = ints_to_tensor(data)
+    # data_tensor=ints_to_tensor([[1],[2]])
+    data_tensor=ints_to_tensor(data)
+    
     int_tensor=tensor_to_ints(grid_world.chakra_nodes_data)
     grid_world.chakra_nodes_data.copy_(data_tensor)
     grid_world.step()
