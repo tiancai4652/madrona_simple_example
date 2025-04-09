@@ -41,6 +41,6 @@ for i in range(5):
     data=empty_tensor()
     data[0]=1+i
     data[1]=2+i
-    # int_tensor=ints_to_tensor(grid_world.chakra_nodes_data)
+    int_tensor=tensor_to_ints(grid_world.chakra_nodes_data)
     grid_world.chakra_nodes_data.copy_(data)
     grid_world.step()
