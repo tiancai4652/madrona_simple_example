@@ -2,6 +2,8 @@ import sys
 import numpy as np
 import torch
 from madrona_simple_example import GridWorld
+from parse_chakra import Node,Attribute,BoolList,Parse
+from node_conversion import node_to_int_array,int_array_to_node
 
 num_worlds = 1
 
@@ -35,6 +37,19 @@ def ints_to_tensor(int_array, max_len=chakra_nodes_data_length):
 def tensor_to_ints(tensor):
      encoded = tensor.cpu().numpy().tolist() 
      return encoded
+ 
+def test_conversion():
+    json_file_path = '/home/zhangran/madrona2/2/madrona_simple_example/scripts/input/npu.0.json'
+    nodes = Parse(json_file_path)
+    
+    if nodes:
+        first_node = nodes[1]
+        print(f"转换前的 Node 对象: {first_node}")
+        int_array = node_to_int_array(first_node)
+        print(f"转换后的整数数组: {int_array}")
+
+        node_back = int_array_to_node(int_array)
+        print(f"转换回的 Node 对象: {node_back}")
 #  -----------------------------
 
 for i in range(5):
