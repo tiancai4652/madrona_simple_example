@@ -44,7 +44,7 @@ struct CurStep {
 };
 
 struct ChakraNodesData {
-    uint32_t data[10000];
+    uint32_t data[10000000];
 };
 
 struct Agent : public madrona::Archetype<

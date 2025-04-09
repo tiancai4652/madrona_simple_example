@@ -266,7 +266,7 @@ Tensor Manager::doneTensor() const
 Tensor Manager::chakraNodesDataTensor() const
 {
     return impl_->exportTensor(ExportID::ChakraNodesData, TensorElementType::Int32,
-        {impl_->cfg.numWorlds, 10000 });
+        {impl_->cfg.numWorlds, 10000000 });
 }
 
 
