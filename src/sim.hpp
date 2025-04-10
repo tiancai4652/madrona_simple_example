@@ -7,6 +7,8 @@
 #include "types.hpp"
 #include "init.hpp"
 
+using madrona::Entity;
+
 namespace madsimple {
 
 class Engine;
@@ -28,6 +30,9 @@ struct Sim : public madrona::WorldBase {
     EpisodeManager *episodeMgr;
     const GridState *grid;
     uint32_t maxEpisodeLength;
+
+    Entity init_entity;
+    Entity chakra_nodes_entities[MAX_CHAKRA_NODES];
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

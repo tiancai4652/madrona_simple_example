@@ -159,7 +159,7 @@ inline void tick(Engine &ctx,
     // printf("chakra_nodes_data[0]%d:\n",chakra_nodes_data.data[0][0]);
     // printf("chakra_nodes_data[1]%d:\n",chakra_nodes_data.data[1][0]);
 
-    printf("1.init npus.\n");
+    printf("init npus.\n");
     // 获取行数和列数
     size_t rows = sizeof(chakra_nodes_data.data) / sizeof(chakra_nodes_data.data[0]); // 总大小 / 单行大小
     size_t cols = sizeof(chakra_nodes_data.data[0]) / sizeof(chakra_nodes_data.data[0][0]); // 单行大小 / 单个元素大小
@@ -170,16 +170,15 @@ inline void tick(Engine &ctx,
 
     for(int32_t i=0;i<npu_nums;i++)
     {
-       
         Entity npuNode = ctx.makeEntity<NpuNode>();
-       
         ctx.get<ID>(npuNode).value = i;
-       
         int nodeCount = parseChakraNodes(chakra_nodes_data,i, ctx.get<ChakraNodes>(npuNode).nodes);
-
         printf("npu %d: turn %d nodes.\n",i,nodeCount);
-
+        ctx.data().chakra_nodes_entities[i]=npuNode;
     }
+
+    ctx.destroyEntity(ctx.data().init_entity);
+    printf("init npus over.\n");
 
     // const GridState *grid = ctx.data().grid;
 
@@ -265,6 +264,41 @@ inline void tick(Engine &ctx,
     // reward.r = cur_cell.reward;
 }
 
+inline void tick2(Engine &ctx,
+    Action &action,
+    Reset &reset,
+    GridPos &grid_pos,
+    Reward &reward,
+    Done &done,
+    CurStep &episode_step,
+    ChakraNodesData &chakra_nodes_data)
+{
+
+printf("inside:\n");
+
+printf("init npus.\n");
+// 获取行数和列数
+size_t rows = sizeof(chakra_nodes_data.data) / sizeof(chakra_nodes_data.data[0]); // 总大小 / 单行大小
+size_t cols = sizeof(chakra_nodes_data.data[0]) / sizeof(chakra_nodes_data.data[0][0]); // 单行大小 / 单个元素大小
+size_t npu_nums=rows;
+size_t npu_data_num=cols;
+printf("npu_nums:%d\n",npu_nums);
+printf("npu_data_num:%d\n",npu_data_num);
+
+for(int32_t i=0;i<npu_nums;i++)
+{
+Entity npuNode = ctx.makeEntity<NpuNode>();
+ctx.get<ID>(npuNode).value = i;
+int nodeCount = parseChakraNodes(chakra_nodes_data,i, ctx.get<ChakraNodes>(npuNode).nodes);
+printf("npu %d: turn %d nodes.\n",i,nodeCount);
+ctx.data().chakra_nodes_entities[i]=npuNode;
+}
+
+ctx.destroyEntity(ctx.data().init_entity);
+printf("init npus over.\n");
+
+}
+
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                      const Config &)
 {
@@ -288,7 +322,8 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Reward>(agent).r = 0.f;
     ctx.get<Done>(agent).episodeDone = 0.f;
     ctx.get<CurStep>(agent).step = 0;
-    printf("1");
+    ctx.data().init_entity=agent;
+    // printf("1");
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);
