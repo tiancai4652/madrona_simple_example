@@ -59,11 +59,11 @@ def tensor_to_ints(tensor):
 #         print(f"转换回的 Node 对象: {node_back}")
 #  -----------------------------
 
-test_conversion()
+# test_conversion()
 
 folder_path = '/home/zhangran/madrona2/2/madrona_simple_example/scripts/input'
-for i in range(5):
-    data=folder_to_int_array(folder_path)
+data=folder_to_int_array(folder_path)
+for i in range(1):
     # data_tensor=ints_to_tensor([[1],[2]])
     data_tensor=ints_to_tensor(data)
     

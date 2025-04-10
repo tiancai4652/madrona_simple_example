@@ -64,6 +64,7 @@ struct ID {
 };
 
 enum class NodeType : int32_t {
+    None=0,
     COMP_NODE = 1,
     COMM_SEND_NODE = 2,
     COMM_RECV_NODE = 3,
@@ -78,23 +79,53 @@ enum class AttributeKey: int32_t {
     involved_dim = 5
 };
 
-struct ChakraNodes {
-    uint32_t name[20],
-    NodeType type,
-    uint32_t id,
-    uint32_t data_deps[10],
-    
+struct ChakraNode {
+    uint32_t name[20];
+    NodeType type;
+    uint32_t id;
+    uint32_t data_deps[10];
+    uint64_t comm_para;
+    uint64_t comm_size;
+    uint64_t comm_src;
+    uint64_t comm_dst;
+    bool involved_dim_1;
+    bool involved_dim_2;
+    bool involved_dim_3;
+    uint32_t durationMicros;
 
+     // 自定义赋值操作符
+     ChakraNode &operator=(const ChakraNode &other) {
+        if (this == &other) return *this; // 防止自赋值
+
+        // 复制每个成员变量
+        for (int i = 0; i < 20; ++i) {
+            name[i] = other.name[i];
+        }
+        type = other.type;
+        id = other.id;
+        for (int i = 0; i < 10; ++i) {
+            data_deps[i] = other.data_deps[i];
+        }
+        comm_para = other.comm_para;
+        comm_size = other.comm_size;
+        comm_src = other.comm_src;
+        comm_dst = other.comm_dst;
+        involved_dim_1 = other.involved_dim_1;
+        involved_dim_2 = other.involved_dim_2;
+        involved_dim_3 = other.involved_dim_3;
+        durationMicros = other.durationMicros;
+
+        return *this;
+    }
+};
+
+struct ChakraNodes{
+    ChakraNode nodes[9*9999];
 };
 
 struct NpuNode : public madrona::Archetype<
     ID,
-    Action,
-    GridPos,
-    Reward,
-    Done,
-    CurStep,
-    ChakraNodesData
+    ChakraNodes
 > {};
 
 // ------------------------------------------
