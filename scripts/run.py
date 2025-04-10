@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from madrona_simple_example import GridWorld
 from parse_chakra import Node,Attribute,BoolList,Parse
-from node_conversion import folder_to_int_array
+from node_conversion import folder_to_int_array,test_conversion
 
 num_worlds = 1
 
@@ -58,6 +58,8 @@ def tensor_to_ints(tensor):
 #         node_back = int_array_to_node(int_array)
 #         print(f"转换回的 Node 对象: {node_back}")
 #  -----------------------------
+
+test_conversion()
 
 folder_path = '/home/zhangran/madrona2/2/madrona_simple_example/scripts/input'
 for i in range(5):

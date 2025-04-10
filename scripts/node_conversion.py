@@ -44,31 +44,42 @@ def node_to_int_array(node: Node) -> List[int]:
     data_deps_ints += [placeholder] * (10 - len(data_deps_ints))  # 不足 10 个则补 placeholder
     int_array.extend(data_deps_ints)
 
-    # 将 attr 转换为 14 个 int 类型
-    attr_ints = []
-    for attr in node.attr:
-        if attr.name not in AttributeKey.__members__:
-            continue
-        key_int = AttributeKey[attr.name].value
-        value_int = placeholder
-        if attr.boolVal is not None:
-            value_int = int(attr.boolVal)
-        elif attr.uint32Val is not None:
-            value_int = attr.uint32Val
-        elif attr.int64Val is not None:
-            value_int = attr.int64Val
-        elif attr.uint64Val is not None:
-            value_int = attr.uint64Val
-        elif attr.boolList is not None:
-            bool_list_vals = [int(val) for val in attr.boolList.values[:3]]  # 取前3个值
-            bool_list_vals += [placeholder] * (3 - len(bool_list_vals))  # 不足3个则补 placeholder
-            attr_ints.extend([key_int, placeholder] + bool_list_vals)  # placeholder表示占位符
-            continue
-        attr_ints.extend([key_int, value_int])
-        if len(attr_ints) >= 14:
-            break  # 只取前 7 个键值对
+    # 将 attr 转换为 11 个 int 类型
+    attr_ints = []  # 存储所有 AttributeKey 的 11 个 int
 
-    attr_ints += [placeholder] * (14 - len(attr_ints))  # 不足 14 个则补 placeholder
+    for key in AttributeKey:
+            # 查找当前 AttributeKey 是否存在于 node.attr 中
+            matching_attr = next((attr for attr in node.attr if attr.name == key.name), None)
+            # 如果匹配到 AttributeKey，设置对应的值
+            if key.value in {1, 2, 3, 4}:  # 对应占用 2 个 int
+                key_ints = [placeholder] * 2
+                if matching_attr:
+                    if matching_attr.boolVal is not None:
+                        key_ints[0] = int(matching_attr.boolVal)
+                        key_ints[1] = placeholder
+                    elif matching_attr.uint32Val is not None:
+                        key_ints[0] = matching_attr.uint32Val
+                        key_ints[1] = placeholder
+                    elif matching_attr.int64Val is not None:
+                        key_ints[0] = int(matching_attr.int64Val & 0xFFFFFFFF)  # 低 32 位
+                        key_ints[1] = int((matching_attr.int64Val >> 32) & 0xFFFFFFFF)  # 高 32 位
+                    elif matching_attr.uint64Val is not None:
+                        key_ints[0] = int(matching_attr.uint64Val & 0xFFFFFFFF)  # 低 32 位
+                        key_ints[1] = int((matching_attr.uint64Val >> 32) & 0xFFFFFFFF)  # 高 32 位
+            elif key.value == 5:  # 对应占用 3 个 int
+                key_ints = [placeholder] * 3
+                if matching_attr:
+                    if matching_attr.boolList is not None:
+                        bool_list_vals = [int(val) for val in matching_attr.boolList.values[:3]]  # 最多取前 3 个布尔值
+                        for i, val in enumerate(bool_list_vals):
+                            key_ints[i] = val
+                        for i in range(len(bool_list_vals), 3):  # 不足 3 个用 placeholder 填充
+                            key_ints[i] = placeholder
+
+            # 将当前 AttributeKey 的 2/3 个 int 添加到 attr_ints
+            attr_ints.extend(key_ints)
+
+    # 将结果添加到 int_array
     int_array.extend(attr_ints)
 
     # 将 durationMicros 添加到数组末尾
@@ -76,30 +87,54 @@ def node_to_int_array(node: Node) -> List[int]:
 
     return int_array
 
+
 def int_array_to_node(int_array: List[int]) -> Node:
     # 将 int 数组转换回 Node 对象
-    name_chars = [chr(i) for i in int_array[:20] if i != placeholder]
-    name = ''.join(name_chars)
 
+    # 1. 解析 name
+    name = ''.join([chr(i) for i in int_array[:20] if i != placeholder])
+
+    # 2. 解析 type
     node_type = NodeType(int_array[20]).name if int_array[20] in NodeType._value2member_map_ else 'UNKNOWN'
+
+    # 3. 解析 id
     node_id = str(int_array[21]) if int_array[21] != placeholder else None
 
+    # 4. 解析 dataDeps
     data_deps = [str(i) for i in int_array[22:32] if i != placeholder]
 
+    # 5. 解析 attr
     attrs = []
-    for i in range(32, 46, 4):
-        if int_array[i] == placeholder and int_array[i+1] == placeholder:
-            continue
-        key_name = AttributeKey(int_array[i]).name if int_array[i] in AttributeKey._value2member_map_ else 'UNKNOWN'
-        if int_array[i+1] == placeholder:
-            bool_list_vals = int_array[i+2:i+5]
-            attr = Attribute(name=key_name, boolList=BoolList(values=[bool(val) for val in bool_list_vals if val != placeholder]))
+    attr_start = 32  # 属性值的起始位置
+    for key in AttributeKey:
+        if key.value in {1, 2, 3, 4}:  # 1234 占用 2 个 int
+            key_ints = int_array[attr_start:attr_start + 2]
+            attr_start += 2
+        elif key.value == 5:  # 5 占用 3 个 int
+            key_ints = int_array[attr_start:attr_start + 3]
+            attr_start += 3
         else:
-            attr = Attribute(name=key_name, uint32Val=int_array[i+1])
-        attrs.append(attr)
+            continue
 
-    duration_micros = int_array[46]
+        # 跳过完全是占位符的 AttributeKey
+        if all(i == placeholder for i in key_ints):
+            continue
 
+        if key.value in {1, 2, 3, 4}:  # 解析 1234
+            if key_ints[0] != placeholder and key_ints[1] == placeholder:
+                attrs.append(Attribute(name=key.name, uint32Val=key_ints[0]))
+            elif key_ints[0] != placeholder and key_ints[1] != placeholder:
+                int64_val = (key_ints[1] << 32) | key_ints[0]
+                attrs.append(Attribute(name=key.name, int64Val=int64_val))
+        elif key.value == 5:  # 解析 5
+            bool_list_vals = [bool(val) for val in key_ints if val != placeholder]
+            if bool_list_vals:
+                attrs.append(Attribute(name=key.name, boolList=BoolList(values=bool_list_vals)))
+
+    # 6. 解析 durationMicros
+    duration_micros = int_array[attr_start]
+
+    # 构造 Node 对象
     return Node(
         name=name,
         type=node_type,
@@ -108,10 +143,11 @@ def int_array_to_node(int_array: List[int]) -> Node:
         attr=attrs,
         durationMicros=duration_micros
     )
- 
+
+
 # 测试示例
 def test_conversion():
-    json_file_path = '/home/zhangran/madrona2/2/madrona_simple_example/scripts/input/npu.0.json'
+    json_file_path = '/home/zhangran/madrona2/2/madrona_simple_example/scripts/input/npu.1.json'
     nodes = Parse(json_file_path)
     
     if nodes:

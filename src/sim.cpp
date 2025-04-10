@@ -39,8 +39,22 @@ inline void tick(Engine &ctx,
 {
 
     printf("inside:\n");
-    printf("chakra_nodes_data[0]%d:\n",chakra_nodes_data.data[0][0]);
-    printf("chakra_nodes_data[1]%d:\n",chakra_nodes_data.data[1][0]);
+    // printf("chakra_nodes_data[0]%d:\n",chakra_nodes_data.data[0][0]);
+    // printf("chakra_nodes_data[1]%d:\n",chakra_nodes_data.data[1][0]);
+
+    printf("1.init npus.\n");
+    // 获取行数和列数
+    size_t rows = sizeof(chakraNodes.data) / sizeof(chakraNodes.data[0]); // 总大小 / 单行大小
+    size_t cols = sizeof(chakraNodes.data[0]) / sizeof(chakraNodes.data[0][0]); // 单行大小 / 单个元素大小
+    npu_nums=rows;
+    npu_data_num=cols;
+
+    for(int32_t i;i<npu_nums;i++)
+    {
+        Entity npuNode = ctx.makeEntity<NpuNode>();
+        ctx.get<ID>(npuNode).value = i;
+    }
+
     // const GridState *grid = ctx.data().grid;
 
     // GridPos new_pos = grid_pos;

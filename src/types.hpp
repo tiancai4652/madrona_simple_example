@@ -57,4 +57,46 @@ struct Agent : public madrona::Archetype<
     ChakraNodesData
 > {};
 
+// ----------------------------------------
+
+struct ID {
+    uint32_t value;
+};
+
+enum class NodeType : int32_t {
+    COMP_NODE = 1,
+    COMM_SEND_NODE = 2,
+    COMM_RECV_NODE = 3,
+    COMM_COLL_NODE = 4
+};
+
+enum class AttributeKey: int32_t {
+    comm_para = 1,
+    comm_size = 2,
+    comm_src = 3,
+    comm_dst = 4,
+    involved_dim = 5
+};
+
+struct ChakraNodes {
+    uint32_t name[20],
+    NodeType type,
+    uint32_t id,
+    uint32_t data_deps[10],
+    
+
+};
+
+struct NpuNode : public madrona::Archetype<
+    ID,
+    Action,
+    GridPos,
+    Reward,
+    Done,
+    CurStep,
+    ChakraNodesData
+> {};
+
+// ------------------------------------------
+
 }
