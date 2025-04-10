@@ -123,6 +123,7 @@ struct ChakraNodes{
     ChakraNode nodes[9*9999];
 };
 
+
 struct NpuNode : public madrona::Archetype<
     ID,
     ChakraNodes

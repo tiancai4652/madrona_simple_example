@@ -131,9 +131,15 @@ inline void tick(Engine &ctx,
 
     for(int32_t i=0;i<npu_nums;i++)
     {
+       
         Entity npuNode = ctx.makeEntity<NpuNode>();
+       
         ctx.get<ID>(npuNode).value = i;
+       
         int nodeCount = parseChakraNodes(chakra_nodes_data,i, ctx.get<ChakraNodes>(npuNode).nodes);
+
+        printf("npu %d: turn %d nodes.\n",i,nodeCount);
+
     }
 
     // const GridState *grid = ctx.data().grid;
