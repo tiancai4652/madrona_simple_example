@@ -35,9 +35,9 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
 
 // -----------------------------------------------------------------------------------
 
-const int INTS_PER_NODE = 44;  // 每个 ChakraNode 占用 44 字节，等于 11 个 int
-const int MAX_CHAKRA_NODES=9*9999;
-const int chakra_nodes_data_length=10000000; 
+// const int INTS_PER_NODE = 44;  // 每个 ChakraNode 占用 44 字节，等于 11 个 int
+// const int MAX_CHAKRA_NODES=9*9999;
+// const int chakra_nodes_data_length=10000000; 
 
 // 将整数数组解析为 ChakraNodes 数组
 int parseChakraNodes(const ChakraNodesData &chakraNodesData,int row, ChakraNode parsedNodes[],int intArrayLength=chakra_nodes_data_length, int maxNodes=MAX_CHAKRA_NODES) {
@@ -104,6 +104,45 @@ int parseChakraNodes(const ChakraNodesData &chakraNodesData,int row, ChakraNode 
        
     }
     return validNodes;  // 返回有效节点的数量
+}
+
+// // 定义无效依赖的值
+// const uint32_t INVALID_DEPENDENCY = 4294967295;
+
+int filterNoDependencyNodes(const ChakraNodes &chakraNodes, ChakraNode filteredNodes[], int maxNodes) {
+    const size_t TOTAL_NODES = 9 * 9999; // 总节点数量
+    int count = 0; // 无依赖节点计数
+
+    // 遍历所有节点
+    for (size_t i = 0; i < TOTAL_NODES; ++i) {
+        const ChakraNode &node = chakraNodes.nodes[i];
+
+        // 跳过无效节点
+        if (node.type == NodeType::None) {
+            continue;
+        }
+
+        // 检查是否没有依赖
+        bool hasDependency = false;
+        for (int j = 0; j < 10; ++j) {
+            if (node.data_deps[j] != INVALID_DEPENDENCY) {
+                hasDependency = true;
+                break;
+            }
+        }
+
+        // 如果没有依赖，添加到结果数组
+        if (!hasDependency) {
+            if (count < maxNodes) {
+                filteredNodes[count++] = node;
+            } else {
+                // 超过最大限制，停止添加
+                break;
+            }
+        }
+    }
+
+    return count; // 返回无依赖节点的数量
 }
 
 inline void tick(Engine &ctx,

@@ -59,6 +59,12 @@ struct Agent : public madrona::Archetype<
 
 // ----------------------------------------
 
+#define INTS_PER_NODE  44  // 每个 ChakraNode 占用 44 字节，等于 11 个 int
+#define MAX_CHAKRA_NODES 9*9999
+#define chakra_nodes_data_length 10000000
+// 定义无效依赖的值
+#define INVALID_DEPENDENCY 4294967295
+
 struct ID {
     uint32_t value;
 };
