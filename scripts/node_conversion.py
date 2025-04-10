@@ -141,6 +141,7 @@ def folder_to_int_array(folder_path):
     result=[]
     folder = Path(folder_path)
     file_paths = [str(file) for file in folder.rglob('*') if file.is_file()]
+    file_paths = sorted(file_paths, key=lambda x: x)
     for file in file_paths:
         result.append(nodes_to_int_array(file))
     return result
