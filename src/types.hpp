@@ -65,6 +65,8 @@ struct Agent : public madrona::Archetype<
 // 定义无效依赖的值
 #define INVALID_DEPENDENCY 4294967295
 
+#define CURRENT_EXEC_NODES_MAX 10
+
 struct ID {
     uint32_t value;
 };
