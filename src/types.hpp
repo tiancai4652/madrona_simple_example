@@ -57,10 +57,19 @@ struct Agent : public madrona::Archetype<
     ChakraNodesData
 > {};
 
+struct  SimTime
+{
+    int64_t time;
+};
+
+struct SimTimeProcessor : public madrona::Archetype<
+    SimTime
+> {};
 // ----------------------------------------
 
 #define INTS_PER_NODE  44  // 每个 ChakraNode 占用 44 字节，等于 11 个 int
 #define MAX_CHAKRA_NODES 9*9999
+#define MAX_CHAKRA_NODP_NODES 99
 #define chakra_nodes_data_length 10000000
 // 定义无效依赖的值
 #define INVALID_DEPENDENCY 4294967295
@@ -128,18 +137,32 @@ struct ChakraNode {
 };
 
 struct ChakraNodes{
-    ChakraNode nodes[9*9999];
+    ChakraNode nodes[MAX_CHAKRA_NODES];
+};
+
+struct Chakra_Nodp_Nodes{
+    ChakraNode nodes[MAX_CHAKRA_NODP_NODES];
 };
 
 struct HardwareResource{
     bool comp_ocupy;
     bool comm_ocupy;
+    bool one_task_finish;
+};
+
+
+struct ProcessingTask{
+    int64_t time_finish_ns;
+    bool is_none;
+    int32_t node_id;
 };
 
 struct NpuNode : public madrona::Archetype<
     ID,
     ChakraNodes,
-    HardwareResource
+    HardwareResource,
+    ProcessingTask,
+    Chakra_Nodp_Nodes
 > {};
 
 // ------------------------------------------

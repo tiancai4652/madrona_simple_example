@@ -32,6 +32,7 @@ struct Sim : public madrona::WorldBase {
     uint32_t maxEpisodeLength;
 
     Entity init_entity;
+    Entity timer_entity;
     Entity chakra_nodes_entities[MAX_CHAKRA_NODES];
 };
 
