@@ -22,6 +22,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     // -------------------------------------
     registry.registerComponent<ID>();
     registry.registerComponent<ChakraNodes>();
+    registry.registerComponent<HardwareResource>();
     registry.registerArchetype<NpuNode>();
 
     // Export tensors for pytorch
@@ -173,6 +174,8 @@ inline void init(Engine &ctx,
         Entity npuNode = ctx.makeEntity<NpuNode>();
         ctx.get<ID>(npuNode).value = i;
         int nodeCount = parseChakraNodes(chakra_nodes_data,i, ctx.get<ChakraNodes>(npuNode).nodes);
+        ctx.get<HardwareResource>(npuNode).comp_ocupy = false;
+        ctx.get<HardwareResource>(npuNode).comm_ocupy = false;
         printf("npu %d: turn %d nodes.\n",i,nodeCount);
         ctx.data().chakra_nodes_entities[i]=npuNode;
     }
@@ -181,9 +184,10 @@ inline void init(Engine &ctx,
     printf("init npus over.\n");
 }
 
-inline void tick2(Engine &ctx,
+inline void processNode(Engine &ctx,
     ID &id,
-    ChakraNodes &chakraNodes)
+    ChakraNodes &chakraNodes,
+    HardwareResource &hardwareResource)
 {
 
 printf("get current execute nodes:\n");
@@ -200,8 +204,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
     auto sys_init= builder.addToGraph<ParallelForNode<Engine, init,
         Action, Reset, GridPos, Reward, Done, CurStep,ChakraNodesData>>({});
-    auto sys_tick= builder.addToGraph<ParallelForNode<Engine, tick2,
-    ID, ChakraNodes>>({sys_init});
+    auto sys_tick= builder.addToGraph<ParallelForNode<Engine, processNode,
+    ID, ChakraNodes,HardwareResource>>({sys_init});
 
 }
 

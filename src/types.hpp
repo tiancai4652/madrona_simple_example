@@ -131,10 +131,15 @@ struct ChakraNodes{
     ChakraNode nodes[9*9999];
 };
 
+struct HardwareResource{
+    bool comp_ocupy;
+    bool comm_ocupy;
+};
 
 struct NpuNode : public madrona::Archetype<
     ID,
-    ChakraNodes
+    ChakraNodes,
+    HardwareResource
 > {};
 
 // ------------------------------------------
