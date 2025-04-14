@@ -330,6 +330,8 @@ namespace madsimple
         size_t cols = sizeof(chakra_nodes_data.data[0]) / sizeof(chakra_nodes_data.data[0][0]); // 单行大小 / 单个元素大小
         size_t npu_nums = rows;
         size_t npu_data_num = cols;
+        printf("sizeof(chakra_nodes_data.data):%d\n",sizeof(chakra_nodes_data.data));
+        printf("sizeof(chakra_nodes_data.data[0]:%d\n",sizeof(chakra_nodes_data.data[0]));
         printf("npu_nums:%d\n", npu_nums);
         printf("npu_data_num:%d\n", npu_data_num);
 
@@ -447,6 +449,7 @@ namespace madsimple
             printf("processingCompTask over.\n");
             // release node.
             removeNode(chakraNodes,processingCompTask.node_id);
+            printf("remode node : %d\n",processingCompTask.node_id);
             // reset flag.
             hardwareResource.one_task_finish=true;
             processingCompTask.is_none = true;
@@ -462,6 +465,7 @@ namespace madsimple
             printf("processingCompTask over.\n");
             // release node.
             removeNode(chakraNodes,processingCommTask.node_id);
+            printf("remode node : %d\n",processingCommTask.node_id);
             // reset flag.
             hardwareResource.one_task_finish=true;
             processingCommTask.is_none = true;

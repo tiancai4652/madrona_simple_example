@@ -27,18 +27,18 @@ grid_world = GridWorld(num_worlds, start_cell, end_cell, rewards, walls, enable_
 
 # params
 chakra_nodes_data_length=10000000 
-chakra_nodes_num=2
+chakra_nodes_num=1
 # 
 
 def empty_tensor(rows= chakra_nodes_num,max_len=chakra_nodes_data_length):
     tensor = torch.zeros((rows,max_len), dtype=torch.int32)
     return tensor
 
-def ints_to_tensor(int_array, rows= chakra_nodes_num,max_len=chakra_nodes_data_length):
+def ints_to_tensor(int_array,num_world=1,rows= chakra_nodes_num,max_len=chakra_nodes_data_length):
      i=0
-     tensor = torch.zeros((rows,max_len), dtype=torch.int32)
+     tensor = torch.zeros((num_world,rows,max_len), dtype=torch.int32)
      for array in int_array:
-        tensor[i,:len(array)] = torch.tensor(array, dtype=torch.int32)
+        tensor[0,i,:len(array)] = torch.tensor(array, dtype=torch.int32)
         i+=1
      return tensor
 def tensor_to_ints(tensor):
