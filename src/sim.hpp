@@ -34,6 +34,7 @@ struct Sim : public madrona::WorldBase {
     Entity init_entity;
     Entity timer_entity;
     Entity chakra_nodes_entities[MAX_CHAKRA_NODES];
+    Entity next_process_time_entity;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

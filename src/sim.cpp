@@ -24,14 +24,17 @@ namespace madsimple
 
         registry.registerComponent<SimTime>();
         registry.registerArchetype<SimTimeProcessor>();
-        
+
         // -------------------------------------
         registry.registerComponent<ID>();
         registry.registerComponent<ChakraNodes>();
         registry.registerComponent<HardwareResource>();
-        registry.registerComponent<ProcessingTask>();
+        registry.registerComponent<ProcessingCompTask>();
+        registry.registerComponent<ProcessingCommTask>();
         registry.registerComponent<Chakra_Nodp_Nodes>();
         registry.registerArchetype<NpuNode>();
+        registry.registerComponent<NextProcessTimes>();
+        registry.registerArchetype<NextProcessTimeE>();
 
         // Export tensors for pytorch
         registry.exportColumn<Agent, Reset>((uint32_t)ExportID::Reset);
@@ -71,6 +74,13 @@ namespace madsimple
             baseIndex += 1;
 
             parsedNodes[validNodes].id = chakraNodesData.data[row][baseIndex];
+
+            // 初始节点没有id
+            if(parsedNodes[validNodes].id==-1)
+            {
+                parsedNodes[validNodes].id=0;
+            }
+
             baseIndex += 1;
 
             for (int j = 0; j < 10; ++j)
@@ -125,11 +135,11 @@ namespace madsimple
 
     int filterNoDependencyNodes(const ChakraNodes &chakraNodes, ChakraNode filteredNodes[], int maxNodes = CURRENT_EXEC_NODES_MAX)
     {
-        const size_t TOTAL_NODES = 9 * 9999; // 总节点数量
+        
         int count = 0;                       // 无依赖节点计数
 
         // 遍历所有节点
-        for (size_t i = 0; i < TOTAL_NODES; ++i)
+        for (size_t i = 0; i < MAX_CHAKRA_NODES; ++i)
         {
             const ChakraNode &node = chakraNodes.nodes[i];
 
@@ -168,15 +178,137 @@ namespace madsimple
         return count; // 返回无依赖节点的数量
     }
 
+    void removeNode(ChakraNodes &chakraNodes, uint32_t nodeId) {
+       
+    
+        // 遍历所有节点，找到目标节点并将其标记为无效
+        for (size_t i = 0; i < MAX_CHAKRA_NODES; ++i) {
+            ChakraNode &node = chakraNodes.nodes[i];
+    
+            // 如果找到目标节点，标记为无效
+            if (node.id == nodeId) {
+                node.type = NodeType::None; // 标记为无效节点
+                for (int j = 0; j < 10; ++j) {
+                    node.data_deps[j] = INVALID_DEPENDENCY; // 清空依赖
+                }
+                node.id = INVALID_DEPENDENCY; // 将节点 ID 设置为无效
+                break;
+            }
+        }
+    
+        // 遍历所有节点，移除对目标节点的依赖
+        for (size_t i = 0; i < MAX_CHAKRA_NODES; ++i) {
+            ChakraNode &node = chakraNodes.nodes[i];
+    
+            // 跳过无效节点
+            if (node.type == NodeType::None) {
+                continue;
+            }
+    
+            // 检查并移除对目标节点的依赖
+            for (int j = 0; j < 10; ++j) {
+                if (node.data_deps[j] == nodeId) {
+                    node.data_deps[j] = INVALID_DEPENDENCY; // 设置为无效依赖
+                }
+            }
+        }
+    }
+
+    // network interface
     inline uint64_t getCurrentTime(Engine &ctx)
     {
         return ctx.get<SimTime>(ctx.data().timer_entity).time;
     }
 
+    // network interface
+    inline bool isExistedFlow(Engine &ctx)
+    {
+        return false;
+    }
 
-    uint64_t msToNs(uint64_t milliseconds) {
+    // network interface
+    inline void addSimtime(Engine &ctx,uint64_t t_ns)
+    {
+        ctx.get<SimTime>(ctx.data().timer_entity).time+=t_ns;
+    }
+
+    inline void procssTime(Engine &ctx,
+        SimTime &simTime)
+    {
+    simTime.time += (1000* 1000000);
+    printf("current time : %ld\n", simTime.time);
+    }
+
+    uint64_t msToNs(uint64_t milliseconds)
+    {
         return milliseconds * 1000000; // 1 ms = 1,000,000 ns
     }
+
+    inline void skipTime_add_time(Engine &ctx,uint64_t t_relative_ns)
+    {
+        for (size_t i = 0; i < MAX_CHAKRA_NODES; i++)
+        {
+            if(ctx.get<NextProcessTimes>(ctx.data().timer_entity).times_abs[i] != 0)
+            {
+                ctx.get<NextProcessTimes>(ctx.data().timer_entity).times_abs[i]=getCurrentTime(ctx)+t_relative_ns;
+                break;
+            }
+        }
+    }
+
+
+    // 自定义排序函数：从大到小冒泡排序
+    void customSortDescending(uint64_t*array, size_t length) {
+        for (size_t i = 0; i < length - 1; ++i) {
+            for (size_t j = 0; j < length - 1 - i; ++j) {
+                if (array[j] < array[j + 1]) { // 从大到小比较
+                    // 交换两个元素
+                    uint64_t temp = array[j];
+                    array[j] = array[j + 1];
+                    array[j + 1] = temp;
+                }
+            }
+        }
+    }
+
+
+
+    inline uint64_t skipTime_sort_time_rMin(Engine &ctx)
+    {
+        // 找到第一个等于 0 的元素的位置
+        size_t zeroIndex = MAX_CHAKRA_NODES; // 默认没有找到 0
+        for (size_t i = 0; i < MAX_CHAKRA_NODES; ++i) {
+            if (ctx.get<NextProcessTimes>(ctx.data().timer_entity).times_abs[i] == 0) {
+                zeroIndex = i;
+                break;
+            }
+        }
+
+        // 对第一个 0 之前的元素进行从大到小排序
+        if (zeroIndex > 0 && zeroIndex < MAX_CHAKRA_NODES) {
+            uint64_t *array = ctx.get<NextProcessTimes>(ctx.data().timer_entity).times_abs;
+            customSortDescending(array, zeroIndex);
+        }
+        
+        return ctx.get<NextProcessTimes>(ctx.data().timer_entity).times_abs[zeroIndex];
+    }
+
+    inline void skipTime_remove_time(Engine &ctx,uint64_t x_ns)
+    {
+        // 找到第一个等于 0 的元素的位置
+        size_t zeroIndex = MAX_CHAKRA_NODES; // 默认没有找到 0
+        for (size_t i = 0; i < MAX_CHAKRA_NODES; ++i) {
+            if (ctx.get<NextProcessTimes>(ctx.data().timer_entity).times_abs[i] != 0) {
+                ctx.get<NextProcessTimes>(ctx.data().timer_entity).times_abs[i]-=x_ns;
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+
+
 
     inline void init(Engine &ctx,
                      Action &action,
@@ -208,8 +340,8 @@ namespace madsimple
             int nodeCount = parseChakraNodes(chakra_nodes_data, i, ctx.get<ChakraNodes>(npuNode).nodes);
             ctx.get<HardwareResource>(npuNode).comp_ocupy = false;
             ctx.get<HardwareResource>(npuNode).comm_ocupy = false;
-            ctx.get<HardwareResource>(npuNode).one_task_finish = false;
-            ctx.get<ProcessingTask>(npuNode).is_none = true;
+            ctx.get<HardwareResource>(npuNode).one_task_finish = true;
+            ctx.get<ProcessingCompTask>(npuNode).is_none = true;
             printf("npu %d: turn %d nodes.\n", i, nodeCount);
             ctx.data().chakra_nodes_entities[i] = npuNode;
         }
@@ -222,21 +354,28 @@ namespace madsimple
                             ID &id,
                             ChakraNodes &chakraNodes,
                             HardwareResource &hardwareResource,
-
-                            ProcessingTask &processingTask)
+                            ProcessingCompTask &processingCompTask,
+                            ProcessingCommTask &processingCommTask)
     {
+        // printf("exec sys: precess_node .");
         // fifter no dp nodes
-        if (hardwareResource.one_task_finish&&(!hardwareResource.comm_ocupy || !hardwareResource.comp_ocupy))
+        if (hardwareResource.one_task_finish && (!hardwareResource.comm_ocupy || !hardwareResource.comp_ocupy))
         {
-            printf("get current execute nodes:\n");
+            // printf("get current execute nodes:\n");
             ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
             int count = filterNoDependencyNodes(chakraNodes, current_exec_nodes);
             printf("npu id:%d has %d exec nodes.\n", id.value, count);
+            for (size_t i = 0; i < count; i++)
+            {
+                printf("node id : %d\n",current_exec_nodes[i].id);
+
+            }
 
             // process no np nodes
             for (size_t i = 0; i < count; i++)
             {
-                ChakraNode node=current_exec_nodes[i];
+                ChakraNode node = current_exec_nodes[i];
+                // printf("node.type:%d\n",node.type);
                 switch (node.type)
                 {
                     // None=0,
@@ -245,46 +384,119 @@ namespace madsimple
                     // COMM_RECV_NODE = 3,
                     // COMM_COLL_NODE = 4
                 case NodeType::COMP_NODE:
-                    /* code */
-                    processingTask.time_finish_ns=getCurrentTime(ctx)+msToNs(node.durationMicros);
-                    processingTask.is_none=false;
-                    processingTask.node_id=node.id;
+                    if (!hardwareResource.comp_ocupy)
+                    {
+                        processingCompTask.time_finish_ns = getCurrentTime(ctx) + msToNs(node.durationMicros);
+                        printf("processingCompTask.time_finish_ns: %ld\n",processingCompTask.time_finish_ns);
+                        processingCompTask.is_none = false;
+                        processingCompTask.node_id = node.id;
+
+                        // set flag
+                        hardwareResource.comp_ocupy=true;
+
+                        // set skip time - add time.
+                        skipTime_add_time(ctx,processingCompTask.time_finish_ns);
+                    }
                     break;
                 case NodeType::COMM_SEND_NODE:
-                    /* code */
+                    if (!hardwareResource.comm_ocupy)
+                    {
+                        // test
+                        processingCommTask.time_finish_ns = getCurrentTime(ctx) + msToNs(10);
+                        printf("processingCommTask.time_finish_ns: %ld\n",processingCommTask.time_finish_ns);
+                        processingCommTask.is_none = false;
+                        processingCommTask.node_id = node.id;
+                        // set flag
+                        hardwareResource.comp_ocupy=true;
+                    }
                     break;
                 case NodeType::COMM_RECV_NODE:
-                    /* code */
+                    if (!hardwareResource.comm_ocupy)
+                    {// test
+                        processingCommTask.time_finish_ns = getCurrentTime(ctx) + msToNs(10);
+                        printf("processingCommTask.time_finish_ns: %ld\n",processingCommTask.time_finish_ns);
+                        processingCommTask.is_none = false;
+                        processingCommTask.node_id = node.id;
+                        // set flag
+                        hardwareResource.comp_ocupy=true;
+                    }
                     break;
                 case NodeType::COMM_COLL_NODE:
-                    /* code */
+                    if (!hardwareResource.comm_ocupy)
+                    {// test
+                        processingCommTask.time_finish_ns = getCurrentTime(ctx) + msToNs(10);
+                        printf("processingCommTask.time_finish_ns: %ld\n",processingCommTask.time_finish_ns);
+                        processingCommTask.is_none = false;
+                        processingCommTask.node_id = node.id;
+                        // set flag
+                        hardwareResource.comp_ocupy=true;
+                    }
                     break;
                 default:
                     break;
                 }
             }
-            
-            // set flag
-            hardwareResource.one_task_finish=false;
 
+            // set flag
+            hardwareResource.one_task_finish = false;
         }
 
         // process comp
-        if(!processingTask.is_none&&(processingTask.time_finish_ns>=getCurrentTime(ctx)))
+        if (!processingCompTask.is_none && (processingCompTask.time_finish_ns <= getCurrentTime(ctx)))
         {
+            printf("processingCompTask over.\n");
             // release node.
-            processingTask.is_none=true;
-        }
+            removeNode(chakraNodes,processingCompTask.node_id);
+            // reset flag.
+            hardwareResource.one_task_finish=true;
+            processingCompTask.is_none = true;
+            hardwareResource.comp_ocupy=false;
 
+
+        }
+        
+        // printf("getCurrentTime(ctx): %d\n",getCurrentTime(ctx));
+        // process comm
+        if (!processingCommTask.is_none && (processingCommTask.time_finish_ns <= getCurrentTime(ctx)))
+        {
+            printf("processingCompTask over.\n");
+            // release node.
+            removeNode(chakraNodes,processingCommTask.node_id);
+            // reset flag.
+            hardwareResource.one_task_finish=true;
+            processingCommTask.is_none = true;
+            hardwareResource.comm_ocupy=false;
+        }
+    
+        // check skip time
+        if(!isExistedFlow(ctx))
+        {
+
+        }
     }
 
+    // network logic
 
-    inline void procssTime(Engine &ctx,
-        SimTime &simTime)
+
+    uint16_t frame_skiptime=0;
+    inline void checkSkipTime(Engine &ctx,NextProcessTimes &t)
+    {
+        frame_skiptime++;
+        if(frame_skiptime/CHECK_SKIPTIME_INTERVAL_PER_FRAME==0)
         {
-            simTime.time+=1000;
-            printf("current time : %d\n",simTime.time);
+            frame_skiptime=0;
+
+            if(!isExistedFlow(ctx))
+            {
+                uint64_t min_time=skipTime_sort_time_rMin(ctx);
+                if(min_time!=0)
+                {
+                    addSimtime(ctx,min_time);
+                    skipTime_remove_time(ctx,min_time);
+                }
+            }
         }
+    }
 
     void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                          const Config &)
@@ -293,9 +505,11 @@ namespace madsimple
         auto sys_init = builder.addToGraph<ParallelForNode<Engine, init,
                                                            Action, Reset, GridPos, Reward, Done, CurStep, ChakraNodesData>>({});
         auto sys_process_node = builder.addToGraph<ParallelForNode<Engine, processNode,
-                                                           ID, ChakraNodes, HardwareResource,ProcessingTask>>({sys_init});
+                                                                   ID, ChakraNodes, HardwareResource, ProcessingCompTask,ProcessingCommTask>>({sys_init});
+        auto sys_skip_time= builder.addToGraph<ParallelForNode<Engine,checkSkipTime, NextProcessTimes>>({sys_process_node});
+        
         auto sys_process_time = builder.addToGraph<ParallelForNode<Engine, procssTime,
-                                                            SimTime>>({sys_process_node});
+                                                                   SimTime>>({sys_skip_time});
     }
 
     Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -317,9 +531,20 @@ namespace madsimple
         // printf("1");
 
         // sim time entity
-        Entity sp= ctx.makeEntity<SimTimeProcessor>();
+        Entity sp = ctx.makeEntity<SimTimeProcessor>();
         ctx.get<SimTime>(sp).time = 0;
         ctx.data().timer_entity = sp;
+
+        // next process time entity
+        Entity nextProcessTimeE = ctx.makeEntity<NextProcessTimeE>();
+        for (size_t i = 0; i < MAX_CHAKRA_NODES; i++)
+        {
+            ctx.get<NextProcessTimes>(nextProcessTimeE).times_abs[i] = 0;
+        }
+        ctx.data().next_process_time_entity = nextProcessTimeE;
+        
+        
+        
     }
 
     MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);

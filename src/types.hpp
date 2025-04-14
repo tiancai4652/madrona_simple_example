@@ -76,6 +76,8 @@ struct SimTimeProcessor : public madrona::Archetype<
 
 #define CURRENT_EXEC_NODES_MAX 10
 
+#define CHECK_SKIPTIME_INTERVAL_PER_FRAME 100
+
 struct ID {
     uint32_t value;
 };
@@ -150,8 +152,22 @@ struct HardwareResource{
     bool one_task_finish;
 };
 
+struct NextProcessTimes{
+    uint64_t times_abs[MAX_CHAKRA_NODES];
+};
 
-struct ProcessingTask{
+struct NextProcessTimeE : public madrona::Archetype<
+NextProcessTimes
+> {};
+
+
+struct ProcessingCompTask{
+    int64_t time_finish_ns;
+    bool is_none;
+    int32_t node_id;
+};
+
+struct ProcessingCommTask{
     int64_t time_finish_ns;
     bool is_none;
     int32_t node_id;
@@ -161,7 +177,8 @@ struct NpuNode : public madrona::Archetype<
     ID,
     ChakraNodes,
     HardwareResource,
-    ProcessingTask,
+    ProcessingCompTask,
+    ProcessingCommTask,
     Chakra_Nodp_Nodes
 > {};
 
