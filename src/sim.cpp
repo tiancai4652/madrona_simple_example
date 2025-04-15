@@ -367,16 +367,24 @@ namespace madsimple
             ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
             int count = filterNoDependencyNodes(chakraNodes, current_exec_nodes);
             printf("npu id:%d has %d exec nodes.\n", id.value, count);
-            for (size_t i = 0; i < count; i++)
-            {
-                printf("node id : %d\n",current_exec_nodes[i].id);
-
-            }
+            // for (size_t i = 0; i < count; i++)
+            // {
+            //     printf("node id : %d\n",current_exec_nodes[i].id);
+            // }
 
             // process no np nodes
             for (size_t i = 0; i < count; i++)
             {
                 ChakraNode node = current_exec_nodes[i];
+                if(hardwareResource.comm_ocupy&&node.id==processingCommTask.node_id)
+                {
+                    break;
+                }
+                if(hardwareResource.comp_ocupy&&node.id==processingCompTask.node_id)
+                {
+                    break;
+                }
+                printf("node id : %d\n",current_exec_nodes[i].id);
                 // printf("node.type:%d\n",node.type);
                 switch (node.type)
                 {
@@ -472,11 +480,6 @@ namespace madsimple
             hardwareResource.comm_ocupy=false;
         }
     
-        // check skip time
-        if(!isExistedFlow(ctx))
-        {
-
-        }
     }
 
     // network logic
@@ -495,7 +498,8 @@ namespace madsimple
                 uint64_t min_time=skipTime_sort_time_rMin(ctx);
                 if(min_time!=0)
                 {
-                    addSimtime(ctx,min_time);
+                    addSimtime(ctx,min_time- getCurrentTime(ctx));
+                    printf("skip to time:%d\n",getCurrentTime(ctx));
                     skipTime_remove_time(ctx,min_time);
                 }
             }
