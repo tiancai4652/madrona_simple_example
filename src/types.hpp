@@ -78,6 +78,8 @@ struct SimTimeProcessor : public madrona::Archetype<
 
 #define CHECK_SKIPTIME_INTERVAL_PER_FRAME 100
 
+#define MAX_FLOW_PER_NPU 9999
+
 struct ID {
     uint32_t value;
 };
@@ -148,8 +150,14 @@ struct Chakra_Nodp_Nodes{
 
 struct HardwareResource{
     bool comp_ocupy;
-    bool comm_ocupy;
+    // bool comm_ocupy;
     bool one_task_finish;
+
+    HardwareResource()
+        : comp_ocupy(false), // 初始化为 0
+        one_task_finish(true)     // 初始化为 true
+    {}
+
 };
 
 struct NextProcessTimes{
@@ -165,12 +173,81 @@ struct ProcessingCompTask{
     int64_t time_finish_ns;
     bool is_none;
     int32_t node_id;
+    // 默认构造函数
+    ProcessingCompTask()
+        : time_finish_ns(0), // 初始化为 0
+          is_none(true),     // 初始化为 true
+          node_id(-1)        // 初始化为 -1 (表示无效节点)
+    {}
 };
 
 struct ProcessingCommTask{
     int64_t time_finish_ns;
     bool is_none;
     int32_t node_id;
+
+    // 默认构造函数
+    ProcessingCommTask()
+        : time_finish_ns(0), // 初始化为 0
+          is_none(true),     // 初始化为 true
+          node_id(-1)        // 初始化为 -1 (表示无效节点)
+    {}
+};
+
+struct ProcessingCommTasks{
+    ProcessingCommTask tasks[MAX_FLOW_PER_NPU];
+    // 默认构造函数
+    ProcessingCommTasks() {
+        for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
+            tasks[i] = ProcessingCommTask(); // 初始化每个任务
+        }
+    }
+
+    // 判断是否存在指定节点 ID 的方法
+    bool containsNodeId(int32_t node_id) const {
+        for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
+            if (!tasks[i].is_none && tasks[i].node_id == node_id) {
+                return true; // 找到匹配的任务
+            }
+        }
+        return false; // 未找到匹配的任务
+    }
+
+    // 添加任务的方法
+    bool addTask(const ProcessingCommTask &new_task) {
+        for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
+            if (tasks[i].is_none == true ){ // 找到第一个 node_id == -1 的位置
+                tasks[i] = new_task; // 放入新任务
+                tasks[i].is_none = false; // 标记任务为有效
+                return true; // 添加成功
+            }
+        }
+        return false; // 没有空闲位置，添加失败
+    }
+
+    // 判断是否至少存在一个 is_none == false 的节点
+    bool is_none() const {
+        for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
+            if (!tasks[i].is_none) { // 如果找到一个 is_none == false 的节点
+                return false;
+            }
+        }
+        return true; // 如果所有节点的 is_none == true
+    }
+
+    // 查找 time_finish_ns <= t 的所有任务，并将这些任务的 is_none 设置为 true
+    int dequeueTasksByTime(int64_t t, ProcessingCommTask result[], int max_result_size) {
+        int count = 0;
+        for (int i = 0; i < MAX_FLOW_PER_NPU && count < max_result_size; ++i) {
+            if (!tasks[i].is_none && tasks[i].time_finish_ns <= t) {
+                result[count++] = tasks[i];     // 将任务放入结果数组
+                tasks[i].is_none = true;       // 标记任务为无效（出队）
+                // tasks[i].node_id = -1;         // 重置 node_id
+                // tasks[i].time_finish_ns = 0;   // 重置 time_finish_ns
+            }
+        }
+        return count; // 返回找到的任务个数
+    }
 };
 
 struct NpuNode : public madrona::Archetype<
@@ -178,7 +255,7 @@ struct NpuNode : public madrona::Archetype<
     ChakraNodes,
     HardwareResource,
     ProcessingCompTask,
-    ProcessingCommTask,
+    ProcessingCommTasks,
     Chakra_Nodp_Nodes
 > {};
 

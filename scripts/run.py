@@ -66,7 +66,7 @@ data=folder_to_int_array(folder_path)
 data_tensor=ints_to_tensor(data)
 int_tensor=tensor_to_ints(grid_world.chakra_nodes_data)
 grid_world.chakra_nodes_data.copy_(data_tensor)
-for i in range(9999):
+for i in range(5):
     # data_tensor=ints_to_tensor([[1],[2]])
    
     grid_world.step()
