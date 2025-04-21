@@ -227,21 +227,60 @@ namespace madsimple
     }
 
     // network interface
+    // 获取当前仿真时间
+    // func
     inline uint64_t getCurrentTime(Engine &ctx)
     {
         return ctx.get<SimTime>(ctx.data().timer_entity).time;
     }
 
     // network interface
+    // 指示当前是否存在流发送
+    // func
     inline bool isExistedFlow(Engine &ctx)
     {
         return false;
     }
 
     // network interface
+    // 增加仿真时间：使所有组件增加仿真时间
+    // func
     inline void addSimtime(Engine &ctx, uint64_t t_ns)
     {
         ctx.get<SimTime>(ctx.data().timer_entity).time += t_ns;
+    }
+
+    // network interface
+    // 设置流：
+    // func
+    inline void setFlow(Engine &ctx,uint64_t comm_src,uint64_t comm_dst,uint64_t comm_size,uint32_t flow_id)
+    {
+        printf("set flow id %d: %d->%d %d, \n",flow_id,comm_src,comm_dst,comm_size);
+    }
+
+    // network interface
+    // 检测/获取流完成事件：返回流完成数量，同时把流完成事件赋值flows_finish
+    // func
+    inline int checkFlowFinish(Engine &ctx,SysFlow flows_finish[])
+    {
+        // struct SysFlow {
+        //     uint32_t id;
+        //     uint64_t comm_size;
+        //     uint64_t comm_src;
+        //     uint64_t comm_dst;
+        //     uint32_t durationMicros;
+        // };
+
+        // for (size_t i = 0; i < count; i++)
+        // {
+            // flows_finish[i].id=id;
+            // flows_finish[i].comm_size=comm_size;
+            // flows_finish[i].comm_src=comm_src;
+            // flows_finish[i].comm_dst=comm_dst;
+            // flows_finish[i].durationMicros=durationMicros;
+            // printf("check flow finish: flow id %d: %d->%d %d, \n",flow_id,comm_src,comm_dst,comm_size);
+        // }
+        // return count;
     }
 
     inline void procssTime(Engine &ctx,

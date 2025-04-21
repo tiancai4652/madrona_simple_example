@@ -100,6 +100,14 @@ enum class AttributeKey: int32_t {
     involved_dim = 5
 };
 
+struct SysFlow {
+    uint32_t id;
+    uint64_t comm_size;
+    uint64_t comm_src;
+    uint64_t comm_dst;
+    uint32_t durationMicros;
+};
+
 struct ChakraNode {
     uint32_t name[20];
     NodeType type;
