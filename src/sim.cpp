@@ -39,6 +39,9 @@ namespace madsimple
         registry.registerComponent<NextProcessTimes>();
         registry.registerArchetype<NextProcessTimeE>();
 
+        registry.registerComponent<CommModel>();
+        registry.registerArchetype<SysConfig>();
+
         // Export tensors for pytorch
         registry.exportColumn<Agent, Reset>((uint32_t)ExportID::Reset);
         registry.exportColumn<Agent, Action>((uint32_t)ExportID::Action);
@@ -688,6 +691,19 @@ namespace madsimple
             ctx.get<NextProcessTimes>(nextProcessTimeE).times_abs[i] = 0;
         }
         ctx.data().next_process_time_entity = nextProcessTimeE;
+
+        // Sys_config
+        // uint32_t all_reduce_implementation;
+        // uint64_t all_gather_implementation;
+        // uint64_t reduce_scatter_implementation;
+        // uint64_t all_to_all_implementation;
+        Entity sc = ctx.makeEntity<SysConfig>();
+        ctx.get<CommModel>(sc).all_reduce_implementation = CommImplementationType::Ring;
+        ctx.get<CommModel>(sc).all_gather_implementation = CommImplementationType::Ring;
+        ctx.get<CommModel>(sc).reduce_scatter_implementation = CommImplementationType::Ring;
+        ctx.get<CommModel>(sc).all_to_all_implementation = CommImplementationType::Ring;
+        ctx.data().sys_config_entity = sc;
+
     }
 
     MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);

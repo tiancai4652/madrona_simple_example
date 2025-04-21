@@ -67,18 +67,29 @@ struct SimTimeProcessor : public madrona::Archetype<
 > {};
 // ----------------------------------------
 
-#define INTS_PER_NODE  44  // 每个 ChakraNode 占用 44 字节，等于 11 个 int
+// 每个 ChakraNode 占用 44 字节，等于 11 个 int
+#define INTS_PER_NODE  44  
+
 #define MAX_CHAKRA_NODES 9*9999
 #define MAX_CHAKRA_NODP_NODES 99
 #define chakra_nodes_data_length 10000000
 // 定义无效依赖的值
 #define INVALID_DEPENDENCY 4294967295
 
+// 当前无依赖节点的最大数量
 #define CURRENT_EXEC_NODES_MAX 10
 
+// 每隔x帧检测一次skip time
 #define CHECK_SKIPTIME_INTERVAL_PER_FRAME 100
 
+// 每个npu的最多流数
 #define MAX_FLOW_PER_NPU 9999
+
+// 每个comm节点的最大通讯量
+#define MAX_FLOW_NUM_PER_COMM_NODE 999
+
+// 一帧内所有节点最大流完成数量
+#define MAX_FLOW_FINISH_NUM_ALL_COMM_NODE 999*10
 
 struct ID {
     uint32_t value;
@@ -92,6 +103,24 @@ enum class NodeType : int32_t {
     COMM_COLL_NODE = 4
 };
 
+enum CollectiveCommType : int32_t {
+    ALL_REDUCE = 0,
+    REDUCE = 1,
+    ALL_GATHER = 2,
+    GATHER = 3,
+    SCATTER = 4,
+    BROADCAST = 5,
+    ALL_TO_ALL = 6,
+    REDUCE_SCATTER = 7,
+    REDUCE_SCATTER_BLOCK = 8,
+    BARRIER = 9
+  }; 
+
+  enum CommImplementationType : int32_t {
+    Ring = 0
+  }; 
+
+
 enum class AttributeKey: int32_t {
     comm_para = 1,
     comm_size = 2,
@@ -99,6 +128,18 @@ enum class AttributeKey: int32_t {
     comm_dst = 4,
     involved_dim = 5
 };
+
+struct CommModel {
+    CommImplementationType all_reduce_implementation;
+    CommImplementationType all_gather_implementation;
+    CommImplementationType reduce_scatter_implementation;
+    CommImplementationType all_to_all_implementation;
+};
+
+struct SysConfig : public madrona::Archetype<
+CommModel
+> {};
+
 
 struct SysFlow {
     uint32_t id;
@@ -175,7 +216,6 @@ struct NextProcessTimes{
 struct NextProcessTimeE : public madrona::Archetype<
 NextProcessTimes
 > {};
-
 
 struct ProcessingCompTask{
     int64_t time_finish_ns;
