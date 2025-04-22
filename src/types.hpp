@@ -140,6 +140,14 @@ struct SysConfig : public madrona::Archetype<
 CommModel
 > {};
 
+struct CommParams {
+    uint32_t id;
+    uint64_t comm_size;
+    uint64_t comm_src;
+    uint64_t comm_dst;
+    uint32_t durationMicros;
+};
+
 
 struct SysFlow {
     uint32_t id;
@@ -147,6 +155,17 @@ struct SysFlow {
     uint64_t comm_src;
     uint64_t comm_dst;
     uint32_t durationMicros;
+
+    // 流执行顺序id
+    uint32_t exec_index;
+    // 是否执行完
+    bool is_none;
+    // 收端完成 or 发端完成
+    bool is_send;
+};
+
+struct TaskFlows{
+    SysFlow nodes[MAX_FLOW_NUM_PER_COMM_NODE];
 };
 
 struct ChakraNode {
@@ -233,12 +252,14 @@ struct ProcessingCommTask{
     int64_t time_finish_ns;
     bool is_none;
     int32_t node_id;
+    int32_t flow_count;
 
     // 默认构造函数
     ProcessingCommTask()
         : time_finish_ns(0), // 初始化为 0
           is_none(true),     // 初始化为 true
-          node_id(-1)        // 初始化为 -1 (表示无效节点)
+          node_id(-1),        // 初始化为 -1 (表示无效节点)
+          flow_count(0)
     {}
 };
 
@@ -249,6 +270,17 @@ struct ProcessingCommTasks{
         for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
             tasks[i] = ProcessingCommTask(); // 初始化每个任务
         }
+    }
+
+    // 统计所有任务的 flow_count 的总和
+    int getTotalFlowCount() const {
+        int totalFlowCount = 0;
+        for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
+            if (!tasks[i].is_none) { // 只统计有效任务
+                totalFlowCount += tasks[i].flow_count;
+            }
+        }
+        return totalFlowCount;
     }
 
     // 判断是否存在指定节点 ID 的方法
@@ -304,9 +336,17 @@ struct NpuNode : public madrona::Archetype<
     HardwareResource,
     ProcessingCompTask,
     ProcessingCommTasks,
-    Chakra_Nodp_Nodes
+    Chakra_Nodp_Nodes,
+    madrona::Entity
 > {};
 
+// ID &id, CollectiveCommType &collective_comm_type, CommParams &comm_params,TaskFlows &taskFlows
+struct ProcessComm_E : public madrona::Archetype<
+    ID,
+    CollectiveCommType,
+    CommParams,
+    TaskFlows
+> {};
 // ------------------------------------------
 
 }

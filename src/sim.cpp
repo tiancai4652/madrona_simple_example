@@ -34,6 +34,7 @@ namespace madsimple
         registry.registerComponent<ProcessingCompTask>();
         registry.registerComponent<ProcessingCommTasks>();
         registry.registerComponent<Chakra_Nodp_Nodes>();
+        registry.registerComponent<Entity>();
         registry.registerArchetype<NpuNode>();
 
         registry.registerComponent<NextProcessTimes>();
@@ -41,6 +42,11 @@ namespace madsimple
 
         registry.registerComponent<CommModel>();
         registry.registerArchetype<SysConfig>();
+
+        registry.registerComponent<CollectiveCommType>();
+        registry.registerComponent<CommParams>();
+        registry.registerComponent<TaskFlows>();
+        registry.registerArchetype<ProcessComm_E>();
 
         // Export tensors for pytorch
         registry.exportColumn<Agent, Reset>((uint32_t)ExportID::Reset);
@@ -50,8 +56,6 @@ namespace madsimple
         registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
         registry.exportColumn<Agent, ChakraNodesData>((uint32_t)ExportID::ChakraNodesData);
     }
-
-    
 
     // -----------------------------------------------------------------------------------
 
@@ -256,15 +260,15 @@ namespace madsimple
     // network interface
     // 设置流：
     // func
-    inline void setFlow(Engine &ctx,uint64_t comm_src,uint64_t comm_dst,uint64_t comm_size,uint32_t flow_id)
+    inline void setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
     {
-        printf("set flow id %d: %d->%d %d, \n",flow_id,comm_src,comm_dst,comm_size);
+        printf("set flow id %d: %d->%d %d, \n", flow_id, comm_src, comm_dst, comm_size);
     }
 
     // network interface
     // 检测/获取流完成事件：返回流完成数量，同时把流完成事件赋值flows_finish
     // func
-    inline int checkFlowFinish(Engine &ctx,SysFlow flows_finish[])
+    inline int checkFlowFinish(Engine &ctx,uint32_t npu_id, SysFlow flows_finish[])
     {
         // struct SysFlow {
         //     uint32_t id;
@@ -276,12 +280,12 @@ namespace madsimple
 
         // for (size_t i = 0; i < count; i++)
         // {
-            // flows_finish[i].id=id;
-            // flows_finish[i].comm_size=comm_size;
-            // flows_finish[i].comm_src=comm_src;
-            // flows_finish[i].comm_dst=comm_dst;
-            // flows_finish[i].durationMicros=durationMicros;
-            // printf("check flow finish: flow id %d: %d->%d %d, \n",flow_id,comm_src,comm_dst,comm_size);
+        // flows_finish[i].id=id;
+        // flows_finish[i].comm_size=comm_size;
+        // flows_finish[i].comm_src=comm_src;
+        // flows_finish[i].comm_dst=comm_dst;
+        // flows_finish[i].durationMicros=durationMicros;
+        // printf("check flow finish: flow id %d: %d->%d %d, \n",flow_id,comm_src,comm_dst,comm_size);
         // }
         // return count;
     }
@@ -331,17 +335,16 @@ namespace madsimple
 
     inline uint64_t skipTime_sort_time_rMin(Engine &ctx)
     {
-       
+
         // 找到第一个等于 0 的元素的位置
         size_t zeroIndex = MAX_CHAKRA_NODES; // 默认没有找到 0
 
-       
         for (size_t i = 0; i < MAX_CHAKRA_NODES; ++i)
         {
-           
+
             if (ctx.get<NextProcessTimes>(ctx.data().next_process_time_entity).times_abs[i] == 0)
             {
-               
+
                 zeroIndex = i;
                 break;
             }
@@ -414,7 +417,7 @@ namespace madsimple
             // ctx.get<ProcessingCommTask>(npuNode).node_id = -1;
             ctx.get<ProcessingCompTask>(npuNode) = ProcessingCompTask();
             ctx.get<ProcessingCommTasks>(npuNode) = ProcessingCommTasks();
-
+            ctx.get<Entity>(npuNode) = npuNode;
             printf("npu %d: turn %d nodes.\n", i, nodeCount);
             ctx.data().chakra_nodes_entities[i] = npuNode;
         }
@@ -428,7 +431,8 @@ namespace madsimple
                                 ChakraNodes &chakraNodes,
                                 HardwareResource &hardwareResource,
                                 ProcessingCompTask &processingCompTask,
-                                ProcessingCommTasks &processingCommTasks)
+                                ProcessingCommTasks &processingCommTasks,
+                                Entity &e)
     {
         // printf("exec sys: precess_node : %d\n.",id.value);
         // fifter no dp nodes
@@ -438,7 +442,7 @@ namespace madsimple
         }
 
         // append nodes
-        if (hardwareResource.one_task_finish && (!hardwareResource.comp_ocupy))
+        if (hardwareResource.one_task_finish)
         {
             // printf("get current execute nodes:\n");
             ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
@@ -459,6 +463,8 @@ namespace madsimple
             for (size_t i = 0; i < count; i++)
             {
                 ChakraNode node = current_exec_nodes[i];
+
+                // 会重复查找，已经在处理时，跳过
                 if (processingCommTasks.containsNodeId(node.id))
                 {
                     continue;
@@ -511,14 +517,24 @@ namespace madsimple
                     // test
                     // processingCommTask.time_finish_ns = getCurrentTime(ctx) + msToNs(2000);
                     ProcessingCommTask processingCommTask = ProcessingCommTask();
-                    processingCommTask.time_finish_ns = getCurrentTime(ctx) + 2000;
+                    // processingCommTask.time_finish_ns = getCurrentTime(ctx) + 2000;
                     if (SYS_LOG && id.value == 0)
                     {
                         printf("processingCommTask.time_finish_ns: %ld\n", processingCommTask.time_finish_ns);
                     }
                     processingCommTask.is_none = false;
                     processingCommTask.node_id = node.id;
+                    processingCommTask.flow_count=1;
                     processingCommTasks.addTask(processingCommTask);
+
+                    // create comm entity
+                    Entity process_e = ctx.makeEntity<Agent>();
+                    ctx.get<Entity>(process_e) = e;
+                    ctx.get<ID>(process_e).value=processingCommTasks.getTotalFlowCount()+1;
+
+
+
+
 
                     break;
                 }
@@ -608,7 +624,30 @@ namespace madsimple
             // reset flag.
             hardwareResource.one_task_finish = true;
         }
-   
+    }
+
+    inline void processComm(Engine &ctx, ID &id, CollectiveCommType &collective_comm_type, CommParams &comm_params,TaskFlows &taskFlows )
+    {
+        // switch (comm_type)
+        // {
+        // case NodeType::COMM_SEND_NODE:
+        // {
+            
+        //     break;
+        // }
+        // case NodeType::COMM_RECV_NODE:
+        // {
+
+        //     break;
+        // }
+        // case NodeType::COMM_COLL_NODE:
+        // {
+
+        //     break;
+        // }
+        // default:
+        //     break;
+        // }
     }
 
     // network logic
@@ -618,32 +657,29 @@ namespace madsimple
     {
 
         frame_skiptime++;
-       
+
         if (frame_skiptime / CHECK_SKIPTIME_INTERVAL_PER_FRAME == 0)
         {
-            
+
             frame_skiptime = 0;
 
             if (!isExistedFlow(ctx))
             {
-               
+
                 uint64_t min_time = skipTime_sort_time_rMin(ctx);
-                
+
                 if (min_time != 0)
                 {
-                   
+
                     addSimtime(ctx, min_time - getCurrentTime(ctx));
-                   
+
                     if (SYS_LOG)
                     {
                         printf("skip to time:%d\n", getCurrentTime(ctx));
                     }
                     skipTime_remove_time(ctx, min_time);
-                  
                 }
-                
             }
-            
         }
     }
 
@@ -654,7 +690,7 @@ namespace madsimple
         auto sys_init = builder.addToGraph<ParallelForNode<Engine, init,
                                                            Action, Reset, GridPos, Reward, Done, CurStep, ChakraNodesData>>({});
         auto sys_process_node = builder.addToGraph<ParallelForNode<Engine, processNpuNodes,
-                                                                   ID, ChakraNodes, HardwareResource, ProcessingCompTask, ProcessingCommTasks>>({sys_init});
+                                                                   ID, ChakraNodes, HardwareResource, ProcessingCompTask, ProcessingCommTasks, Entity>>({sys_init});
         auto sys_skip_time = builder.addToGraph<ParallelForNode<Engine, checkSkipTime, NextProcessTimes>>({sys_process_node});
 
         auto sys_process_time = builder.addToGraph<ParallelForNode<Engine, procssTime,
@@ -703,7 +739,6 @@ namespace madsimple
         ctx.get<CommModel>(sc).reduce_scatter_implementation = CommImplementationType::Ring;
         ctx.get<CommModel>(sc).all_to_all_implementation = CommImplementationType::Ring;
         ctx.data().sys_config_entity = sc;
-
     }
 
     MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);
