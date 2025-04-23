@@ -99,6 +99,8 @@ namespace madsimple
 // 每个comm节点的最大通讯量
 #define MAX_FLOW_NUM_PER_COMM_NODE 999
 
+// #define MAX_FLOW_NUM_ALL_COMM_NODE 9999
+
     struct NpuID
     {
         uint32_t value;

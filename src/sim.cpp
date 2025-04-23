@@ -482,6 +482,7 @@ namespace madsimple
                     ctx.get<TaskFlows>(process_e).flows[0].state = TaskState::START;
                     ctx.get<TaskFlows>(process_e).flows[0].is_send = true;
 
+                    ctx.data().node_flows_exec_entity[id.value][node.id]= process_e;
                     // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
                     setFlow(ctx, node.comm_src, node.comm_dst, node.comm_size, flow_id);
 
@@ -512,6 +513,7 @@ namespace madsimple
                     ctx.get<TaskFlows>(process_e).flows[0].state = TaskState::START;
                     ctx.get<TaskFlows>(process_e).flows[0].is_send = false;
 
+                    ctx.data().node_flows_exec_entity[id.value][node.id]= process_e;
                     // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
                     setFlow(ctx, node.comm_src, node.comm_dst, node.comm_size, flow_id);
 
@@ -542,6 +544,10 @@ namespace madsimple
                     ctx.get<TaskFlows>(process_e).flows[0].state = TaskState::START;
                     ctx.get<TaskFlows>(process_e).flows[0].is_send = true;
 
+
+                    ctx.data().node_flows_exec_entity[id.value][node.id]= process_e;
+
+
                     // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
                     setFlow(ctx, 0, 1, 100000, flow_id);
                     break;
@@ -553,6 +559,80 @@ namespace madsimple
 
             // set flag
             hardwareResource.one_task_finish = false;
+        }
+    }
+
+    inline void processCommCheckFlow(Engine &ctx, NpuID &npu_id, NodeID &node_id, TaskFlows &taskFlows)
+    {
+        if (SYS_LOG && npu_id.value == 0)
+        {
+            printf("###############   exec sys processCommCheckFlow.    ###############.\n");
+        }
+
+        SysFlow flows_finish[MAX_FLOW_NUM_PER_COMM_NODE];
+        uint32_t flow_finish_count = checkFlowFinish(ctx, npu_id.value, flows_finish);
+        if (ENABLE_TEST)
+        {
+            for (int i = 0; i < 20; ++i)
+            {
+                if (taskFlows.flows[i].state == TaskState::START)
+                {
+                    taskFlows.flows[i].state = TaskState::FINISH;
+                    printf("test : flow id %d -> set flow finish.\n", taskFlows.flows[i].id);
+                }
+            }
+        }
+
+        if (flow_finish_count > 0)
+        {
+            taskFlows.updateFlows(flows_finish, flow_finish_count);
+        }
+
+        if (taskFlows.areAllTasksDone())
+        {
+            printf("node id %d -> taskFlows.areAllTasksDone\n", node_id);
+
+            ctx.get<ProcessingCommTasks>(ctx.data().chakra_nodes_entities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx));
+        
+            ctx.destroyEntity(ctx.data().node_flows_exec_entity[npu_id.value][node_id.value]);
+        }
+    }
+
+    // network logic
+
+    uint16_t frame_skiptime = 0;
+    inline void checkSkipTime(Engine &ctx, NextProcessTimes &t)
+    {
+        frame_skiptime++;
+        if (frame_skiptime / CHECK_SKIPTIME_INTERVAL_PER_FRAME == 0)
+        {
+            frame_skiptime = 0;
+            if (!isExistedFlow(ctx))
+            {
+                uint64_t min_time = skipTime_sort_time_rMin(ctx);
+                if (min_time != 0)
+                {
+                    addSimtime(ctx, min_time - getCurrentTime(ctx));
+                    if (SYS_LOG)
+                    {
+                        printf("skip to time:%d\n", getCurrentTime(ctx));
+                    }
+                    skipTime_remove_time(ctx, min_time);
+                }
+            }
+        }
+    }
+
+    inline void removeNpuNodes(Engine &ctx,
+                               NpuID &id,
+                               ChakraNodes &chakraNodes,
+                               HardwareResource &hardwareResource,
+                               ProcessingCompTask &processingCompTask,
+                               ProcessingCommTasks &processingCommTasks)
+    {
+        if (SYS_LOG && id.value == 0)
+        {
+            printf("###############   exec removeNpuNodes.    ###############.\n");
         }
 
         if (SYS_LOG && id.value == 0)
@@ -593,7 +673,7 @@ namespace madsimple
             ProcessingCommTask result[MAX_FLOW_PER_NPU];
             int task_count = processingCommTasks.dequeueTasksByTime(t, result, MAX_FLOW_PER_NPU);
 
-            if (SYS_LOG && id.value == 0&&task_count>0)
+            if (SYS_LOG && id.value == 0 && task_count > 0)
             {
                 printf("npu id %d -> processingCommTasks over count :%d .\n", id.value, task_count);
             }
@@ -620,65 +700,6 @@ namespace madsimple
         }
     }
 
-    inline void processCommCheckFlow(Engine &ctx, NpuID &npu_id, NodeID &node_id, TaskFlows &taskFlows)
-    {
-        if (SYS_LOG && npu_id.value == 0)
-        {
-            printf("###############   exec sys processCommCheckFlow.    ###############.\n");
-        }
-
-        SysFlow flows_finish[MAX_FLOW_NUM_PER_COMM_NODE];
-        uint32_t flow_finish_count = checkFlowFinish(ctx, npu_id.value, flows_finish);
-        if (ENABLE_TEST)
-        {
-            for (int i = 0; i < 20; ++i)
-            {
-                if (taskFlows.flows[i].state == TaskState::START)
-                {
-                    taskFlows.flows[i].state = TaskState::FINISH;
-                    printf("test : flow id %d -> set flow finish.\n", taskFlows.flows[i].id);
-                }
-            }
-        }
-
-        if (flow_finish_count > 0)
-        {
-            taskFlows.updateFlows(flows_finish, flow_finish_count);
-        }
-
-        if (taskFlows.areAllTasksDone())
-        {
-            printf("node id %d -> taskFlows.areAllTasksDone\n", node_id);
-
-            ctx.get<ProcessingCommTasks>(ctx.data().chakra_nodes_entities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx));
-        }
-    }
-
-    // network logic
-
-    uint16_t frame_skiptime = 0;
-    inline void checkSkipTime(Engine &ctx, NextProcessTimes &t)
-    {
-        frame_skiptime++;
-        if (frame_skiptime / CHECK_SKIPTIME_INTERVAL_PER_FRAME == 0)
-        {
-            frame_skiptime = 0;
-            if (!isExistedFlow(ctx))
-            {
-                uint64_t min_time = skipTime_sort_time_rMin(ctx);
-                if (min_time != 0)
-                {
-                    addSimtime(ctx, min_time - getCurrentTime(ctx));
-                    if (SYS_LOG)
-                    {
-                        printf("skip to time:%d\n", getCurrentTime(ctx));
-                    }
-                    skipTime_remove_time(ctx, min_time);
-                }
-            }
-        }
-    }
-
     void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                          const Config &)
     {
@@ -689,7 +710,11 @@ namespace madsimple
                                                                    NpuID, ChakraNodes, HardwareResource, ProcessingCompTask, ProcessingCommTasks>>({sys_init});
         auto sys_process_comm = builder.addToGraph<ParallelForNode<Engine, processCommCheckFlow,
                                                                    NpuID, NodeID, TaskFlows>>({sys_process_node});
-        auto sys_skip_time = builder.addToGraph<ParallelForNode<Engine, checkSkipTime, NextProcessTimes>>({sys_process_comm});
+        
+        auto sys_remove_node=builder.addToGraph<ParallelForNode<Engine, removeNpuNodes,
+        NpuID, ChakraNodes, HardwareResource, ProcessingCompTask, ProcessingCommTasks>>({sys_process_comm});
+        
+        auto sys_skip_time = builder.addToGraph<ParallelForNode<Engine, checkSkipTime, NextProcessTimes>>({sys_remove_node});
 
         auto sys_process_time = builder.addToGraph<ParallelForNode<Engine, procssTime,
                                                                    SimTime>>({sys_skip_time});

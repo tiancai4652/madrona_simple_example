@@ -37,6 +37,8 @@ struct Sim : public madrona::WorldBase {
     Entity next_process_time_entity;
     Entity sys_config_entity;
 
+    Entity node_flows_exec_entity[MAX_CHAKRA_NODES][MAX_FLOW_NUM_PER_COMM_NODE];
+
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {
