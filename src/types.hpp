@@ -88,9 +88,6 @@ struct SimTimeProcessor : public madrona::Archetype<
 // 每个comm节点的最大通讯量
 #define MAX_FLOW_NUM_PER_COMM_NODE 999
 
-// 一帧内所有节点最大流完成数量
-#define MAX_FLOW_FINISH_NUM_ALL_COMM_NODE 999*10
-
 struct ID {
     uint32_t value;
 };
@@ -140,17 +137,23 @@ struct SysConfig : public madrona::Archetype<
 CommModel
 > {};
 
-struct CommParams {
-    uint32_t id;
-    uint64_t comm_size;
-    uint64_t comm_src;
-    uint64_t comm_dst;
-    uint32_t durationMicros;
-};
+// struct CommParams {
+//     uint64_t comm_size;
+//     uint64_t comm_src;
+//     uint64_t comm_dst;
+//     uint32_t durationMicros;
+//     CollectiveCommType coll_comm_type;
+// };
+
+enum TaskState : int32_t {
+    INIT=0,
+    START=1,
+    FINISH=2
+  }; 
 
 
 struct SysFlow {
-    uint32_t id;
+    int id;
     uint64_t comm_size;
     uint64_t comm_src;
     uint64_t comm_dst;
@@ -159,13 +162,53 @@ struct SysFlow {
     // 流执行顺序id
     uint32_t exec_index;
     // 是否执行完
-    bool is_none;
+    TaskState state;
     // 收端完成 or 发端完成
     bool is_send;
+
+    SysFlow()
+        : id(-1), // 初始化为 0
+        comm_size(0),
+        comm_src(0),
+        comm_dst(0),
+        durationMicros(0),
+        exec_index(0),
+        state(TaskState::INIT),
+        is_send(true)   // 初始化为 true
+    {}
 };
 
 struct TaskFlows{
-    SysFlow nodes[MAX_FLOW_NUM_PER_COMM_NODE];
+    SysFlow flows[MAX_FLOW_NUM_PER_COMM_NODE];
+
+    void updateFlows(const SysFlow flows_finish[], int flows_finish_size) {
+        for (int i = 0; i < flows_finish_size; ++i) {
+            const SysFlow &finishedFlow = flows_finish[i];
+            for (int j = 0; j < MAX_FLOW_NUM_PER_COMM_NODE; ++j) {
+                if (flows[j].id == finishedFlow.id) { // 查找 id 相同的元素
+                    flows[j].state = TaskState::FINISH; 
+                    flows[j].is_send = finishedFlow.is_send; // 赋值 is_send
+                    flows[j].durationMicros = finishedFlow.durationMicros; // 赋值 durationMicros
+                    break; // 找到匹配项后，跳出内层循环
+                }
+            }
+        }
+    }
+
+    // 检查是否所有的任务都完成了
+    bool areAllTasksDone() const {
+        for (int i = 0; i < MAX_FLOW_NUM_PER_COMM_NODE; ++i) {
+            if (flows[i].state==TaskState::INIT)
+            {
+                continue;
+            }
+            
+            if (flows[i].state==TaskState::START) { 
+                return false;
+            }
+        }
+        return true; 
+    }
 };
 
 struct ChakraNode {
@@ -238,26 +281,26 @@ NextProcessTimes
 
 struct ProcessingCompTask{
     int64_t time_finish_ns;
-    bool is_none;
+    TaskState state;
     int32_t node_id;
     // 默认构造函数
     ProcessingCompTask()
         : time_finish_ns(0), // 初始化为 0
-          is_none(true),     // 初始化为 true
+          state(TaskState::INIT),     // 初始化为 true
           node_id(-1)        // 初始化为 -1 (表示无效节点)
     {}
 };
 
 struct ProcessingCommTask{
     int64_t time_finish_ns;
-    bool is_none;
+    TaskState state;
     int32_t node_id;
     int32_t flow_count;
 
     // 默认构造函数
     ProcessingCommTask()
         : time_finish_ns(0), // 初始化为 0
-          is_none(true),     // 初始化为 true
+          state(TaskState::INIT),     // 初始化为 true
           node_id(-1),        // 初始化为 -1 (表示无效节点)
           flow_count(0)
     {}
@@ -276,7 +319,7 @@ struct ProcessingCommTasks{
     int getTotalFlowCount() const {
         int totalFlowCount = 0;
         for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
-            if (!tasks[i].is_none) { // 只统计有效任务
+            if (tasks[i].state!=TaskState::INIT) { // 只统计有效任务
                 totalFlowCount += tasks[i].flow_count;
             }
         }
@@ -286,19 +329,29 @@ struct ProcessingCommTasks{
     // 判断是否存在指定节点 ID 的方法
     bool containsNodeId(int32_t node_id) const {
         for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
-            if (!tasks[i].is_none && tasks[i].node_id == node_id) {
+            if (tasks[i].state==TaskState::START && tasks[i].node_id == node_id) {
                 return true; // 找到匹配的任务
             }
         }
         return false; // 未找到匹配的任务
     }
 
+    void setFinish(int32_t node_id, int64_t time_finish_ns)  {
+        for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
+            if (tasks[i].state==TaskState::START && tasks[i].node_id == node_id) {
+                tasks[i].state=TaskState::FINISH;
+                tasks[i].time_finish_ns=time_finish_ns;
+                break;
+            }
+        }
+    }
+
     // 添加任务的方法
     bool addTask(const ProcessingCommTask &new_task) {
         for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
-            if (tasks[i].is_none == true ){ // 找到第一个 node_id == -1 的位置
+            if (tasks[i].state== TaskState::INIT ){ // 找到第一个 node_id == -1 的位置
                 tasks[i] = new_task; // 放入新任务
-                tasks[i].is_none = false; // 标记任务为有效
+                tasks[i].state = TaskState::START; // 标记任务为有效
                 return true; // 添加成功
             }
         }
@@ -306,22 +359,22 @@ struct ProcessingCommTasks{
     }
 
     // 判断是否至少存在一个 is_none == false 的节点
-    bool is_none() const {
+    bool has_task() const {
         for (int i = 0; i < MAX_FLOW_PER_NPU; ++i) {
-            if (!tasks[i].is_none) { // 如果找到一个 is_none == false 的节点
-                return false;
+            if (tasks[i].state==TaskState::START||tasks[i].state==TaskState::FINISH) { // 如果找到一个 is_none == false 的节点
+                return true;
             }
         }
-        return true; // 如果所有节点的 is_none == true
+        return false; // 如果所有节点的 is_none == true
     }
 
     // 查找 time_finish_ns <= t 的所有任务，并将这些任务的 is_none 设置为 true
     int dequeueTasksByTime(int64_t t, ProcessingCommTask result[], int max_result_size) {
         int count = 0;
         for (int i = 0; i < MAX_FLOW_PER_NPU && count < max_result_size; ++i) {
-            if (!tasks[i].is_none && tasks[i].time_finish_ns <= t) {
+            if (tasks[i].state==TaskState::FINISH && tasks[i].time_finish_ns <= t) {
                 result[count++] = tasks[i];     // 将任务放入结果数组
-                tasks[i].is_none = true;       // 标记任务为无效（出队）
+                tasks[i].state = TaskState::INIT;       // 标记任务为无效（出队）
                 // tasks[i].node_id = -1;         // 重置 node_id
                 // tasks[i].time_finish_ns = 0;   // 重置 time_finish_ns
             }
@@ -343,10 +396,13 @@ struct NpuNode : public madrona::Archetype<
 // ID &id, CollectiveCommType &collective_comm_type, CommParams &comm_params,TaskFlows &taskFlows
 struct ProcessComm_E : public madrona::Archetype<
     ID,
-    CollectiveCommType,
-    CommParams,
-    TaskFlows
+    // CollectiveCommType,
+    // CommParams,
+    TaskFlows,
+    madrona::Entity
 > {};
+
+
 // ------------------------------------------
 
 }
