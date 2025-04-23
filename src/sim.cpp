@@ -36,7 +36,6 @@ namespace madsimple
         registry.registerComponent<ProcessingCompTask>();
         registry.registerComponent<ProcessingCommTasks>();
         registry.registerComponent<Chakra_Nodp_Nodes>();
-        registry.registerComponent<Entity>();
         registry.registerArchetype<NpuNode>();
 
         registry.registerComponent<NextProcessTimes>();
@@ -48,8 +47,6 @@ namespace madsimple
         registry.registerComponent<TaskFlows>();
         registry.registerArchetype<ProcessComm_E>();
 
-       
-
         // Export tensors for pytorch
         registry.exportColumn<Agent, Reset>((uint32_t)ExportID::Reset);
         registry.exportColumn<Agent, Action>((uint32_t)ExportID::Action);
@@ -60,7 +57,6 @@ namespace madsimple
     }
 
     // -----------------------------------------------------------------------------------
-
 
     // 将整数数组解析为 ChakraNodes 数组
     int parseChakraNodes(const ChakraNodesData &chakraNodesData, int row, ChakraNode parsedNodes[], int intArrayLength = chakra_nodes_data_length, int maxNodes = MAX_CHAKRA_NODES)
@@ -258,13 +254,13 @@ namespace madsimple
     // func
     inline void setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
     {
-        printf("set flow id %d: %d->%d %d, \n", flow_id, comm_src, comm_dst, comm_size);    
+        printf("set flow id %d: %d->%d %d, \n", flow_id, comm_src, comm_dst, comm_size);
     }
 
     // network interface
     // 检测/获取流完成事件：返回流完成数量，同时把流完成事件赋值flows_finish
     // func
-    inline uint32_t checkFlowFinish(Engine &ctx,uint32_t npu_id, SysFlow flows_finish[])
+    inline uint32_t checkFlowFinish(Engine &ctx, uint32_t npu_id, SysFlow flows_finish[])
     {
         return 0;
     }
@@ -384,7 +380,8 @@ namespace madsimple
             ctx.get<HardwareResource>(npuNode) = HardwareResource();
             ctx.get<ProcessingCompTask>(npuNode) = ProcessingCompTask();
             ctx.get<ProcessingCommTasks>(npuNode) = ProcessingCommTasks();
-            ctx.get<Entity>(npuNode) = npuNode;
+            // ctx.get<Entity>(npuNode) = npuNode;
+
             printf("npu %d: turn %d nodes.\n", i, nodeCount);
             ctx.data().chakra_nodes_entities[i] = npuNode;
         }
@@ -398,12 +395,17 @@ namespace madsimple
                                 ChakraNodes &chakraNodes,
                                 HardwareResource &hardwareResource,
                                 ProcessingCompTask &processingCompTask,
-                                ProcessingCommTasks &processingCommTasks,
-                                Entity &e)
+                                ProcessingCommTasks &processingCommTasks
+                                )
     {
         if (SYS_LOG)
         {
             printf("--------------------------------------.\n");
+            printf("tasks[0].state:%d\n",processingCommTasks.tasks[0].state);
+
+            // Entity e1= ctx.get<Entity>(xx);
+            // printf("tasks[0].state:%d\n",ctx.get<ProcessingCommTasks>(e1).tasks[0].state);
+
         }
 
         // append nodes
@@ -411,7 +413,7 @@ namespace madsimple
         {
             ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
             int count = filterNoDependencyNodes(chakraNodes, current_exec_nodes);
-           
+
             // process no np nodes
             for (size_t i = 0; i < count; i++)
             {
@@ -461,32 +463,31 @@ namespace madsimple
                 }
                 case NodeType::COMM_SEND_NODE:
                 {
-                    
+
                     ProcessingCommTask processingCommTask = ProcessingCommTask();
                     if (SYS_LOG && id.value == 0)
                     {
-                        printf("processingCommTask %d -> %d .\n", node.comm_src,node.comm_dst);
+                        printf("processingCommTask %d -> %d .\n", node.comm_src, node.comm_dst);
                     }
                     processingCommTask.state = TaskState::START;
                     processingCommTask.node_id = node.id;
-                    processingCommTask.flow_count=1;
+                    processingCommTask.flow_count = 1;
                     processingCommTasks.addTask(processingCommTask);
 
                     // create comm entity
                     Entity process_e = ctx.makeEntity<ProcessComm_E>();
-                    ctx.get<Entity>(process_e) = e;
                     ctx.get<ID>(process_e).value = node.id;
-                    uint32_t flow_id=processingCommTasks.getTotalFlowCount()+1;
-                    ctx.get<TaskFlows>(process_e).flows[0]=SysFlow();
-                    ctx.get<TaskFlows>(process_e).flows[0].id=flow_id;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_size=node.comm_size;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_src=node.comm_src;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_dst=node.comm_dst;
-                    ctx.get<TaskFlows>(process_e).flows[0].state=TaskState::START;
-                    ctx.get<TaskFlows>(process_e).flows[0].is_send=true;
-                    
+                    uint32_t flow_id = processingCommTasks.getTotalFlowCount() + 1;
+                    ctx.get<TaskFlows>(process_e).flows[0] = SysFlow();
+                    ctx.get<TaskFlows>(process_e).flows[0].id = flow_id;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_size = node.comm_size;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_src = node.comm_src;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_dst = node.comm_dst;
+                    ctx.get<TaskFlows>(process_e).flows[0].state = TaskState::START;
+                    ctx.get<TaskFlows>(process_e).flows[0].is_send = true;
+
                     // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
-                    setFlow(ctx,node.comm_src,node.comm_dst,node.comm_size,flow_id);
+                    setFlow(ctx, node.comm_src, node.comm_dst, node.comm_size, flow_id);
 
                     break;
                 }
@@ -495,28 +496,27 @@ namespace madsimple
                     ProcessingCommTask processingCommTask = ProcessingCommTask();
                     if (SYS_LOG && id.value == 0)
                     {
-                        printf("processingCommTask %d -> %d .\n", node.comm_src,node.comm_dst);
+                        printf("processingCommTask %d -> %d .\n", node.comm_src, node.comm_dst);
                     }
                     processingCommTask.state = TaskState::START;
                     processingCommTask.node_id = node.id;
-                    processingCommTask.flow_count=1;
+                    processingCommTask.flow_count = 1;
                     processingCommTasks.addTask(processingCommTask);
 
                     // create comm entity
                     Entity process_e = ctx.makeEntity<ProcessComm_E>();
-                    ctx.get<Entity>(process_e) = e;
                     ctx.get<ID>(process_e).value = node.id;
-                    uint32_t flow_id=processingCommTasks.getTotalFlowCount()+1;
-                    ctx.get<TaskFlows>(process_e).flows[0]=SysFlow();
-                    ctx.get<TaskFlows>(process_e).flows[0].id=flow_id;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_size=node.comm_size;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_src=node.comm_src;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_dst=node.comm_dst;
-                    ctx.get<TaskFlows>(process_e).flows[0].state=TaskState::START;
-                    ctx.get<TaskFlows>(process_e).flows[0].is_send=false;
-                    
+                    uint32_t flow_id = processingCommTasks.getTotalFlowCount() + 1;
+                    ctx.get<TaskFlows>(process_e).flows[0] = SysFlow();
+                    ctx.get<TaskFlows>(process_e).flows[0].id = flow_id;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_size = node.comm_size;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_src = node.comm_src;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_dst = node.comm_dst;
+                    ctx.get<TaskFlows>(process_e).flows[0].state = TaskState::START;
+                    ctx.get<TaskFlows>(process_e).flows[0].is_send = false;
+
                     // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
-                    setFlow(ctx,node.comm_src,node.comm_dst,node.comm_size,flow_id);
+                    setFlow(ctx, node.comm_src, node.comm_dst, node.comm_size, flow_id);
 
                     break;
                 }
@@ -529,25 +529,23 @@ namespace madsimple
                     }
                     processingCommTask.state = TaskState::START;
                     processingCommTask.node_id = node.id;
-                    processingCommTask.flow_count=1;
+                    processingCommTask.flow_count = 1;
                     processingCommTasks.addTask(processingCommTask);
 
                     // create comm entity
                     Entity process_e = ctx.makeEntity<ProcessComm_E>();
-                    ctx.get<Entity>(process_e) = e;
                     ctx.get<ID>(process_e).value = node.id;
-                    uint32_t flow_id=processingCommTasks.getTotalFlowCount()+1;
-                    ctx.get<TaskFlows>(process_e).flows[0]=SysFlow();
-                    ctx.get<TaskFlows>(process_e).flows[0].id=flow_id;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_size=100000;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_src=0;
-                    ctx.get<TaskFlows>(process_e).flows[0].comm_dst=1;
-                    ctx.get<TaskFlows>(process_e).flows[0].state=TaskState::START;
-                    ctx.get<TaskFlows>(process_e).flows[0].is_send=true;
-                    
-                    // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
-                    setFlow(ctx,0,1,100000,flow_id);
+                    uint32_t flow_id = processingCommTasks.getTotalFlowCount() + 1;
+                    ctx.get<TaskFlows>(process_e).flows[0] = SysFlow();
+                    ctx.get<TaskFlows>(process_e).flows[0].id = flow_id;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_size = 100000;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_src = 0;
+                    ctx.get<TaskFlows>(process_e).flows[0].comm_dst = 1;
+                    ctx.get<TaskFlows>(process_e).flows[0].state = TaskState::START;
+                    ctx.get<TaskFlows>(process_e).flows[0].is_send = true;
 
+                    // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
+                    setFlow(ctx, 0, 1, 100000, flow_id);
                     break;
                 }
                 default:
@@ -560,7 +558,7 @@ namespace madsimple
         }
 
         // process comp
-        if (processingCompTask.state==TaskState::START && (processingCompTask.time_finish_ns >= getCurrentTime(ctx)))
+        if (processingCompTask.state == TaskState::START && (processingCompTask.time_finish_ns >= getCurrentTime(ctx)))
         {
             if (SYS_LOG)
             {
@@ -581,9 +579,19 @@ namespace madsimple
         // process comm
         if (processingCommTasks.has_task())
         {
+            if (SYS_LOG && id.value == 0)
+            {
+                printf("node id %d -> processingCommTasks.has_task() .\n", id.value);
+            }
+
             int64_t t = getCurrentTime(ctx);
             ProcessingCommTask result[MAX_FLOW_PER_NPU];
             int task_count = processingCommTasks.dequeueTasksByTime(t, result, MAX_FLOW_PER_NPU);
+
+            if (SYS_LOG && id.value == 0)
+            {
+                printf("node id %d -> dequeue_task_count :%d .\n", id.value, task_count);
+            }
 
             if (task_count > 0)
             {
@@ -607,49 +615,35 @@ namespace madsimple
         }
     }
 
-    inline void processCommCheckFlow(Engine &ctx,Entity &e, ID &node_id, TaskFlows &taskFlows )
+    inline void processCommCheckFlow(Engine &ctx, ID &node_id, TaskFlows &taskFlows)
     {
-         SysFlow flows_finish[MAX_FLOW_NUM_PER_COMM_NODE];
-         uint32_t flow_finish_count=checkFlowFinish(ctx,node_id.value,flows_finish);
-        if(ENABLE_TEST)
+        printf("x tasks[0].state:%d\n",ctx.get<ProcessingCommTasks>((ctx.data().chakra_nodes_entities[node_id.value])).tasks[0].state);
+        SysFlow flows_finish[MAX_FLOW_NUM_PER_COMM_NODE];
+        uint32_t flow_finish_count = checkFlowFinish(ctx, node_id.value, flows_finish);
+        if (ENABLE_TEST)
         {
-            for (int i = 0; i < 20; ++i) {
-                    if (taskFlows.flows[i].state== TaskState::START) { 
-                        taskFlows.flows[i].state = TaskState::FINISH; 
-                    }
+            for (int i = 0; i < 20; ++i)
+            {
+                if (taskFlows.flows[i].state == TaskState::START)
+                {
+                    taskFlows.flows[i].state = TaskState::FINISH;
+                    printf("flow id %d -> test set flow finish.\n",taskFlows.flows[i].id);
                 }
+            }
         }
 
-         if(flow_finish_count>0)
-         {
-            taskFlows.updateFlows(flows_finish,flow_finish_count);
-         }
-         if(taskFlows.areAllTasksDone())
-         {
-            ctx.get<ProcessingCommTasks>(e).setFinish(node_id.value,getCurrentTime(ctx));
-         }
-        //  printf("10\n");
+        if (flow_finish_count > 0)
+        {
+            taskFlows.updateFlows(flows_finish, flow_finish_count);
+        }
 
-        // switch (comm_type)
-        // {
-        // case NodeType::COMM_SEND_NODE:
-        // {
-            
-        //     break;
-        // }
-        // case NodeType::COMM_RECV_NODE:
-        // {
+        if (taskFlows.areAllTasksDone())
+        {
+            printf("node id %d -> taskFlows.areAllTasksDone\n", node_id);
 
-        //     break;
-        // }
-        // case NodeType::COMM_COLL_NODE:
-        // {
-
-        //     break;
-        // }
-        // default:
-        //     break;
-        // }
+            ctx.get<ProcessingCommTasks>(ctx.data().chakra_nodes_entities[node_id.value]).setFinish(node_id.value, getCurrentTime(ctx));
+        }
+    
     }
 
     // network logic
@@ -684,14 +678,39 @@ namespace madsimple
         auto sys_init = builder.addToGraph<ParallelForNode<Engine, init,
                                                            Action, Reset, GridPos, Reward, Done, CurStep, ChakraNodesData>>({});
         auto sys_process_node = builder.addToGraph<ParallelForNode<Engine, processNpuNodes,
-                                                                   ID, ChakraNodes, HardwareResource, ProcessingCompTask, ProcessingCommTasks, Entity>>({sys_init});
+                                                                   ID, ChakraNodes, HardwareResource, ProcessingCompTask, ProcessingCommTasks>>({sys_init});
         auto sys_process_comm = builder.addToGraph<ParallelForNode<Engine, processCommCheckFlow,
-                                                                   Entity, ID, TaskFlows>>({sys_process_node});
+                                                                    ID, TaskFlows>>({sys_process_node});
         auto sys_skip_time = builder.addToGraph<ParallelForNode<Engine, checkSkipTime, NextProcessTimes>>({sys_process_comm});
 
         auto sys_process_time = builder.addToGraph<ParallelForNode<Engine, procssTime,
                                                                    SimTime>>({sys_skip_time});
     }
+
+
+
+
+
+
+
+
+
+
+
+    inline void SetEntity()
+{}
+
+
+    inline void ReadEntity()
+    {}
+
+
+
+
+
+
+
+
 
     Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
         : WorldBase(ctx),
