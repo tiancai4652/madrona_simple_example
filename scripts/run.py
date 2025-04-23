@@ -70,3 +70,5 @@ for i in range(5):
     # data_tensor=ints_to_tensor([[1],[2]])
    
     grid_world.step()
+    
+    print(f"Step {i+1} frame:\n")

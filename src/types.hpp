@@ -99,7 +99,12 @@ namespace madsimple
 // 每个comm节点的最大通讯量
 #define MAX_FLOW_NUM_PER_COMM_NODE 999
 
-    struct ID
+    struct NpuID
+    {
+        uint32_t value;
+    };
+
+    struct NodeID
     {
         uint32_t value;
     };
@@ -378,7 +383,8 @@ namespace madsimple
         {
             for (int i = 0; i < MAX_FLOW_PER_NPU; ++i)
             {
-                if (tasks[i].state == TaskState::START && tasks[i].node_id == node_id)
+                // 任务状态可能是start也可能是finish，还没来得及处理
+                if (tasks[i].state != TaskState::INIT && tasks[i].node_id == node_id)
                 {
                     return true; // 找到匹配的任务
                 }
@@ -388,10 +394,8 @@ namespace madsimple
 
         void setFinish(int32_t node_id, int64_t time_finish_ns)
         {
-            printf("tasks[0].state:%d\n",tasks[0].state);
             for (int i = 0; i < MAX_FLOW_PER_NPU; ++i)
-            {
-               
+            {      
                 if (tasks[i].state == TaskState::START && tasks[i].node_id == node_id)
                 {
                     printf("node id %d -> setFinish\n",node_id);
@@ -436,12 +440,6 @@ namespace madsimple
             int count = 0;
             for (int i = 0; i < MAX_FLOW_PER_NPU && count < max_result_size; ++i)
             {
-                if (tasks[i].state == TaskState::FINISH)
-                {
-                    printf("tasks[i].state:%d\n", tasks[i].state);
-                    printf("tasks[i].time_finish_ns:%d\n", tasks[i].time_finish_ns);
-                    printf("t:%d\n", t);
-                }
                 if (tasks[i].state == TaskState::FINISH && tasks[i].time_finish_ns <= t)
                 {
                     result[count++] = tasks[i];       // 将任务放入结果数组
@@ -455,7 +453,7 @@ namespace madsimple
     };
 
     struct NpuNode : public madrona::Archetype<
-                         ID,
+                         NpuID,
                          ChakraNodes,
                          HardwareResource,
                          ProcessingCompTask,
@@ -467,7 +465,7 @@ namespace madsimple
 
     // ID &id, CollectiveCommType &collective_comm_type, CommParams &comm_params,TaskFlows &taskFlows
     struct ProcessComm_E : public madrona::Archetype<
-                               ID,
+    NpuID,NodeID,
                                // CollectiveCommType,
                                // CommParams,
                                TaskFlows
