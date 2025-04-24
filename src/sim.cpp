@@ -400,7 +400,7 @@ namespace madsimple
     {
         if (SYS_LOG && id.value == 0)
         {
-            printf("###############   exec processNpuNodes.    ###############.\n");
+            printf("### sys1 ### : exec processNpuNodes.\n");
         }
 
         // append nodes
@@ -566,7 +566,7 @@ namespace madsimple
     {
         if (SYS_LOG && npu_id.value == 0)
         {
-            printf("###############   exec sys processCommCheckFlow.    ###############.\n");
+            printf("### sys2 ### : exec processCommCheckFlow.\n");
         }
 
         SysFlow flows_finish[MAX_FLOW_NUM_PER_COMM_NODE];
@@ -603,6 +603,11 @@ namespace madsimple
     uint16_t frame_skiptime = 0;
     inline void checkSkipTime(Engine &ctx, NextProcessTimes &t)
     {
+        if (SYS_LOG)
+        {
+            printf("### sys4 ### : exec checkSkipTime.\n");
+        }
+
         frame_skiptime++;
         if (frame_skiptime / CHECK_SKIPTIME_INTERVAL_PER_FRAME == 0)
         {
@@ -632,7 +637,7 @@ namespace madsimple
     {
         if (SYS_LOG && id.value == 0)
         {
-            printf("###############   exec removeNpuNodes.    ###############.\n");
+            printf("### sys3 ### : exec removeNpuNodes.\n");
         }
 
         if (SYS_LOG && id.value == 0)
@@ -642,10 +647,10 @@ namespace madsimple
         // process comp
         if (processingCompTask.state == TaskState::START && (processingCompTask.time_finish_ns >= getCurrentTime(ctx)))
         {
-            if (SYS_LOG && id.value == 0)
-            {
-                printf("processingCompTask %d over.\n", processingCompTask.node_id);
-            }
+            // if (SYS_LOG && id.value == 0)
+            // {
+            //     printf("processingCompTask %d over.\n", processingCompTask.node_id);
+            // }
             // release node.
             removeNode(chakraNodes, processingCompTask.node_id);
             if (SYS_LOG && id.value == 0)
@@ -682,10 +687,10 @@ namespace madsimple
             {
                 for (size_t i = 0; i < task_count; i++)
                 {
-                    if (SYS_LOG && id.value == 0)
-                    {
-                        printf("processingCompTask over.\n");
-                    }
+                    // if (SYS_LOG && id.value == 0)
+                    // {
+                    //     printf("processingCompTask over.\n");
+                    // }
                     // release node.
                     removeNode(chakraNodes, processingCommTasks.tasks[i].node_id);
                     if (SYS_LOG && id.value == 0)
