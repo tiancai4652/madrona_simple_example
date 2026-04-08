@@ -381,6 +381,8 @@ int32_t Sim::lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const
 
 void Sim::injectFlowDef(Engine &ctx, const FlowDef &flow)
 {
+    (void)ctx;
+
     NodeId path[MAX_PATH_NODES] {};
     int32_t path_len = getPath(flow.src_node, flow.dst_node, flow.id,
         path, MAX_PATH_NODES);
@@ -425,24 +427,6 @@ void Sim::injectFlowDef(Engine &ctx, const FlowDef &flow)
         }
     }
 
-    int32_t src_port_id = topoNodes[src_slot].neighbors[first_neighbor_idx].port_id;
-    Entity flow_entity = ctx.makeEntity<FlowTag>();
-    ctx.get<FlowTagState>(flow_entity) = FlowTagState {
-        .port_id = src_port_id,
-        .flow_id = flow.id,
-        .priority = flow.priority,
-        .in_bw = topoNodes[src_slot].port_bw,
-        .out_bw = 0.0,
-        .prev_out_bw = 0.0,
-        .backlog = 0.0,
-        .last_backlog_time = now,
-        .remaining = flow.size,
-        .last_remaining_time = now,
-        .is_source = 1,
-        .downstream_created = 0,
-        .next_port_id = lookupFlowRouteNext(flow.id, src_port_id),
-        .ingress_port_id = -1,
-    };
 }
 
 void Sim::schedulePendingFlows(Engine &ctx)
@@ -543,6 +527,8 @@ void Sim::loadTopo(Engine &ctx)
 
 void Sim::loadFlow(Engine &ctx)
 {
+    (void)ctx;
+
     FlowDef flows[MAX_FLOWS] {};
     int32_t flow_count = 0;
     buildHardcodedFlows(flows, flow_count);
@@ -565,11 +551,6 @@ void Sim::loadFlow(Engine &ctx)
         }
     }
 
-    for (int32_t i = 0; i < numFlowDefs; i++) {
-        injectFlowDef(ctx, flowDefs[i]);
-    }
-
-    numPendingFlows = 0;
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -589,16 +570,6 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     resetNetworkState();
     loadTopo(ctx);
     loadFlow(ctx);
-
-    Entity agent = ctx.makeEntity<Agent>();
-    ctx.get<Action>(agent) = Action::None;
-    ctx.get<GridPos>(agent) = GridPos {
-        0,
-        0,
-    };
-    ctx.get<Reward>(agent).r = 0.f;
-    ctx.get<Done>(agent).episodeDone = 0.f;
-    ctx.get<CurStep>(agent).step = 0;
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);
