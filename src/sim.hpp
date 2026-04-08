@@ -20,6 +20,12 @@ constexpr int32_t MAX_FLOWS = 16;
 constexpr int32_t MAX_PATH_NODES = 16;
 constexpr int32_t MAX_ECMP_NEXT_HOPS = 8;
 constexpr int32_t MAX_FLOW_ROUTE_STEPS = 16;
+constexpr int32_t MAX_DELAYED_EVENTS = 64;
+constexpr int32_t MAX_EVENTS_PER_STEP = 64;
+constexpr int32_t MAX_TAG_INDEX = 128;
+constexpr int32_t MAX_SOURCE_TAGS = 64;
+constexpr int32_t MAX_INGRESS_TAGS = 128;
+constexpr int32_t MAX_FLOW_COMPLETIONS = 64;
 
 struct TopoNeighbor {
     NodeId neighbor_id = -1;
@@ -53,6 +59,54 @@ struct FlowRouteState {
     FlowRouteStep steps[MAX_FLOW_ROUTE_STEPS] {};
 };
 
+struct FlowArrivalEv {
+    int32_t port_id = -1;
+    FlowId flow_id = -1;
+    Bytes size = 0.0;
+    Bw in_bw = 0.0;
+    int32_t is_source = 0;
+    int32_t priority = 0;
+};
+
+struct BwUpdateEv {
+    int32_t port_id = -1;
+    FlowId flow_id = -1;
+    Bw in_bw = 0.0;
+};
+
+struct DelayedEvent {
+    enum class Type : int32_t {
+        Arrival,
+        BwUpdate,
+    } type = Type::Arrival;
+
+    Time t = 0.0;
+    FlowArrivalEv arrival {};
+    BwUpdateEv bwupd {};
+};
+
+struct TagIndexEntry {
+    int32_t port_id = -1;
+    FlowId flow_id = -1;
+    madrona::Entity entity = madrona::Entity::none();
+};
+
+struct SourceTagEntry {
+    FlowId flow_id = -1;
+    madrona::Entity entity = madrona::Entity::none();
+};
+
+struct IngressTagEntry {
+    int32_t ingress_port_id = -1;
+    FlowId flow_id = -1;
+    madrona::Entity entity = madrona::Entity::none();
+};
+
+struct FlowCompletionEntry {
+    FlowId flow_id = -1;
+    FlowCompletionRecord record {};
+};
+
 struct Sim : public madrona::WorldBase {
     struct Config {
         uint32_t maxEpisodeLength;
@@ -84,9 +138,28 @@ struct Sim : public madrona::WorldBase {
                     FlowId flow_id,
                     NodeId *out_path,
                     int32_t max_path) const;
-    void injectFlowDef(Engine &ctx, const FlowDef &flow);
-    void schedulePendingFlows(Engine &ctx);
+    void injectFlowDef(const FlowDef &flow);
+    void injectFlow(int32_t src_port_id, const FlowDef &flow);
+    void schedulePendingFlows();
+    void deliverEvents();
+    void flowArrivalSystem(Engine &ctx);
+    void bwUpdateIngressSystem(Engine &ctx);
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
+    madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;
+    madrona::Entity createTagOnPort(Engine &ctx,
+                                    int32_t port_id,
+                                    FlowId flow_id,
+                                    Bw in_bw,
+                                    Bytes size,
+                                    bool is_source,
+                                    int32_t priority);
+    void destroyTag(Engine &ctx,
+                    madrona::Entity tag_entity,
+                    bool propagate_cleanup,
+                    Time logical_now);
+    void recordFlowCompletion(FlowId flow_id, Time end_time);
+    void materializeBacklog(FlowTagState &tag, Time at_time);
+    void pushDelayedEvent(const DelayedEvent &ev);
 
     EpisodeManager *episodeMgr;
     const GridState *grid;
@@ -112,6 +185,22 @@ struct Sim : public madrona::WorldBase {
     FlowDef pendingFlows[MAX_FLOWS];
     int32_t numFlowRoutes;
     FlowRouteState flowRoutes[MAX_FLOWS];
+
+    int32_t numDelayedEvents;
+    DelayedEvent delayedEvents[MAX_DELAYED_EVENTS];
+    int32_t numInboxArrival;
+    FlowArrivalEv inboxArrival[MAX_EVENTS_PER_STEP];
+    int32_t numInboxBwUpdate;
+    BwUpdateEv inboxBwUpdate[MAX_EVENTS_PER_STEP];
+    int32_t numTagIndexEntries;
+    TagIndexEntry tagIndex[MAX_TAG_INDEX];
+    int32_t numSourceTags;
+    SourceTagEntry sourceTags[MAX_SOURCE_TAGS];
+    int32_t numIngressTags;
+    IngressTagEntry ingressTags[MAX_INGRESS_TAGS];
+    int32_t numFlowCompletions;
+    FlowCompletionEntry flowCompletions[MAX_FLOW_COMPLETIONS];
+    int32_t enableBuffer;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

@@ -18,22 +18,61 @@ inline int32_t hashFlowIndex(FlowId flow_id, int32_t count)
     return (int32_t)(v % (uint64_t)count);
 }
 
-inline void tick(Engine &,
-                 Action &action,
-                 Reset &reset,
-                 GridPos &,
-                 Reward &reward,
-                 Done &done,
-                 CurStep &episode_step)
-{
-    action = Action::None;
-    if (reset.resetNow != 0) {
-        reset.resetNow = 0;
+struct StepScheduleNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().schedulePendingFlows();
     }
-    reward.r = 0.f;
-    done.episodeDone = 0.f;
-    episode_step.step += 1;
-}
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepScheduleNode>(deps);
+    }
+};
+
+struct StepDeliverNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().deliverEvents();
+    }
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepDeliverNode>(deps);
+    }
+};
+
+struct StepArrivalNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().flowArrivalSystem(ctx);
+    }
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepArrivalNode>(deps);
+    }
+};
+
+struct StepBwUpdateNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().bwUpdateIngressSystem(ctx);
+    }
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepBwUpdateNode>(deps);
+    }
+};
 
 }
 
@@ -70,8 +109,10 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                      const Config &)
 {
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
-    builder.addToGraph<ParallelForNode<Engine, tick,
-        Action, Reset, GridPos, Reward, Done, CurStep>>({});
+    TaskGraphNodeID n0 = builder.addToGraph<StepScheduleNode>({});
+    TaskGraphNodeID n1 = builder.addToGraph<StepDeliverNode>({n0});
+    TaskGraphNodeID n2 = builder.addToGraph<StepArrivalNode>({n1});
+    builder.addToGraph<StepBwUpdateNode>({n2});
 }
 
 void Sim::resetNetworkState()
@@ -84,6 +125,14 @@ void Sim::resetNetworkState()
     numFlowDefs = 0;
     numPendingFlows = 0;
     numFlowRoutes = 0;
+    numDelayedEvents = 0;
+    numInboxArrival = 0;
+    numInboxBwUpdate = 0;
+    numTagIndexEntries = 0;
+    numSourceTags = 0;
+    numIngressTags = 0;
+    numFlowCompletions = 0;
+    enableBuffer = 1;
 
     for (int32_t i = 0; i < MAX_TOPO_PORTS; i++) {
         portEntities[i] = Entity::none();
@@ -111,6 +160,26 @@ void Sim::resetNetworkState()
         flowDefs[i] = FlowDef {};
         pendingFlows[i] = FlowDef {};
         flowRoutes[i] = FlowRouteState {};
+    }
+
+    for (int32_t i = 0; i < MAX_DELAYED_EVENTS; i++) {
+        delayedEvents[i] = DelayedEvent {};
+    }
+    for (int32_t i = 0; i < MAX_EVENTS_PER_STEP; i++) {
+        inboxArrival[i] = FlowArrivalEv {};
+        inboxBwUpdate[i] = BwUpdateEv {};
+    }
+    for (int32_t i = 0; i < MAX_TAG_INDEX; i++) {
+        tagIndex[i] = TagIndexEntry {};
+    }
+    for (int32_t i = 0; i < MAX_SOURCE_TAGS; i++) {
+        sourceTags[i] = SourceTagEntry {};
+    }
+    for (int32_t i = 0; i < MAX_INGRESS_TAGS; i++) {
+        ingressTags[i] = IngressTagEntry {};
+    }
+    for (int32_t i = 0; i < MAX_FLOW_COMPLETIONS; i++) {
+        flowCompletions[i] = FlowCompletionEntry {};
     }
 }
 
@@ -379,10 +448,281 @@ int32_t Sim::lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const
     return -1;
 }
 
-void Sim::injectFlowDef(Engine &ctx, const FlowDef &flow)
+Entity Sim::findTag(int32_t port_id, FlowId flow_id) const
 {
-    (void)ctx;
+    for (int32_t i = 0; i < numTagIndexEntries; i++) {
+        if (tagIndex[i].port_id == port_id && tagIndex[i].flow_id == flow_id) {
+            return tagIndex[i].entity;
+        }
+    }
 
+    return Entity::none();
+}
+
+void Sim::materializeBacklog(FlowTagState &tag, Time at_time)
+{
+    if (tag.is_source != 0) {
+        tag.backlog = 0.0;
+        tag.last_backlog_time = at_time;
+        return;
+    }
+
+    if (at_time > tag.last_backlog_time) {
+        Time elapsed = at_time - tag.last_backlog_time;
+        tag.backlog += (tag.in_bw - tag.out_bw) * elapsed;
+        if (tag.backlog < 0.0) {
+            tag.backlog = 0.0;
+        }
+        tag.last_backlog_time = at_time;
+    }
+}
+
+void Sim::recordFlowCompletion(FlowId flow_id, Time end_time)
+{
+    for (int32_t i = 0; i < numFlowCompletions; i++) {
+        if (flowCompletions[i].flow_id == flow_id) {
+            if (end_time > flowCompletions[i].record.end_time) {
+                flowCompletions[i].record.end_time = end_time;
+            }
+            return;
+        }
+    }
+
+    if (numFlowCompletions >= MAX_FLOW_COMPLETIONS) {
+        return;
+    }
+
+    for (int32_t i = 0; i < numFlowDefs; i++) {
+        if (flowDefs[i].id == flow_id) {
+            FlowCompletionEntry &entry = flowCompletions[numFlowCompletions++];
+            entry.flow_id = flow_id;
+            entry.record = FlowCompletionRecord {
+                .flow_id = flow_id,
+                .src_node = flowDefs[i].src_node,
+                .dst_node = flowDefs[i].dst_node,
+                .size = flowDefs[i].size,
+                .start_time = flowDefs[i].start_time,
+                .end_time = end_time,
+                .priority = flowDefs[i].priority,
+            };
+            return;
+        }
+    }
+}
+
+void Sim::destroyTag(Engine &ctx,
+                     Entity tag_entity,
+                     bool propagate_cleanup,
+                     Time logical_now)
+{
+    if (tag_entity == Entity::none()) {
+        return;
+    }
+
+    FlowTagState tag = ctx.get<FlowTagState>(tag_entity);
+    Time effective_now = logical_now >= 0.0 ? logical_now : now;
+
+    if (tag.next_port_id < 0) {
+        recordFlowCompletion(tag.flow_id, effective_now);
+    }
+
+    if (propagate_cleanup && tag.next_port_id >= 0) {
+        if (tag.downstream_created != 0) {
+            int32_t src_node_slot = findNodeSlot(portToNode[tag.port_id]);
+            int32_t dst_node_slot = findNodeSlot(portToNode[tag.next_port_id]);
+            Time delay = 0.0;
+            if (src_node_slot >= 0 && dst_node_slot >= 0) {
+                delay = linkDelays[src_node_slot][dst_node_slot];
+                if (delay < 0.0) {
+                    delay = 0.0;
+                }
+            }
+            DelayedEvent ev {};
+            ev.t = effective_now + delay;
+            ev.type = DelayedEvent::Type::BwUpdate;
+            ev.bwupd = BwUpdateEv {
+                .port_id = tag.next_port_id,
+                .flow_id = tag.flow_id,
+                .in_bw = 0.0,
+            };
+            pushDelayedEvent(ev);
+        } else {
+            int32_t cur = tag.port_id;
+            int32_t nxt = lookupFlowRouteNext(tag.flow_id, cur);
+            while (nxt >= 0) {
+                cur = nxt;
+                nxt = lookupFlowRouteNext(tag.flow_id, cur);
+            }
+            if (cur != tag.port_id) {
+                recordFlowCompletion(tag.flow_id, effective_now);
+            }
+        }
+    }
+
+    for (int32_t i = 0; i < numTagIndexEntries; i++) {
+        if (tagIndex[i].entity == tag_entity) {
+            for (int32_t j = i + 1; j < numTagIndexEntries; j++) {
+                tagIndex[j - 1] = tagIndex[j];
+            }
+            numTagIndexEntries -= 1;
+            break;
+        }
+    }
+
+    for (int32_t i = 0; i < numIngressTags; i++) {
+        if (ingressTags[i].entity == tag_entity) {
+            for (int32_t j = i + 1; j < numIngressTags; j++) {
+                ingressTags[j - 1] = ingressTags[j];
+            }
+            numIngressTags -= 1;
+            i -= 1;
+        }
+    }
+
+    for (int32_t i = 0; i < numSourceTags; i++) {
+        if (sourceTags[i].entity == tag_entity) {
+            for (int32_t j = i + 1; j < numSourceTags; j++) {
+                sourceTags[j - 1] = sourceTags[j];
+            }
+            numSourceTags -= 1;
+            break;
+        }
+    }
+
+    if (tag.port_id >= 0 && tag.port_id < numPorts) {
+        Entity port_entity = portEntities[tag.port_id];
+        if (port_entity != Entity::none()) {
+            ctx.get<DirtyPort>(port_entity).isDirty = 1;
+        }
+    }
+}
+
+void Sim::pushDelayedEvent(const DelayedEvent &ev)
+{
+    if (numDelayedEvents >= MAX_DELAYED_EVENTS) {
+        return;
+    }
+
+    int32_t idx = numDelayedEvents++;
+    delayedEvents[idx] = ev;
+
+    while (idx > 0 && delayedEvents[idx].t < delayedEvents[idx - 1].t) {
+        DelayedEvent tmp = delayedEvents[idx - 1];
+        delayedEvents[idx - 1] = delayedEvents[idx];
+        delayedEvents[idx] = tmp;
+        idx -= 1;
+    }
+}
+
+Entity Sim::createTagOnPort(Engine &ctx,
+                            int32_t port_id,
+                            FlowId flow_id,
+                            Bw in_bw,
+                            Bytes size,
+                            bool is_source,
+                            int32_t priority)
+{
+    if (port_id < 0 || port_id >= numPorts) {
+        return Entity::none();
+    }
+
+    Entity port_entity = portEntities[port_id];
+    if (port_entity == Entity::none()) {
+        return Entity::none();
+    }
+
+    Entity tag_entity = ctx.makeEntity<FlowTag>();
+    FlowTagState tag {};
+    tag.port_id = port_id;
+    tag.flow_id = flow_id;
+    tag.priority = priority;
+    tag.in_bw = in_bw;
+    tag.out_bw = 0.0;
+    tag.prev_out_bw = 0.0;
+    tag.backlog = 0.0;
+    tag.last_backlog_time = now;
+    tag.remaining = size;
+    tag.last_remaining_time = now;
+    tag.is_source = is_source ? 1 : 0;
+    tag.downstream_created = 0;
+    tag.next_port_id = lookupFlowRouteNext(flow_id, port_id);
+    tag.ingress_port_id = -1;
+
+    if (!is_source) {
+        for (int32_t i = 0; i < numFlowRoutes; i++) {
+            if (flowRoutes[i].flow_id != flow_id) {
+                continue;
+            }
+            for (int32_t j = 0; j < flowRoutes[i].num_steps; j++) {
+                if (flowRoutes[i].steps[j].next_port_id == port_id) {
+                    int32_t upstream_port = flowRoutes[i].steps[j].port_id;
+                    if (upstream_port >= 0 && upstream_port < numPorts) {
+                        tag.ingress_port_id = peerPort[upstream_port];
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    ctx.get<FlowTagState>(tag_entity) = tag;
+
+    if (numTagIndexEntries < MAX_TAG_INDEX) {
+        tagIndex[numTagIndexEntries++] = TagIndexEntry {
+            .port_id = port_id,
+            .flow_id = flow_id,
+            .entity = tag_entity,
+        };
+    }
+
+    if (tag.ingress_port_id >= 0 && numIngressTags < MAX_INGRESS_TAGS) {
+        ingressTags[numIngressTags++] = IngressTagEntry {
+            .ingress_port_id = tag.ingress_port_id,
+            .flow_id = flow_id,
+            .entity = tag_entity,
+        };
+    }
+
+    if (is_source && numSourceTags < MAX_SOURCE_TAGS) {
+        sourceTags[numSourceTags++] = SourceTagEntry {
+            .flow_id = flow_id,
+            .entity = tag_entity,
+        };
+    }
+
+    ctx.get<DirtyPort>(port_entity).isDirty = 1;
+    PortBuffer &port_buf = ctx.get<PortBuffer>(port_entity);
+    if (port_buf.last_update_time < now) {
+        port_buf.last_update_time = now;
+    }
+
+    return tag_entity;
+}
+
+void Sim::injectFlow(int32_t src_port_id, const FlowDef &flow)
+{
+    int32_t src_slot = findNodeSlot(flow.src_node);
+    Bw src_in_bw = 0.0;
+    if (src_slot >= 0) {
+        src_in_bw = topoNodes[src_slot].port_bw;
+    }
+
+    DelayedEvent ev {};
+    ev.t = now;
+    ev.type = DelayedEvent::Type::Arrival;
+    ev.arrival = FlowArrivalEv {
+        .port_id = src_port_id,
+        .flow_id = flow.id,
+        .size = flow.size,
+        .in_bw = src_in_bw,
+        .is_source = 1,
+        .priority = flow.priority,
+    };
+    pushDelayedEvent(ev);
+}
+
+void Sim::injectFlowDef(const FlowDef &flow)
+{
     NodeId path[MAX_PATH_NODES] {};
     int32_t path_len = getPath(flow.src_node, flow.dst_node, flow.id,
         path, MAX_PATH_NODES);
@@ -417,7 +757,15 @@ void Sim::injectFlowDef(Engine &ctx, const FlowDef &flow)
     }
     port_path[port_path_len++] = -1;
 
-    if (numFlowRoutes < MAX_FLOWS) {
+    bool exists = false;
+    for (int32_t i = 0; i < numFlowRoutes; i++) {
+        if (flowRoutes[i].flow_id == flow.id) {
+            exists = true;
+            break;
+        }
+    }
+
+    if (!exists && numFlowRoutes < MAX_FLOWS) {
         FlowRouteState &route = flowRoutes[numFlowRoutes++];
         route.flow_id = flow.id;
         route.num_steps = port_path_len - 1;
@@ -427,9 +775,11 @@ void Sim::injectFlowDef(Engine &ctx, const FlowDef &flow)
         }
     }
 
+    int32_t src_port_id = topoNodes[src_slot].neighbors[first_neighbor_idx].port_id;
+    injectFlow(src_port_id, flow);
 }
 
-void Sim::schedulePendingFlows(Engine &ctx)
+void Sim::schedulePendingFlows()
 {
     while (numPendingFlows > 0 && pendingFlows[0].start_time <= now + 1e-15) {
         FlowDef flow = pendingFlows[0];
@@ -437,7 +787,147 @@ void Sim::schedulePendingFlows(Engine &ctx)
             pendingFlows[i - 1] = pendingFlows[i];
         }
         numPendingFlows -= 1;
-        injectFlowDef(ctx, flow);
+        injectFlowDef(flow);
+    }
+}
+
+void Sim::deliverEvents()
+{
+    numInboxArrival = 0;
+    numInboxBwUpdate = 0;
+
+    int32_t write_idx = 0;
+    for (int32_t i = 0; i < numDelayedEvents; i++) {
+        if (delayedEvents[i].t <= now + 1e-15) {
+            if (delayedEvents[i].type == DelayedEvent::Type::Arrival) {
+                if (numInboxArrival < MAX_EVENTS_PER_STEP) {
+                    inboxArrival[numInboxArrival++] = delayedEvents[i].arrival;
+                }
+            } else {
+                if (numInboxBwUpdate < MAX_EVENTS_PER_STEP) {
+                    inboxBwUpdate[numInboxBwUpdate++] = delayedEvents[i].bwupd;
+                }
+            }
+        } else {
+            delayedEvents[write_idx++] = delayedEvents[i];
+        }
+    }
+    numDelayedEvents = write_idx;
+}
+
+void Sim::flowArrivalSystem(Engine &ctx)
+{
+    for (int32_t i = 0; i < numInboxArrival; i++) {
+        const FlowArrivalEv &ev = inboxArrival[i];
+        if (ev.port_id < 0 || ev.port_id >= numPorts) {
+            continue;
+        }
+
+        Entity port_entity = portEntities[ev.port_id];
+        if (port_entity == Entity::none()) {
+            continue;
+        }
+
+        Entity existing = findTag(ev.port_id, ev.flow_id);
+        if (existing != Entity::none()) {
+            FlowTagState &tag = ctx.get<FlowTagState>(existing);
+            tag.in_bw = ev.in_bw;
+            if (ev.is_source != 0) {
+                tag.is_source = 1;
+                tag.remaining = ev.size;
+            }
+            ctx.get<DirtyPort>(port_entity).isDirty = 1;
+            continue;
+        }
+
+        createTagOnPort(ctx, ev.port_id, ev.flow_id, ev.in_bw,
+            ev.size, ev.is_source != 0, ev.priority);
+    }
+}
+
+void Sim::bwUpdateIngressSystem(Engine &ctx)
+{
+    for (int32_t i = 0; i < numInboxBwUpdate; i++) {
+        const BwUpdateEv &ev = inboxBwUpdate[i];
+        if (ev.port_id < 0 || ev.port_id >= numPorts) {
+            continue;
+        }
+
+        Entity port_entity = portEntities[ev.port_id];
+        if (port_entity == Entity::none()) {
+            continue;
+        }
+
+        Entity existing = findTag(ev.port_id, ev.flow_id);
+
+        if (ev.in_bw == 0.0) {
+            if (existing != Entity::none()) {
+                FlowTagState &tag = ctx.get<FlowTagState>(existing);
+                materializeBacklog(tag, now);
+                if (enableBuffer != 0 && tag.backlog > 1e-15) {
+                    tag.in_bw = 0.0;
+                    ctx.get<DirtyPort>(port_entity).isDirty = 1;
+                } else {
+                    destroyTag(ctx, existing, true, now);
+                }
+            }
+            continue;
+        }
+
+        if (existing == Entity::none()) {
+            bool has_cleanup = false;
+            for (int32_t j = 0; j < numInboxBwUpdate; j++) {
+                if (inboxBwUpdate[j].port_id == ev.port_id &&
+                    inboxBwUpdate[j].flow_id == ev.flow_id &&
+                    inboxBwUpdate[j].in_bw == 0.0) {
+                    has_cleanup = true;
+                    break;
+                }
+            }
+
+            if (has_cleanup) {
+                int32_t next_port = lookupFlowRouteNext(ev.flow_id, ev.port_id);
+                if (next_port >= 0) {
+                    int32_t src_slot = findNodeSlot(portToNode[ev.port_id]);
+                    int32_t dst_slot = findNodeSlot(portToNode[next_port]);
+                    Time delay = 0.0;
+                    if (src_slot >= 0 && dst_slot >= 0) {
+                        delay = linkDelays[src_slot][dst_slot];
+                        if (delay < 0.0) {
+                            delay = 0.0;
+                        }
+                    }
+                    DelayedEvent cleanup_ev {};
+                    cleanup_ev.t = now + delay;
+                    cleanup_ev.type = DelayedEvent::Type::BwUpdate;
+                    cleanup_ev.bwupd = BwUpdateEv {
+                        .port_id = next_port,
+                        .flow_id = ev.flow_id,
+                        .in_bw = 0.0,
+                    };
+                    pushDelayedEvent(cleanup_ev);
+                } else {
+                    recordFlowCompletion(ev.flow_id, now);
+                }
+                continue;
+            }
+
+            int32_t pri = 0;
+            for (int32_t j = 0; j < numFlowDefs; j++) {
+                if (flowDefs[j].id == ev.flow_id) {
+                    pri = flowDefs[j].priority;
+                    break;
+                }
+            }
+            createTagOnPort(ctx, ev.port_id, ev.flow_id, ev.in_bw, 0.0, false, pri);
+        } else {
+            FlowTagState &tag = ctx.get<FlowTagState>(existing);
+            if (tag.in_bw != ev.in_bw) {
+                materializeBacklog(tag, now);
+                tag.in_bw = ev.in_bw;
+            }
+            ctx.get<DirtyPort>(port_entity).isDirty = 1;
+        }
     }
 }
 
@@ -551,6 +1041,9 @@ void Sim::loadFlow(Engine &ctx)
         }
     }
 
+    for (int32_t i = 0; i < numFlowDefs; i++) {
+        injectFlowDef(flowDefs[i]);
+    }
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
