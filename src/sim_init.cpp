@@ -43,6 +43,7 @@ void Sim::resetNetworkState()
     numPfcResumeTimers = 0;
     numLastDirtyPortIDs = 0;
     nextDT = 0.0;
+    systemLogStep = 0;
 
     for (int32_t i = 0; i < PFC_MAX_PRIORITY; i++) {
         priorWeights[i] = 0.0;

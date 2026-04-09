@@ -1,4 +1,5 @@
 #include "sim.hpp"
+#include "sim_debug.hpp"
 
 #include <algorithm>
 
@@ -120,26 +121,55 @@ void Sim::clearPfcResumeTimer(int32_t ingress_port_id)
 
 void Sim::pfcPropagateSystem(Engine &ctx)
 {
+    constexpr const char *scope = "ingress_chain";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    int32_t applied_count = 0;
+    int32_t skipped_count = 0;
+
+    if (log_enabled) {
+        printSystemBegin(step, now, scope, "pfc_propagate");
+    }
+
     if (enablePfc == 0 || numInboxPfc == 0) {
+        if (log_enabled) {
+            printSystemPfcSummary(step, now, applied_count, skipped_count);
+            printSystemEnd(step, now, scope, "pfc_propagate");
+        }
         return;
     }
 
     for (int32_t i = 0; i < numInboxPfc; i++) {
         const PfcControlEv &ev = inboxPfc[i];
         if (ev.target_port_id < 0 || ev.target_port_id >= numPorts) {
+            skipped_count += 1;
             continue;
         }
 
         Entity target_port = portEntities[ev.target_port_id];
         if (target_port == Entity::none()) {
+            skipped_count += 1;
             continue;
         }
 
         PortPfcState &state = ctx.get<PortPfcState>(target_port);
         if (ev.priority >= 0 && ev.priority < PFC_MAX_PRIORITY) {
             state.paused[ev.priority] = ev.paused;
+            ctx.get<DirtyPort>(target_port).isDirty = 1;
+            applied_count += 1;
+            if (log_enabled) {
+                printSystemPfcState(step, now, ev,
+                    state.paused[ev.priority],
+                    ctx.get<DirtyPort>(target_port).isDirty);
+            }
+        } else {
+            skipped_count += 1;
         }
-        ctx.get<DirtyPort>(target_port).isDirty = 1;
+    }
+
+    if (log_enabled) {
+        printSystemPfcSummary(step, now, applied_count, skipped_count);
+        printSystemEnd(step, now, scope, "pfc_propagate");
     }
 }
 

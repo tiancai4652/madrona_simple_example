@@ -12,6 +12,7 @@ struct StepScheduleNode : public NodeBase {
     void run(Context &ctx_base, TaskGraph &)
     {
         Engine &ctx = (Engine &)ctx_base;
+        ctx.data().systemLogStep += 1;
         ctx.data().schedulePendingFlows();
     }
 
@@ -68,7 +69,9 @@ struct StepPfcPropagateNode : public NodeBase {
     void run(Context &ctx_base, TaskGraph &)
     {
         Engine &ctx = (Engine &)ctx_base;
-        ctx.data().pfcPropagateSystem(ctx);
+        if (ctx.data().enablePfc != 0) {
+            ctx.data().pfcPropagateSystem(ctx);
+        }
     }
 
     static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,

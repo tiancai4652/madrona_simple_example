@@ -1,4 +1,5 @@
 #include "sim.hpp"
+#include "sim_debug.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -329,18 +330,69 @@ void Sim::injectFlowDef(const FlowDef &flow)
 
 void Sim::schedulePendingFlows()
 {
+    constexpr const char *scope = "ingress_chain";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    int32_t pending_before = numPendingFlows;
+    int32_t delayed_before = numDelayedEvents;
+    int32_t flow_routes_before = numFlowRoutes;
+    int32_t scheduled_count = 0;
+    FlowDef logged_flows[MAX_FLOWS] {};
+    int32_t num_logged_flows = 0;
+
+    if (log_enabled) {
+        printSystemBegin(step, now, scope, "schedule_pending_flows");
+    }
+
     while (numPendingFlows > 0 && pendingFlows[0].start_time <= now + 1e-15) {
         FlowDef flow = pendingFlows[0];
         for (int32_t i = 1; i < numPendingFlows; i++) {
             pendingFlows[i - 1] = pendingFlows[i];
         }
         numPendingFlows -= 1;
+        if (log_enabled && num_logged_flows < MAX_FLOWS) {
+            logged_flows[num_logged_flows++] = flow;
+        }
+        scheduled_count += 1;
         injectFlowDef(flow);
+    }
+
+    if (log_enabled) {
+        for (int32_t i = 0; i < num_logged_flows; i++) {
+            for (int32_t j = i + 1; j < num_logged_flows; j++) {
+                if (logged_flows[j].id < logged_flows[i].id) {
+                    FlowDef tmp = logged_flows[i];
+                    logged_flows[i] = logged_flows[j];
+                    logged_flows[j] = tmp;
+                }
+            }
+        }
+        for (int32_t i = 0; i < num_logged_flows; i++) {
+            printSystemScheduleFlow(step, now, logged_flows[i]);
+        }
+        printSystemScheduleSummary(step, now,
+            scheduled_count,
+            pending_before,
+            numPendingFlows,
+            delayed_before,
+            numDelayedEvents,
+            flow_routes_before,
+            numFlowRoutes);
+        printSystemEnd(step, now, scope, "schedule_pending_flows");
     }
 }
 
 void Sim::deliverEvents()
 {
+    constexpr const char *scope = "ingress_chain";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    int32_t delayed_before = numDelayedEvents;
+
+    if (log_enabled) {
+        printSystemBegin(step, now, scope, "deliver_events");
+    }
+
     numInboxArrival = 0;
     numInboxBwUpdate = 0;
     numInboxPfc = 0;
@@ -351,14 +403,23 @@ void Sim::deliverEvents()
             if (delayedEvents[i].type == DelayedEvent::Type::Arrival) {
                 if (numInboxArrival < MAX_EVENTS_PER_STEP) {
                     inboxArrival[numInboxArrival++] = delayedEvents[i].arrival;
+                    if (log_enabled) {
+                        printSystemDeliverArrival(step, now, delayedEvents[i].arrival);
+                    }
                 }
             } else if (delayedEvents[i].type == DelayedEvent::Type::BwUpdate) {
                 if (numInboxBwUpdate < MAX_EVENTS_PER_STEP) {
                     inboxBwUpdate[numInboxBwUpdate++] = delayedEvents[i].bwupd;
+                    if (log_enabled) {
+                        printSystemDeliverBwUpdate(step, now, delayedEvents[i].bwupd);
+                    }
                 }
             } else {
                 if (numInboxPfc < MAX_EVENTS_PER_STEP) {
                     inboxPfc[numInboxPfc++] = delayedEvents[i].pfcctrl;
+                    if (log_enabled) {
+                        printSystemDeliverPfc(step, now, delayedEvents[i].pfcctrl);
+                    }
                 }
             }
         } else {
@@ -366,18 +427,41 @@ void Sim::deliverEvents()
         }
     }
     numDelayedEvents = write_idx;
+
+    if (log_enabled) {
+        printSystemDeliverSummary(step, now,
+            delayed_before,
+            numDelayedEvents,
+            numInboxArrival,
+            numInboxBwUpdate,
+            numInboxPfc);
+        printSystemEnd(step, now, scope, "deliver_events");
+    }
 }
 
 void Sim::flowArrivalSystem(Engine &ctx)
 {
+    constexpr const char *scope = "ingress_chain";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    int32_t created_count = 0;
+    int32_t updated_count = 0;
+    int32_t skipped_count = 0;
+
+    if (log_enabled) {
+        printSystemBegin(step, now, scope, "flow_arrival");
+    }
+
     for (int32_t i = 0; i < numInboxArrival; i++) {
         const FlowArrivalEv &ev = inboxArrival[i];
         if (ev.port_id < 0 || ev.port_id >= numPorts) {
+            skipped_count += 1;
             continue;
         }
 
         Entity port_entity = portEntities[ev.port_id];
         if (port_entity == Entity::none()) {
+            skipped_count += 1;
             continue;
         }
 
@@ -390,24 +474,64 @@ void Sim::flowArrivalSystem(Engine &ctx)
                 tag.remaining = ev.size;
             }
             ctx.get<DirtyPort>(port_entity).isDirty = 1;
+            updated_count += 1;
+            if (log_enabled) {
+                printSystemArrivalTag(step, now, "update", tag,
+                    ctx.get<DirtyPort>(port_entity).isDirty);
+            }
             continue;
         }
 
-        createTagOnPort(ctx, ev.port_id, ev.flow_id, ev.in_bw,
+        Entity created = createTagOnPort(ctx, ev.port_id, ev.flow_id, ev.in_bw,
             ev.size, ev.is_source != 0, ev.priority);
+        if (created == Entity::none()) {
+            skipped_count += 1;
+            continue;
+        }
+        created_count += 1;
+        if (log_enabled) {
+            printSystemArrivalTag(step, now, "create",
+                ctx.get<FlowTagState>(created),
+                ctx.get<DirtyPort>(port_entity).isDirty);
+        }
+    }
+
+    if (log_enabled) {
+        printSystemArrivalSummary(step, now,
+            created_count,
+            updated_count,
+            skipped_count);
+        printSystemEnd(step, now, scope, "flow_arrival");
     }
 }
 
 void Sim::bwUpdateIngressSystem(Engine &ctx)
 {
+    constexpr const char *scope = "ingress_chain";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    int32_t created_count = 0;
+    int32_t updated_count = 0;
+    int32_t buffered_zero_count = 0;
+    int32_t destroyed_count = 0;
+    int32_t forwarded_count = 0;
+    int32_t completed_count = 0;
+    int32_t skipped_count = 0;
+
+    if (log_enabled) {
+        printSystemBegin(step, now, scope, "bw_update_ingress");
+    }
+
     for (int32_t i = 0; i < numInboxBwUpdate; i++) {
         const BwUpdateEv &ev = inboxBwUpdate[i];
         if (ev.port_id < 0 || ev.port_id >= numPorts) {
+            skipped_count += 1;
             continue;
         }
 
         Entity port_entity = portEntities[ev.port_id];
         if (port_entity == Entity::none()) {
+            skipped_count += 1;
             continue;
         }
 
@@ -420,9 +544,22 @@ void Sim::bwUpdateIngressSystem(Engine &ctx)
                 if (enableBuffer != 0 && tag.backlog > 1e-15) {
                     tag.in_bw = 0.0;
                     ctx.get<DirtyPort>(port_entity).isDirty = 1;
+                    buffered_zero_count += 1;
+                    if (log_enabled) {
+                        printSystemBwUpdateTag(step, now, "buffered_zero", tag,
+                            ctx.get<DirtyPort>(port_entity).isDirty);
+                    }
                 } else {
+                    FlowTagState tag_copy = tag;
                     destroyTag(ctx, existing, true, now);
+                    destroyed_count += 1;
+                    if (log_enabled) {
+                        printSystemBwUpdateTag(step, now, "destroy", tag_copy,
+                            ctx.get<DirtyPort>(port_entity).isDirty);
+                    }
                 }
+            } else {
+                skipped_count += 1;
             }
             continue;
         }
@@ -450,8 +587,16 @@ void Sim::bwUpdateIngressSystem(Engine &ctx)
                         .in_bw = 0.0,
                     };
                     pushDelayedEvent(cleanup_ev);
+                    forwarded_count += 1;
+                    if (log_enabled) {
+                        printSystemBwUpdateForward(step, now, ev.flow_id, ev.port_id, next_port);
+                    }
                 } else {
                     recordFlowCompletion(ev.flow_id, now);
+                    completed_count += 1;
+                    if (log_enabled) {
+                        printSystemBwUpdateComplete(step, now, ev.flow_id);
+                    }
                 }
                 continue;
             }
@@ -463,7 +608,16 @@ void Sim::bwUpdateIngressSystem(Engine &ctx)
                     break;
                 }
             }
-            createTagOnPort(ctx, ev.port_id, ev.flow_id, ev.in_bw, 0.0, false, pri);
+            Entity created = createTagOnPort(ctx, ev.port_id, ev.flow_id, ev.in_bw, 0.0, false, pri);
+            if (created == Entity::none()) {
+                skipped_count += 1;
+                continue;
+            }
+            created_count += 1;
+            if (log_enabled) {
+                printSystemBwUpdateTag(step, now, "create", ctx.get<FlowTagState>(created),
+                    ctx.get<DirtyPort>(port_entity).isDirty);
+            }
         } else {
             FlowTagState &tag = ctx.get<FlowTagState>(existing);
             if (tag.in_bw != ev.in_bw) {
@@ -471,7 +625,24 @@ void Sim::bwUpdateIngressSystem(Engine &ctx)
                 tag.in_bw = ev.in_bw;
             }
             ctx.get<DirtyPort>(port_entity).isDirty = 1;
+            updated_count += 1;
+            if (log_enabled) {
+                printSystemBwUpdateTag(step, now, "update", tag,
+                    ctx.get<DirtyPort>(port_entity).isDirty);
+            }
         }
+    }
+
+    if (log_enabled) {
+        printSystemBwUpdateSummary(step, now,
+            created_count,
+            updated_count,
+            buffered_zero_count,
+            destroyed_count,
+            forwarded_count,
+            completed_count,
+            skipped_count);
+        printSystemEnd(step, now, scope, "bw_update_ingress");
     }
 }
 

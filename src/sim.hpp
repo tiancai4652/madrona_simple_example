@@ -275,6 +275,7 @@ struct Sim : public madrona::WorldBase {
     int32_t numLastDirtyPortIDs;
     int32_t lastDirtyPortIDs[MAX_TOPO_PORTS];
     Time nextDT;
+    uint64_t systemLogStep;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

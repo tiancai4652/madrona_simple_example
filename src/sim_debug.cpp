@@ -1,6 +1,7 @@
 #include "sim_debug.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 
@@ -33,15 +34,42 @@ inline void printNodeList(const NodeId *nodes, int32_t count)
     }
     std::cout << ']';
 }
+
+inline bool scopeMatches(const char *want, const char *actual)
+{
+    return std::strcmp(want, actual) == 0;
+}
 #endif
 
 }
 
 #if defined(__CUDA_ARCH__)
 const bool init_log_print_enabled = false;
+const bool system_log_print_enabled = false;
+
+bool systemLogEnabled(const char *, uint64_t)
+{
+    return false;
+}
 
 void printInitTopoLog(const Sim &, Engine &) {}
 void printInitFlowLog(const Sim &) {}
+void printSystemBegin(uint64_t, Time, const char *, const char *) {}
+void printSystemEnd(uint64_t, Time, const char *, const char *) {}
+void printSystemScheduleFlow(uint64_t, Time, const FlowDef &) {}
+void printSystemScheduleSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t) {}
+void printSystemDeliverArrival(uint64_t, Time, const FlowArrivalEv &) {}
+void printSystemDeliverBwUpdate(uint64_t, Time, const BwUpdateEv &) {}
+void printSystemDeliverPfc(uint64_t, Time, const PfcControlEv &) {}
+void printSystemDeliverSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t, int32_t) {}
+void printSystemArrivalTag(uint64_t, Time, const char *, const FlowTagState &, int32_t) {}
+void printSystemArrivalSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
+void printSystemBwUpdateTag(uint64_t, Time, const char *, const FlowTagState &, int32_t) {}
+void printSystemBwUpdateForward(uint64_t, Time, FlowId, int32_t, int32_t) {}
+void printSystemBwUpdateComplete(uint64_t, Time, FlowId) {}
+void printSystemBwUpdateSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t) {}
+void printSystemPfcState(uint64_t, Time, const PfcControlEv &, int32_t, int32_t) {}
+void printSystemPfcSummary(uint64_t, Time, int32_t, int32_t) {}
 #else
 const bool init_log_print_enabled = []() {
     const char *env = std::getenv("init_log_print_enabled");
@@ -51,6 +79,39 @@ const bool init_log_print_enabled = []() {
 
     return !(env[0] == '0' && env[1] == '\0');
 }();
+
+const bool system_log_print_enabled = []() {
+    const char *env = std::getenv("system_log_print_enabled");
+    if (env == nullptr || env[0] == '\0') {
+        return false;
+    }
+
+    return !(env[0] == '0' && env[1] == '\0');
+}();
+
+bool systemLogEnabled(const char *scope, uint64_t step)
+{
+    if (!system_log_print_enabled) {
+        return false;
+    }
+
+    const char *scope_env = std::getenv("system_log_scope");
+    if (scope_env != nullptr && scope_env[0] != '\0' &&
+        !scopeMatches(scope_env, "all") && !scopeMatches(scope_env, scope)) {
+        return false;
+    }
+
+    const char *step_env = std::getenv("system_log_step");
+    if (step_env != nullptr && step_env[0] != '\0') {
+        char *end = nullptr;
+        unsigned long want = std::strtoul(step_env, &end, 10);
+        if (end != step_env && *end == '\0' && step != want) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 void printInitTopoLog(const Sim &sim, Engine &ctx)
 {
@@ -194,6 +255,245 @@ void printInitFlowLog(const Sim &sim)
               << " flow_routes_state="
               << (sim.numFlowRoutes == 0 ? "empty" : "pre_generated")
               << " flow_tag_entities_count=0\n";
+}
+
+void printSystemBegin(uint64_t step, Time now, const char *scope, const char *phase)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][BEGIN] step=" << step
+              << " now=" << now
+              << " scope=" << scope
+              << " phase=" << phase
+              << "\n";
+}
+
+void printSystemEnd(uint64_t step, Time now, const char *scope, const char *phase)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][END] step=" << step
+              << " now=" << now
+              << " scope=" << scope
+              << " phase=" << phase
+              << "\n";
+}
+
+void printSystemScheduleFlow(uint64_t step, Time now, const FlowDef &flow)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][SCHEDULE][FLOW] step=" << step
+              << " now=" << now
+              << " flow_id=" << flow.id
+              << " src_node=" << flow.src_node
+              << " dst_node=" << flow.dst_node
+              << " size=" << flow.size
+              << " start_time=" << flow.start_time
+              << " priority=" << flow.priority
+              << "\n";
+}
+
+void printSystemScheduleSummary(uint64_t step, Time now,
+                                int32_t scheduled_count,
+                                int32_t pending_before,
+                                int32_t pending_after,
+                                int32_t delayed_before,
+                                int32_t delayed_after,
+                                int32_t flow_routes_before,
+                                int32_t flow_routes_after)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][SCHEDULE][SUMMARY] step=" << step
+              << " now=" << now
+              << " scheduled_count=" << scheduled_count
+              << " pending_before=" << pending_before
+              << " pending_after=" << pending_after
+              << " delayed_before=" << delayed_before
+              << " delayed_after=" << delayed_after
+              << " flow_routes_before=" << flow_routes_before
+              << " flow_routes_after=" << flow_routes_after
+              << "\n";
+}
+
+void printSystemDeliverArrival(uint64_t step, Time now, const FlowArrivalEv &ev)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][DELIVER][EVENT] step=" << step
+              << " now=" << now
+              << " event_type=arrival"
+              << " port_id=" << ev.port_id
+              << " flow_id=" << ev.flow_id
+              << " in_bw=" << ev.in_bw
+              << " size=" << ev.size
+              << " is_source=" << ev.is_source
+              << " priority=" << ev.priority
+              << "\n";
+}
+
+void printSystemDeliverBwUpdate(uint64_t step, Time now, const BwUpdateEv &ev)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][DELIVER][EVENT] step=" << step
+              << " now=" << now
+              << " event_type=bwupdate"
+              << " port_id=" << ev.port_id
+              << " flow_id=" << ev.flow_id
+              << " in_bw=" << ev.in_bw
+              << "\n";
+}
+
+void printSystemDeliverPfc(uint64_t step, Time now, const PfcControlEv &ev)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][DELIVER][EVENT] step=" << step
+              << " now=" << now
+              << " event_type=pfc"
+              << " target_port_id=" << ev.target_port_id
+              << " source_port_id=" << ev.source_port_id
+              << " priority=" << ev.priority
+              << " paused=" << ev.paused
+              << "\n";
+}
+
+void printSystemDeliverSummary(uint64_t step, Time now,
+                               int32_t delayed_before,
+                               int32_t delayed_after,
+                               int32_t inbox_arrival_count,
+                               int32_t inbox_bwupdate_count,
+                               int32_t inbox_pfc_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][DELIVER][SUMMARY] step=" << step
+              << " now=" << now
+              << " delayed_before=" << delayed_before
+              << " delayed_after=" << delayed_after
+              << " inbox_arrival_count=" << inbox_arrival_count
+              << " inbox_bwupdate_count=" << inbox_bwupdate_count
+              << " inbox_pfc_count=" << inbox_pfc_count
+              << "\n";
+}
+
+void printSystemArrivalTag(uint64_t step, Time now, const char *action,
+                           const FlowTagState &tag, int32_t dirty)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][ARRIVAL][TAG] step=" << step
+              << " now=" << now
+              << " action=" << action
+              << " port_id=" << tag.port_id
+              << " flow_id=" << tag.flow_id
+              << " in_bw=" << tag.in_bw
+              << " remaining=" << tag.remaining
+              << " is_source=" << tag.is_source
+              << " priority=" << tag.priority
+              << " next_port_id=" << tag.next_port_id
+              << " ingress_port_id=" << tag.ingress_port_id
+              << " dirty=" << dirty
+              << "\n";
+}
+
+void printSystemArrivalSummary(uint64_t step, Time now,
+                               int32_t created_count,
+                               int32_t updated_count,
+                               int32_t skipped_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][ARRIVAL][SUMMARY] step=" << step
+              << " now=" << now
+              << " created_count=" << created_count
+              << " updated_count=" << updated_count
+              << " skipped_count=" << skipped_count
+              << "\n";
+}
+
+void printSystemBwUpdateTag(uint64_t step, Time now, const char *action,
+                            const FlowTagState &tag, int32_t dirty)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][BWUPDATE][TAG] step=" << step
+              << " now=" << now
+              << " action=" << action
+              << " port_id=" << tag.port_id
+              << " flow_id=" << tag.flow_id
+              << " in_bw=" << tag.in_bw
+              << " out_bw=" << tag.out_bw
+              << " backlog=" << tag.backlog
+              << " priority=" << tag.priority
+              << " is_source=" << tag.is_source
+              << " next_port_id=" << tag.next_port_id
+              << " ingress_port_id=" << tag.ingress_port_id
+              << " dirty=" << dirty
+              << "\n";
+}
+
+void printSystemBwUpdateForward(uint64_t step, Time now,
+                                FlowId flow_id,
+                                int32_t port_id,
+                                int32_t next_port_id)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][BWUPDATE][FORWARD] step=" << step
+              << " now=" << now
+              << " flow_id=" << flow_id
+              << " port_id=" << port_id
+              << " next_port_id=" << next_port_id
+              << "\n";
+}
+
+void printSystemBwUpdateComplete(uint64_t step, Time now, FlowId flow_id)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][BWUPDATE][COMPLETE] step=" << step
+              << " now=" << now
+              << " flow_id=" << flow_id
+              << "\n";
+}
+
+void printSystemBwUpdateSummary(uint64_t step, Time now,
+                                int32_t created_count,
+                                int32_t updated_count,
+                                int32_t buffered_zero_count,
+                                int32_t destroyed_count,
+                                int32_t forwarded_count,
+                                int32_t completed_count,
+                                int32_t skipped_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][BWUPDATE][SUMMARY] step=" << step
+              << " now=" << now
+              << " created_count=" << created_count
+              << " updated_count=" << updated_count
+              << " buffered_zero_count=" << buffered_zero_count
+              << " destroyed_count=" << destroyed_count
+              << " forwarded_count=" << forwarded_count
+              << " completed_count=" << completed_count
+              << " skipped_count=" << skipped_count
+              << "\n";
+}
+
+void printSystemPfcState(uint64_t step, Time now, const PfcControlEv &ev,
+                         int32_t applied_paused, int32_t dirty)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][PFC][STATE] step=" << step
+              << " now=" << now
+              << " target_port_id=" << ev.target_port_id
+              << " source_port_id=" << ev.source_port_id
+              << " priority=" << ev.priority
+              << " paused=" << ev.paused
+              << " applied_paused=" << applied_paused
+              << " dirty=" << dirty
+              << "\n";
+}
+
+void printSystemPfcSummary(uint64_t step, Time now,
+                           int32_t applied_count,
+                           int32_t skipped_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][PFC][SUMMARY] step=" << step
+              << " now=" << now
+              << " applied_count=" << applied_count
+              << " skipped_count=" << skipped_count
+              << "\n";
 }
 #endif
 
