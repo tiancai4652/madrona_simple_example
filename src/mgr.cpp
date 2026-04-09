@@ -146,6 +146,16 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
     Sim::Config sim_cfg {
         .maxEpisodeLength = cfg.maxEpisodeLength,
         .enableViewer = false,
+        .default_link_delay = 0.001,
+        .propagation_interval = 0.0,
+        .enable_buffer = 1,
+        .enable_pfc = 0,
+        .pfc_egress = 0,
+        .pfc_xoff_threshold = 1e9,
+        .pfc_xon_threshold = 0.5e9,
+        .dt_min = 0.0,
+        .qos_mode = QOS_NONE,
+        .prior_weights = {},
     };
 
     switch (cfg.execMode) {

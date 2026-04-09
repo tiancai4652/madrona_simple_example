@@ -26,6 +26,9 @@ constexpr int32_t MAX_TAG_INDEX = 128;
 constexpr int32_t MAX_SOURCE_TAGS = 64;
 constexpr int32_t MAX_INGRESS_TAGS = 128;
 constexpr int32_t MAX_FLOW_COMPLETIONS = 64;
+constexpr int32_t QOS_NONE = 0;
+constexpr int32_t QOS_SP = 1;
+constexpr int32_t QOS_WRR = 2;
 
 struct TopoNeighbor {
     NodeId neighbor_id = -1;
@@ -74,15 +77,24 @@ struct BwUpdateEv {
     Bw in_bw = 0.0;
 };
 
+struct PfcControlEv {
+    int32_t target_port_id = -1;
+    int32_t source_port_id = -1;
+    int32_t priority = 0;
+    int32_t paused = 0;
+};
+
 struct DelayedEvent {
     enum class Type : int32_t {
         Arrival,
         BwUpdate,
+        PfcControl,
     } type = Type::Arrival;
 
     Time t = 0.0;
     FlowArrivalEv arrival {};
     BwUpdateEv bwupd {};
+    PfcControlEv pfcctrl {};
 };
 
 struct TagIndexEntry {
@@ -109,8 +121,18 @@ struct FlowCompletionEntry {
 
 struct Sim : public madrona::WorldBase {
     struct Config {
-        uint32_t maxEpisodeLength;
-        bool enableViewer;
+        uint32_t maxEpisodeLength = 200;
+        bool enableViewer = false;
+        Time default_link_delay = 0.001;
+        Time propagation_interval = 0.0;
+        int32_t enable_buffer = 1;
+        int32_t enable_pfc = 0;
+        int32_t pfc_egress = 0;
+        double pfc_xoff_threshold = 1e9;
+        double pfc_xon_threshold = 0.5e9;
+        double dt_min = 0.0;
+        int32_t qos_mode = QOS_NONE;
+        double prior_weights[PFC_MAX_PRIORITY] {};
     };
 
     static void registerTypes(madrona::ECSRegistry &registry,
@@ -144,6 +166,10 @@ struct Sim : public madrona::WorldBase {
     void deliverEvents();
     void flowArrivalSystem(Engine &ctx);
     void bwUpdateIngressSystem(Engine &ctx);
+    void pfcPropagateSystem(Engine &ctx);
+    void portBandwidthAllocSystem(Engine &ctx, Time dt);
+    void pfcThresholdDetectSystem(Engine &ctx);
+    void downstreamEmitSystem(Engine &ctx);
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;
     madrona::Entity createTagOnPort(Engine &ctx,
@@ -159,7 +185,25 @@ struct Sim : public madrona::WorldBase {
                     Time logical_now);
     void recordFlowCompletion(FlowId flow_id, Time end_time);
     void materializeBacklog(FlowTagState &tag, Time at_time);
+    void materializeRemaining(FlowTagState &tag, Time at_time);
+    void materializeBufCnt(PortBuffer &port_buf, Time at_time);
+    void alignChunksWithBufCnt(PriorityBuffer &pb);
+    double drainBufferChunks(PriorityBuffer &pb, double drain_bytes);
+    Time computePropagationTimeAt(Time base_time, Time link_delay) const;
+    Time computePropagationTime(Time link_delay) const;
+    Time computePropagationTimeForPort(int32_t src_port_id, int32_t dst_port_id) const;
     void pushDelayedEvent(const DelayedEvent &ev);
+    int32_t findSourceTagIndex(FlowId flow_id) const;
+    int32_t findIngressTagIndex(int32_t ingress_port_id, FlowId flow_id) const;
+    int32_t findBacklogDrainTimerIndex(int32_t port_id) const;
+    int32_t findPfcPauseTimerIndex(int32_t ingress_port_id) const;
+    int32_t findPfcResumeTimerIndex(int32_t ingress_port_id) const;
+    void setBacklogDrainTimer(int32_t port_id, Time t);
+    void setPfcPauseTimer(int32_t ingress_port_id, Time t);
+    void setPfcResumeTimer(int32_t ingress_port_id, Time t);
+    void clearBacklogDrainTimer(int32_t port_id);
+    void clearPfcPauseTimer(int32_t ingress_port_id);
+    void clearPfcResumeTimer(int32_t ingress_port_id);
 
     EpisodeManager *episodeMgr;
     const GridState *grid;
@@ -192,6 +236,8 @@ struct Sim : public madrona::WorldBase {
     FlowArrivalEv inboxArrival[MAX_EVENTS_PER_STEP];
     int32_t numInboxBwUpdate;
     BwUpdateEv inboxBwUpdate[MAX_EVENTS_PER_STEP];
+    int32_t numInboxPfc;
+    PfcControlEv inboxPfc[MAX_EVENTS_PER_STEP];
     int32_t numTagIndexEntries;
     TagIndexEntry tagIndex[MAX_TAG_INDEX];
     int32_t numSourceTags;
@@ -201,6 +247,27 @@ struct Sim : public madrona::WorldBase {
     int32_t numFlowCompletions;
     FlowCompletionEntry flowCompletions[MAX_FLOW_COMPLETIONS];
     int32_t enableBuffer;
+    int32_t enablePfc;
+    int32_t pfcEgress;
+    Time defaultLinkDelay;
+    Time propagationInterval;
+    double pfcXoffThreshold;
+    double pfcXonThreshold;
+    double dtMin;
+    int32_t qosMode;
+    double priorWeights[PFC_MAX_PRIORITY];
+    Time cachedNextDrainTime;
+    int32_t cachedDrainPortID;
+    Time cachedNextFinishTime;
+    int32_t numBacklogDrainTimers;
+    int32_t backlogDrainPortIDs[MAX_TOPO_PORTS];
+    Time backlogDrainTimers[MAX_TOPO_PORTS];
+    int32_t numPfcPauseTimers;
+    int32_t pfcPausePortIDs[MAX_TOPO_PORTS];
+    Time pfcPauseTimers[MAX_TOPO_PORTS];
+    int32_t numPfcResumeTimers;
+    int32_t pfcResumePortIDs[MAX_TOPO_PORTS];
+    Time pfcResumeTimers[MAX_TOPO_PORTS];
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {
