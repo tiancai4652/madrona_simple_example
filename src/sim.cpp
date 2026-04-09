@@ -1900,6 +1900,115 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
     }
 
     if (pfcEgress != 0) {
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            Entity egress_e = portEntities[port_id];
+            if (egress_e == Entity::none() || ctx.get<DirtyPort>(egress_e).isDirty == 0) {
+                continue;
+            }
+
+            PortPfcConfig &cfg = ctx.get<PortPfcConfig>(egress_e);
+            if (cfg.pfc_enabled == 0) {
+                continue;
+            }
+            PortPfcState &state = ctx.get<PortPfcState>(egress_e);
+
+            double buf_by_pri[PFC_MAX_PRIORITY] {};
+            int32_t upstream_ports[MAX_TOPO_PORTS] {};
+            int32_t num_upstream_ports = 0;
+
+            for (int32_t i = 0; i < numTagIndexEntries; i++) {
+                if (tagIndex[i].port_id != port_id) {
+                    continue;
+                }
+                Entity te = tagIndex[i].entity;
+                if (te == Entity::none()) {
+                    continue;
+                }
+                FlowTagState &tag = ctx.get<FlowTagState>(te);
+                if (tag.is_source != 0) {
+                    continue;
+                }
+                materializeBacklog(tag, now);
+                int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+                buf_by_pri[pri] += tag.backlog;
+
+                int32_t ip = tag.ingress_port_id;
+                if (ip >= 0 && ip < numPorts) {
+                    int32_t up = peerPort[ip];
+                    if (up >= 0) {
+                        bool dup = false;
+                        for (int32_t j = 0; j < num_upstream_ports; j++) {
+                            if (upstream_ports[j] == up) {
+                                dup = true;
+                                break;
+                            }
+                        }
+                        if (!dup && num_upstream_ports < MAX_TOPO_PORTS) {
+                            upstream_ports[num_upstream_ports++] = up;
+                        }
+                    }
+                }
+            }
+
+            bool state_changed = false;
+            for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+                double buf = buf_by_pri[pri];
+                if (state.pause_active[pri] == 0 && buf >= cfg.xoff[pri] - 0.5) {
+                    state.pause_active[pri] = 1;
+                    state_changed = true;
+                    state.paused_upstream_count[pri] = 0;
+                    for (int32_t j = 0; j < num_upstream_ports && j < MAX_PAUSED_UPSTREAMS; j++) {
+                        int32_t up = upstream_ports[j];
+                        state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = up;
+                        int32_t detect_slot = findNodeSlot(portToNode[port_id]);
+                        int32_t upstream_slot = findNodeSlot(portToNode[up]);
+                        Time pfc_delay = defaultLinkDelay;
+                        if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
+                            pfc_delay = linkDelays[detect_slot][upstream_slot];
+                        }
+                        DelayedEvent ev {};
+                        ev.t = computePropagationTime(pfc_delay);
+                        ev.type = DelayedEvent::Type::PfcControl;
+                        ev.pfcctrl = PfcControlEv {
+                            .target_port_id = up,
+                            .source_port_id = port_id,
+                            .priority = pri,
+                            .paused = 1,
+                        };
+                        pushDelayedEvent(ev);
+                    }
+                    state.pfc_cnt[pri] += 1;
+                } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
+                    state.pause_active[pri] = 0;
+                    state_changed = true;
+                    for (int32_t j = 0; j < state.paused_upstream_count[pri]; j++) {
+                        int32_t up = state.paused_upstreams[pri][j];
+                        int32_t detect_slot = findNodeSlot(portToNode[port_id]);
+                        int32_t upstream_slot = findNodeSlot(portToNode[up]);
+                        Time pfc_delay = defaultLinkDelay;
+                        if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
+                            pfc_delay = linkDelays[detect_slot][upstream_slot];
+                        }
+                        DelayedEvent ev {};
+                        ev.t = computePropagationTime(pfc_delay);
+                        ev.type = DelayedEvent::Type::PfcControl;
+                        ev.pfcctrl = PfcControlEv {
+                            .target_port_id = up,
+                            .source_port_id = port_id,
+                            .priority = pri,
+                            .paused = 0,
+                        };
+                        pushDelayedEvent(ev);
+                    }
+                    state.paused_upstream_count[pri] = 0;
+                }
+            }
+
+            if (state_changed) {
+                clearPfcPauseTimer(port_id);
+                clearPfcResumeTimer(port_id);
+            }
+        }
         return;
     }
 
@@ -2698,6 +2807,128 @@ void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
                 if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
                     ctx.get<DirtyPort>(pe).isDirty = 1;
                     break;
+                }
+            }
+        }
+
+        if (enablePfc != 0) {
+            for (int32_t ingress_port = 0; ingress_port < numPorts; ingress_port++) {
+                Entity ingress_e = portEntities[ingress_port];
+                if (ingress_e == Entity::none()) {
+                    continue;
+                }
+                PortPfcState &pfc = ctx.get<PortPfcState>(ingress_e);
+                bool has_active_pause = false;
+                for (int32_t p = 0; p < PFC_MAX_PRIORITY; p++) {
+                    if (pfc.pause_active[p] != 0) {
+                        has_active_pause = true;
+                        break;
+                    }
+                }
+                if (!has_active_pause) {
+                    continue;
+                }
+
+                bool no_tags = true;
+                for (int32_t j = 0; j < numIngressTags; j++) {
+                    if (ingressTags[j].ingress_port_id == ingress_port && ingressTags[j].entity != Entity::none()) {
+                        no_tags = false;
+                        break;
+                    }
+                }
+
+                if (no_tags) {
+                    for (int32_t p = 0; p < PFC_MAX_PRIORITY; p++) {
+                        if (pfc.pause_active[p] == 0) {
+                            continue;
+                        }
+                        pfc.pause_active[p] = 0;
+                        for (int32_t k = 0; k < pfc.paused_upstream_count[p]; k++) {
+                            int32_t up = pfc.paused_upstreams[p][k];
+                            if (up < 0 || up >= numPorts) {
+                                continue;
+                            }
+                            int32_t detect_slot = findNodeSlot(portToNode[ingress_port]);
+                            int32_t upstream_slot = findNodeSlot(portToNode[up]);
+                            Time pfc_delay = defaultLinkDelay;
+                            if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
+                                pfc_delay = linkDelays[detect_slot][upstream_slot];
+                            }
+                            DelayedEvent ev {};
+                            ev.t = now + dt + pfc_delay;
+                            ev.type = DelayedEvent::Type::PfcControl;
+                            ev.pfcctrl = PfcControlEv {
+                                .target_port_id = up,
+                                .source_port_id = ingress_port,
+                                .priority = p,
+                                .paused = 0,
+                            };
+                            pushDelayedEvent(ev);
+                        }
+                        pfc.paused_upstream_count[p] = 0;
+                    }
+                    continue;
+                }
+
+                double port_buf_cnt[MAX_TOPO_PORTS][PFC_MAX_PRIORITY] {};
+                bool any_capped = false;
+                for (int32_t j = 0; j < numIngressTags; j++) {
+                    if (ingressTags[j].ingress_port_id != ingress_port) {
+                        continue;
+                    }
+                    Entity te = ingressTags[j].entity;
+                    if (te == Entity::none()) {
+                        continue;
+                    }
+                    FlowTagState &t = ctx.get<FlowTagState>(te);
+                    Entity pe = portEntities[t.port_id];
+                    if (pe != Entity::none()) {
+                        PortBuffer &pb = ctx.get<PortBuffer>(pe);
+                        materializeBufCnt(pb, now);
+                        int32_t pri = std::clamp(t.priority, 0, PFC_MAX_PRIORITY - 1);
+                        port_buf_cnt[t.port_id][pri] = pb.prior_bufs[pri].buf_cnt;
+                    }
+                }
+
+                for (int32_t j = 0; j < numIngressTags; j++) {
+                    if (ingressTags[j].ingress_port_id != ingress_port) {
+                        continue;
+                    }
+                    Entity te = ingressTags[j].entity;
+                    if (te == Entity::none()) {
+                        continue;
+                    }
+                    FlowTagState &t = ctx.get<FlowTagState>(te);
+                    if (t.is_source != 0) {
+                        continue;
+                    }
+                    materializeBacklog(t, now);
+                    int32_t pri = std::clamp(t.priority, 0, PFC_MAX_PRIORITY - 1);
+                    double actual = port_buf_cnt[t.port_id][pri];
+                    if (actual < 1.0 && t.backlog > 1.0) {
+                        t.backlog = actual;
+                        t.last_backlog_time = now;
+                        any_capped = true;
+                    }
+                }
+
+                if (any_capped) {
+                    for (int32_t j = 0; j < numIngressTags; j++) {
+                        if (ingressTags[j].ingress_port_id != ingress_port) {
+                            continue;
+                        }
+                        Entity te = ingressTags[j].entity;
+                        if (te == Entity::none()) {
+                            continue;
+                        }
+                        FlowTagState &t = ctx.get<FlowTagState>(te);
+                        if (t.port_id >= 0 && t.port_id < numPorts) {
+                            Entity pe = portEntities[t.port_id];
+                            if (pe != Entity::none()) {
+                                ctx.get<DirtyPort>(pe).isDirty = 1;
+                            }
+                        }
+                    }
                 }
             }
         }
