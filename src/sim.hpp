@@ -12,20 +12,20 @@ namespace madsimple {
 
 class Engine;
 
-constexpr int32_t MAX_TOPO_NODES = 8;
-constexpr int32_t MAX_TOPO_LINKS = 16;
-constexpr int32_t MAX_TOPO_PORTS = 32;
-constexpr int32_t MAX_NODE_NEIGHBORS = 8;
-constexpr int32_t MAX_FLOWS = 16;
+constexpr int32_t MAX_TOPO_NODES = 67;
+constexpr int32_t MAX_TOPO_LINKS = 132;
+constexpr int32_t MAX_TOPO_PORTS = 132;
+constexpr int32_t MAX_NODE_NEIGHBORS = 33;
+constexpr int32_t MAX_FLOWS = 448;
 constexpr int32_t MAX_PATH_NODES = 16;
 constexpr int32_t MAX_ECMP_NEXT_HOPS = 8;
 constexpr int32_t MAX_FLOW_ROUTE_STEPS = 16;
-constexpr int32_t MAX_DELAYED_EVENTS = 64;
-constexpr int32_t MAX_EVENTS_PER_STEP = 64;
-constexpr int32_t MAX_TAG_INDEX = 128;
-constexpr int32_t MAX_SOURCE_TAGS = 64;
-constexpr int32_t MAX_INGRESS_TAGS = 128;
-constexpr int32_t MAX_FLOW_COMPLETIONS = 64;
+constexpr int32_t MAX_DELAYED_EVENTS = 16384;
+constexpr int32_t MAX_EVENTS_PER_STEP = 16384;
+constexpr int32_t MAX_TAG_INDEX = 4096;
+constexpr int32_t MAX_SOURCE_TAGS = 512;
+constexpr int32_t MAX_INGRESS_TAGS = 4096;
+constexpr int32_t MAX_FLOW_COMPLETIONS = 512;
 constexpr int32_t QOS_NONE = 0;
 constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
