@@ -130,6 +130,63 @@ struct StepDownstreamEmitNode : public NodeBase {
     }
 };
 
+struct StepClearDirtyNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().clearDirtyPorts(ctx);
+    }
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepClearDirtyNode>(deps);
+    }
+};
+
+struct StepChooseDTNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().nextDT = ctx.data().chooseDT();
+    }
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepChooseDTNode>(deps);
+    }
+};
+
+struct StepBufferUpdateNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().bufferUpdateSystem(ctx, ctx.data().nextDT);
+    }
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepBufferUpdateNode>(deps);
+    }
+};
+
+struct StepFlowProgressNode : public NodeBase {
+    void run(Context &ctx_base, TaskGraph &)
+    {
+        Engine &ctx = (Engine &)ctx_base;
+        ctx.data().flowProgressAndCleanupSystem(ctx, ctx.data().nextDT);
+        ctx.data().now += ctx.data().nextDT;
+    }
+
+    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
+                                      Span<const TaskGraphNodeID> deps)
+    {
+        return builder.addDefaultNode<StepFlowProgressNode>(deps);
+    }
+};
+
 }
 
 void Sim::registerTypes(ECSRegistry &registry, const Config &)
@@ -172,7 +229,11 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     TaskGraphNodeID n4 = builder.addToGraph<StepPfcPropagateNode>({n3});
     TaskGraphNodeID n5 = builder.addToGraph<StepPortAllocNode>({n4});
     TaskGraphNodeID n6 = builder.addToGraph<StepPfcDetectNode>({n5});
-    builder.addToGraph<StepDownstreamEmitNode>({n6});
+    TaskGraphNodeID n7 = builder.addToGraph<StepDownstreamEmitNode>({n6});
+    TaskGraphNodeID n8 = builder.addToGraph<StepClearDirtyNode>({n7});
+    TaskGraphNodeID n9 = builder.addToGraph<StepChooseDTNode>({n8});
+    TaskGraphNodeID n10 = builder.addToGraph<StepBufferUpdateNode>({n9});
+    builder.addToGraph<StepFlowProgressNode>({n10});
 }
 
 void Sim::resetNetworkState()
@@ -208,6 +269,8 @@ void Sim::resetNetworkState()
     numBacklogDrainTimers = 0;
     numPfcPauseTimers = 0;
     numPfcResumeTimers = 0;
+    numLastDirtyPortIDs = 0;
+    nextDT = 0.0;
 
     for (int32_t i = 0; i < PFC_MAX_PRIORITY; i++) {
         priorWeights[i] = 0.0;
@@ -223,6 +286,7 @@ void Sim::resetNetworkState()
         pfcPauseTimers[i] = 0.0;
         pfcResumePortIDs[i] = -1;
         pfcResumeTimers[i] = 0.0;
+        lastDirtyPortIDs[i] = -1;
     }
 
     for (int32_t i = 0; i < MAX_TOPO_NODES; i++) {
@@ -2058,6 +2122,584 @@ void Sim::downstreamEmitSystem(Engine &ctx)
                 .in_bw = tag.out_bw,
             };
             pushDelayedEvent(ev);
+        }
+    }
+}
+
+void Sim::clearDirtyPorts(Engine &ctx)
+{
+    numLastDirtyPortIDs = 0;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        DirtyPort &dirty = ctx.get<DirtyPort>(port_e);
+        if (dirty.isDirty != 0) {
+            if (numLastDirtyPortIDs < MAX_TOPO_PORTS) {
+                lastDirtyPortIDs[numLastDirtyPortIDs++] = port_id;
+            }
+            dirty.isDirty = 0;
+        }
+    }
+}
+
+Time Sim::chooseDT() const
+{
+    Time dt_event = std::numeric_limits<Time>::max();
+
+    if (numDelayedEvents > 0) {
+        Time gap = delayedEvents[0].t - now;
+        if (gap > 1e-15) {
+            dt_event = std::min(dt_event, gap);
+        }
+    }
+
+    if (numPendingFlows > 0) {
+        Time gap = pendingFlows[0].start_time - now;
+        if (gap > 1e-15) {
+            dt_event = std::min(dt_event, gap);
+        }
+    }
+
+    if (cachedNextFinishTime > 1e-15 && cachedNextFinishTime < std::numeric_limits<Time>::max()) {
+        dt_event = std::min(dt_event, cachedNextFinishTime);
+    }
+
+    if (enableBuffer != 0 && cachedNextDrainTime > 1e-15 && cachedNextDrainTime < std::numeric_limits<Time>::max()) {
+        dt_event = std::min(dt_event, cachedNextDrainTime);
+    }
+
+    if (enableBuffer != 0) {
+        for (int32_t i = 0; i < numBacklogDrainTimers; i++) {
+            if (backlogDrainTimers[i] > 1e-15) {
+                dt_event = std::min(dt_event, backlogDrainTimers[i]);
+            }
+        }
+    }
+
+    if (enablePfc != 0) {
+        for (int32_t i = 0; i < numPfcPauseTimers; i++) {
+            if (pfcPauseTimers[i] > 1e-9) {
+                dt_event = std::min(dt_event, pfcPauseTimers[i]);
+            }
+        }
+        for (int32_t i = 0; i < numPfcResumeTimers; i++) {
+            if (pfcResumeTimers[i] > 1e-9) {
+                dt_event = std::min(dt_event, pfcResumeTimers[i]);
+            }
+        }
+    }
+
+    Time dt = dt_event;
+    if (dtMin > 0.0 && dt < dtMin) {
+        dt = dtMin;
+    }
+    if (dt > 1e12 || dt == std::numeric_limits<Time>::max()) {
+        dt = 0.001;
+    }
+    return dt;
+}
+
+void Sim::bufferUpdateSystem(Engine &ctx, Time dt)
+{
+    if (enableBuffer == 0 || dt < 1e-15) {
+        return;
+    }
+
+    bool processPorts[MAX_TOPO_PORTS] {};
+    for (int32_t i = 0; i < numLastDirtyPortIDs; i++) {
+        if (lastDirtyPortIDs[i] >= 0 && lastDirtyPortIDs[i] < numPorts) {
+            processPorts[lastDirtyPortIDs[i]] = true;
+        }
+    }
+    if (cachedDrainPortID >= 0 && cachedNextDrainTime < std::numeric_limits<Time>::max() && cachedNextDrainTime <= dt + 1e-12) {
+        processPorts[cachedDrainPortID] = true;
+    }
+    for (int32_t i = 0; i < numBacklogDrainTimers; i++) {
+        if (backlogDrainTimers[i] <= dt + 1e-12 && backlogDrainPortIDs[i] >= 0) {
+            processPorts[backlogDrainPortIDs[i]] = true;
+        }
+    }
+
+    constexpr double BUFFER_EPSILON = 1.0;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (processPorts[port_id]) {
+            continue;
+        }
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
+        bool any_pri_empty = false;
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            PriorityBuffer &pb = port_buf.prior_bufs[pri];
+            if (pb.buf_cnt < 1e-15 && pb.num_chunks == 0 && std::abs(pb.net_buffer_rate) < 1e-15) {
+                continue;
+            }
+            double eff = pb.buf_cnt;
+            if (now > port_buf.last_update_time) {
+                eff += pb.net_buffer_rate * (now - port_buf.last_update_time);
+                if (eff < 0.0) {
+                    eff = 0.0;
+                }
+            }
+            if (eff < BUFFER_EPSILON) {
+                any_pri_empty = true;
+                break;
+            }
+        }
+        if (any_pri_empty) {
+            processPorts[port_id] = true;
+        }
+    }
+
+    Time frame_end = now + dt;
+    Entity tags_to_destroy[MAX_TAG_INDEX] {};
+    int32_t num_destroy = 0;
+
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (!processPorts[port_id]) {
+            continue;
+        }
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+
+        PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
+        materializeBufCnt(port_buf, now);
+
+        Entity tags[MAX_TAG_INDEX] {};
+        int32_t num_tags = 0;
+        for (int32_t i = 0; i < numTagIndexEntries; i++) {
+            if (tagIndex[i].port_id == port_id && tagIndex[i].entity != Entity::none()) {
+                tags[num_tags++] = tagIndex[i].entity;
+            }
+        }
+        if (num_tags == 0) {
+            continue;
+        }
+
+        double port_bw = ctx.get<PortState>(port_e).port_bw;
+        bool multi_pri = (qosMode == QOS_SP || qosMode == QOS_WRR);
+        int32_t pri_begin = multi_pri ? 0 : 0;
+        int32_t pri_end = multi_pri ? PFC_MAX_PRIORITY : 1;
+
+        Entity pri_tags[PFC_MAX_PRIORITY][MAX_TAG_INDEX] {};
+        int32_t pri_counts[PFC_MAX_PRIORITY] {};
+        double pri_in[PFC_MAX_PRIORITY] {};
+        double pri_out[PFC_MAX_PRIORITY] {};
+        for (int32_t i = 0; i < num_tags; i++) {
+            FlowTagState &tag = ctx.get<FlowTagState>(tags[i]);
+            int32_t p = multi_pri ? std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1) : 0;
+            pri_tags[p][pri_counts[p]++] = tags[i];
+            pri_in[p] += (tag.is_source != 0) ? tag.out_bw : tag.in_bw;
+            pri_out[p] += tag.out_bw;
+        }
+
+        for (int32_t pri = pri_begin; pri < pri_end; pri++) {
+            if (pri_counts[pri] == 0 && pri_in[pri] < 1e-15 && pri_out[pri] < 1e-15) {
+                continue;
+            }
+
+            PriorityBuffer &pb = port_buf.prior_bufs[pri];
+            double in_total = pri_in[pri];
+            double out_total = pri_out[pri];
+
+            if (pb.buf_cnt > 1.0 && pb.num_chunks == 0) {
+                BufferChunk comp {};
+                comp.chunk_bytes = pb.buf_cnt;
+                int32_t wcnt = 0;
+                for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
+                    FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                    comp.weights[wcnt].flow_id = tag.flow_id;
+                    comp.weights[wcnt].weight = 1.0;
+                    wcnt += 1;
+                }
+                comp.num_weights = wcnt;
+                if (wcnt > 0) {
+                    for (int32_t i = 0; i < wcnt; i++) {
+                        comp.weights[i].weight /= (double)wcnt;
+                    }
+                    pb.buf_chunks[pb.tail] = comp;
+                    pb.tail = (pb.tail + 1) % MAX_BUFFER_CHUNKS;
+                    pb.num_chunks += 1;
+                }
+            }
+
+            if (pb.buf_cnt > BUFFER_EPSILON && pb.num_chunks == 0) {
+                BufferChunk comp {};
+                comp.chunk_bytes = pb.buf_cnt;
+                int32_t wcnt = 0;
+                for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
+                    FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                    materializeBacklog(tag, now);
+                    if (tag.backlog > 1e-15) {
+                        comp.weights[wcnt].flow_id = tag.flow_id;
+                        comp.weights[wcnt].weight = 1.0;
+                        wcnt += 1;
+                    }
+                }
+                comp.num_weights = wcnt;
+                if (wcnt > 0) {
+                    for (int32_t i = 0; i < wcnt; i++) {
+                        comp.weights[i].weight = 1.0 / (double)wcnt;
+                    }
+                    pb.buf_chunks[pb.tail] = comp;
+                    pb.tail = (pb.tail + 1) % MAX_BUFFER_CHUNKS;
+                    pb.num_chunks += 1;
+                }
+            }
+
+            if (pb.buf_cnt < 1e-15 && pb.num_chunks > 0) {
+                double chunk_sum = 0.0;
+                for (int32_t i = 0; i < pb.num_chunks; i++) {
+                    int32_t idx = (pb.head + i) % MAX_BUFFER_CHUNKS;
+                    chunk_sum += pb.buf_chunks[idx].chunk_bytes;
+                }
+                if (chunk_sum > 1e-15) {
+                    pb.buf_cnt = chunk_sum;
+                }
+            }
+
+            alignChunksWithBufCnt(pb);
+            bool has_existing_buffer = (pb.buf_cnt > 1e-15 && pb.num_chunks > 0);
+
+            if (has_existing_buffer) {
+                double buf_before = pb.buf_cnt;
+                double add_amount = in_total * dt;
+                if (add_amount > BUFFER_EPSILON && in_total > 1e-18) {
+                    BufferChunk chunk {};
+                    chunk.chunk_bytes = add_amount;
+                    int32_t wcnt = 0;
+                    for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
+                        FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                        double effective_in = (tag.is_source != 0) ? tag.out_bw : tag.in_bw;
+                        if (effective_in > 1e-18) {
+                            chunk.weights[wcnt].flow_id = tag.flow_id;
+                            chunk.weights[wcnt].weight = effective_in / in_total;
+                            wcnt += 1;
+                        }
+                    }
+                    chunk.num_weights = wcnt;
+                    bool merged = false;
+                    if (pb.num_chunks >= 2 && wcnt > 0) {
+                        int32_t back_idx = (pb.tail - 1 + MAX_BUFFER_CHUNKS) % MAX_BUFFER_CHUNKS;
+                        BufferChunk &back = pb.buf_chunks[back_idx];
+                        if (back.num_weights == chunk.num_weights) {
+                            merged = true;
+                            for (int32_t i = 0; i < back.num_weights; i++) {
+                                if (back.weights[i].flow_id != chunk.weights[i].flow_id ||
+                                    std::abs(back.weights[i].weight - chunk.weights[i].weight) > 1e-6) {
+                                    merged = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if (merged) {
+                            back.chunk_bytes += add_amount;
+                        }
+                    }
+                    if (!merged && wcnt > 0 && pb.num_chunks < MAX_BUFFER_CHUNKS) {
+                        pb.buf_chunks[pb.tail] = chunk;
+                        pb.tail = (pb.tail + 1) % MAX_BUFFER_CHUNKS;
+                        pb.num_chunks += 1;
+                    }
+                    pb.buf_cnt += add_amount;
+                }
+
+                int32_t chunks_before = pb.num_chunks;
+                double drain_amount = std::min(out_total * dt, pb.buf_cnt);
+                if (drain_amount > BUFFER_EPSILON) {
+                    double drained = drainBufferChunks(pb, drain_amount);
+                    pb.buf_cnt = std::max(0.0, pb.buf_cnt - drained);
+                }
+                if (pb.num_chunks > 0) {
+                    BufferChunk &front = pb.buf_chunks[pb.head];
+                    if (front.chunk_bytes < BUFFER_EPSILON) {
+                        pb.buf_cnt = std::max(0.0, pb.buf_cnt - front.chunk_bytes);
+                        front = BufferChunk {};
+                        pb.head = (pb.head + 1) % MAX_BUFFER_CHUNKS;
+                        pb.num_chunks -= 1;
+                    }
+                }
+
+                for (int32_t i = 0; i < pri_counts[pri]; i++) {
+                    FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                    Time bl_elapsed = frame_end - tag.last_backlog_time;
+                    if (bl_elapsed > 1e-15) {
+                        double net = (tag.in_bw - tag.out_bw) * bl_elapsed;
+                        tag.backlog = std::max(0.0, tag.backlog + net);
+                    }
+                    tag.last_backlog_time = frame_end;
+                }
+
+                bool chunk_consumed = pb.num_chunks < chunks_before;
+                bool buffer_emptied = buf_before > 1e-15 && pb.buf_cnt < 1e-15;
+                if (chunk_consumed || buffer_emptied) {
+                    ctx.get<DirtyPort>(port_e).isDirty = 1;
+                }
+
+                if (chunk_consumed && !buffer_emptied) {
+                    for (int32_t i = 0; i < pri_counts[pri]; i++) {
+                        FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                        double reconciled = 0.0;
+                        for (int32_t c = 0; c < pb.num_chunks; c++) {
+                            int32_t idx = (pb.head + c) % MAX_BUFFER_CHUNKS;
+                            BufferChunk &chunk = pb.buf_chunks[idx];
+                            for (int32_t w = 0; w < chunk.num_weights; w++) {
+                                if (chunk.weights[w].flow_id == tag.flow_id) {
+                                    reconciled += chunk.chunk_bytes * chunk.weights[w].weight;
+                                    break;
+                                }
+                            }
+                        }
+                        tag.backlog = reconciled;
+                        tag.last_backlog_time = frame_end;
+                    }
+                }
+                if (buffer_emptied) {
+                    for (int32_t i = 0; i < pri_counts[pri]; i++) {
+                        ctx.get<FlowTagState>(pri_tags[pri][i]).backlog = 0.0;
+                    }
+                }
+            } else {
+                double delta = (in_total - out_total) * dt;
+                if (delta > BUFFER_EPSILON) {
+                    pb.buf_cnt += delta;
+                    BufferChunk chunk {};
+                    chunk.chunk_bytes = delta;
+                    int32_t wcnt = 0;
+                    if (in_total > 1e-18) {
+                        for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
+                            FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                            double effective_in = (tag.is_source != 0) ? tag.out_bw : tag.in_bw;
+                            if (effective_in > 1e-18) {
+                                chunk.weights[wcnt].flow_id = tag.flow_id;
+                                chunk.weights[wcnt].weight = effective_in / in_total;
+                                if (tag.is_source == 0) {
+                                    tag.backlog += delta * chunk.weights[wcnt].weight;
+                                }
+                                wcnt += 1;
+                            }
+                            tag.last_backlog_time = frame_end;
+                        }
+                    }
+                    chunk.num_weights = wcnt;
+                    if (wcnt > 0 && pb.num_chunks < MAX_BUFFER_CHUNKS) {
+                        pb.buf_chunks[pb.tail] = chunk;
+                        pb.tail = (pb.tail + 1) % MAX_BUFFER_CHUNKS;
+                        pb.num_chunks += 1;
+                    }
+                    ctx.get<DirtyPort>(port_e).isDirty = 1;
+                } else {
+                    for (int32_t i = 0; i < pri_counts[pri]; i++) {
+                        ctx.get<FlowTagState>(pri_tags[pri][i]).last_backlog_time = frame_end;
+                    }
+                }
+            }
+
+            for (int32_t i = 0; i < pri_counts[pri]; i++) {
+                FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                if (tag.in_bw != 0.0) {
+                    continue;
+                }
+                bool upstream_alive = false;
+                if (tag.is_source == 0) {
+                    for (int32_t r = 0; r < numFlowRoutes; r++) {
+                        if (flowRoutes[r].flow_id != tag.flow_id) {
+                            continue;
+                        }
+                        for (int32_t s = 0; s < flowRoutes[r].num_steps; s++) {
+                            if (flowRoutes[r].steps[s].next_port_id == tag.port_id) {
+                                Entity up = findTag(flowRoutes[r].steps[s].port_id, tag.flow_id);
+                                if (up != Entity::none()) {
+                                    upstream_alive = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (tag.backlog < 1e-15) {
+                    if (!upstream_alive && num_destroy < MAX_TAG_INDEX) {
+                        tags_to_destroy[num_destroy++] = pri_tags[pri][i];
+                    }
+                    continue;
+                }
+                if (tag.out_bw == 0.0) {
+                    bool pfc_paused = false;
+                    if (enablePfc != 0) {
+                        pfc_paused = ctx.get<PortPfcState>(port_e).paused[std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1)] != 0;
+                    }
+                    bool sp_starved = false;
+                    if (qosMode != QOS_NONE) {
+                        int32_t tp = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+                        PriorityBuffer &tpb = port_buf.prior_bufs[tp];
+                        if (tpb.buf_cnt > 1e-15 || tpb.num_chunks > 0) {
+                            sp_starved = true;
+                        }
+                    }
+                    if (!pfc_paused && !upstream_alive && !sp_starved) {
+                        tag.backlog = 0.0;
+                        if (num_destroy < MAX_TAG_INDEX) {
+                            tags_to_destroy[num_destroy++] = pri_tags[pri][i];
+                        }
+                    }
+                }
+            }
+        }
+
+        port_buf.last_update_time = frame_end;
+    }
+
+    for (int32_t i = 0; i < num_destroy; i++) {
+        if (tags_to_destroy[i] != Entity::none()) {
+            destroyTag(ctx, tags_to_destroy[i], true, frame_end);
+        }
+    }
+}
+
+void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
+{
+    Time next_now = now + dt;
+    bool need_check_finish = cachedNextFinishTime < std::numeric_limits<Time>::max() && cachedNextFinishTime <= dt + 1e-12;
+
+    if (need_check_finish) {
+        Entity finished[MAX_SOURCE_TAGS] {};
+        int32_t num_finished = 0;
+        Time next_finish = std::numeric_limits<Time>::max();
+        for (int32_t i = 0; i < numSourceTags; i++) {
+            Entity tag_e = sourceTags[i].entity;
+            if (tag_e == Entity::none()) {
+                continue;
+            }
+            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+            materializeRemaining(tag, next_now);
+            if (tag.remaining < 1.0) {
+                tag.remaining = 0.0;
+                if (num_finished < MAX_SOURCE_TAGS) {
+                    finished[num_finished++] = tag_e;
+                }
+                if (tag.next_port_id >= 0) {
+                    DelayedEvent ev {};
+                    ev.t = next_now + computePropagationTimeForPort(tag.port_id, tag.next_port_id) - now;
+                    ev.type = DelayedEvent::Type::BwUpdate;
+                    ev.bwupd = BwUpdateEv {
+                        .port_id = tag.next_port_id,
+                        .flow_id = tag.flow_id,
+                        .in_bw = 0.0,
+                    };
+                    pushDelayedEvent(ev);
+                }
+            } else if (tag.out_bw > 1e-15) {
+                Time t_finish = tag.remaining / tag.out_bw;
+                if (t_finish > 1e-15) {
+                    next_finish = std::min(next_finish, t_finish);
+                }
+            }
+        }
+        for (int32_t i = 0; i < num_finished; i++) {
+            destroyTag(ctx, finished[i], false, next_now);
+        }
+        cachedNextFinishTime = next_finish;
+    } else if (cachedNextFinishTime < std::numeric_limits<Time>::max()) {
+        cachedNextFinishTime -= dt;
+        if (cachedNextFinishTime < 1e-15) {
+            cachedNextFinishTime = 1e-15;
+        }
+    }
+
+    if (cachedNextDrainTime < std::numeric_limits<Time>::max()) {
+        cachedNextDrainTime -= dt;
+        if (cachedNextDrainTime < 1e-15) {
+            cachedNextDrainTime = std::numeric_limits<Time>::max();
+            cachedDrainPortID = -1;
+        }
+    }
+
+    int32_t i = 0;
+    while (i < numBacklogDrainTimers) {
+        backlogDrainTimers[i] -= dt;
+        if (backlogDrainTimers[i] < 1e-15) {
+            int32_t pid = backlogDrainPortIDs[i];
+            if (pid >= 0 && pid < numPorts) {
+                Entity pe = portEntities[pid];
+                if (pe != Entity::none()) {
+                    ctx.get<DirtyPort>(pe).isDirty = 1;
+                }
+            }
+            clearBacklogDrainTimer(backlogDrainPortIDs[i]);
+        } else {
+            i += 1;
+        }
+    }
+
+    auto mark_egress_ports_for_ingress = [&](int32_t ingress_port) {
+        for (int32_t j = 0; j < numIngressTags; j++) {
+            if (ingressTags[j].ingress_port_id != ingress_port) {
+                continue;
+            }
+            Entity te = ingressTags[j].entity;
+            if (te == Entity::none()) {
+                continue;
+            }
+            FlowTagState &t = ctx.get<FlowTagState>(te);
+            if (t.port_id >= 0 && t.port_id < numPorts) {
+                Entity pe = portEntities[t.port_id];
+                if (pe != Entity::none()) {
+                    ctx.get<DirtyPort>(pe).isDirty = 1;
+                }
+            }
+        }
+    };
+
+    i = 0;
+    while (i < numPfcPauseTimers) {
+        pfcPauseTimers[i] -= dt;
+        if (pfcPauseTimers[i] < 1e-9) {
+            int32_t ingress_port = pfcPausePortIDs[i];
+            mark_egress_ports_for_ingress(ingress_port);
+            clearPfcPauseTimer(ingress_port);
+        } else {
+            i += 1;
+        }
+    }
+
+    i = 0;
+    while (i < numPfcResumeTimers) {
+        pfcResumeTimers[i] -= dt;
+        if (pfcResumeTimers[i] < 1e-9) {
+            int32_t ingress_port = pfcResumePortIDs[i];
+            mark_egress_ports_for_ingress(ingress_port);
+            clearPfcResumeTimer(ingress_port);
+        } else {
+            i += 1;
+        }
+    }
+
+    bool all_exhausted = cachedNextDrainTime >= std::numeric_limits<Time>::max() &&
+                         cachedNextFinishTime >= std::numeric_limits<Time>::max() &&
+                         numDelayedEvents == 0 && numPendingFlows == 0 &&
+                         numBacklogDrainTimers == 0 && numPfcPauseTimers == 0 &&
+                         numPfcResumeTimers == 0;
+
+    if (all_exhausted) {
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            Entity pe = portEntities[port_id];
+            if (pe == Entity::none()) {
+                continue;
+            }
+            PortBuffer &pb_all = ctx.get<PortBuffer>(pe);
+            for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+                PriorityBuffer &pb = pb_all.prior_bufs[pri];
+                if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
+                    ctx.get<DirtyPort>(pe).isDirty = 1;
+                    break;
+                }
+            }
         }
     }
 }

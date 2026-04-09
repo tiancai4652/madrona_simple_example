@@ -170,6 +170,10 @@ struct Sim : public madrona::WorldBase {
     void portBandwidthAllocSystem(Engine &ctx, Time dt);
     void pfcThresholdDetectSystem(Engine &ctx);
     void downstreamEmitSystem(Engine &ctx);
+    void clearDirtyPorts(Engine &ctx);
+    Time chooseDT() const;
+    void bufferUpdateSystem(Engine &ctx, Time dt);
+    void flowProgressAndCleanupSystem(Engine &ctx, Time dt);
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;
     madrona::Entity createTagOnPort(Engine &ctx,
@@ -268,6 +272,9 @@ struct Sim : public madrona::WorldBase {
     int32_t numPfcResumeTimers;
     int32_t pfcResumePortIDs[MAX_TOPO_PORTS];
     Time pfcResumeTimers[MAX_TOPO_PORTS];
+    int32_t numLastDirtyPortIDs;
+    int32_t lastDirtyPortIDs[MAX_TOPO_PORTS];
+    Time nextDT;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {
