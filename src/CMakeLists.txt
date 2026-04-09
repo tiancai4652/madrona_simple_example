@@ -1,5 +1,13 @@
 set(SIMULATOR_SRCS
-    types.hpp sim.hpp sim.cpp
+    types.hpp sim.hpp
+    sim.cpp
+    sim_init.cpp
+    sim_world.cpp
+    sim_debug.cpp
+    sim_systems.cpp
+    sim_systems_bandwidth.cpp
+    sim_systems_buffer.cpp
+    sim_systems_pfc.cpp
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC
