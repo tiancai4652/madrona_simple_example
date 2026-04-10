@@ -74,5 +74,16 @@ void printSystemAllocSummary(uint64_t step, Time now,
                              int32_t dirty_port_count,
                              int32_t processed_port_count,
                              int32_t dirty_tag_count);
+void printSystemEmitSummary(uint64_t step, Time now,
+                            int32_t dirty_port_count,
+                            int32_t arrival_emit_count,
+                            int32_t bwupdate_emit_count);
+void printSystemPfcDetectSummary(uint64_t step, Time now,
+                                 int32_t checked_port_count,
+                                 int32_t emitted_pfc_count,
+                                 int32_t pause_timer_count,
+                                 int32_t resume_timer_count);
+void printSystemClearSummary(uint64_t step, Time now,
+                             int32_t cleared_port_count);
 
 }

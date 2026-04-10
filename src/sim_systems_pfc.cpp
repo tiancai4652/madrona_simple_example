@@ -175,7 +175,17 @@ void Sim::pfcPropagateSystem(Engine &ctx)
 
 void Sim::pfcThresholdDetectSystem(Engine &ctx)
 {
+    constexpr const char *scope = "emit_pfc";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    int32_t checked_port_count = 0;
+    int32_t emitted_pfc_count = 0;
+
     if (enablePfc == 0) {
+        if (log_enabled) {
+            printSystemPfcDetectSummary(step, now, 0, 0,
+                numPfcPauseTimers, numPfcResumeTimers);
+        }
         return;
     }
 
@@ -190,6 +200,7 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
             if (cfg.pfc_enabled == 0) {
                 continue;
             }
+            checked_port_count += 1;
             PortPfcState &state = ctx.get<PortPfcState>(egress_e);
 
             double buf_by_pri[PFC_MAX_PRIORITY] {};
@@ -256,6 +267,7 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
                             .paused = 1,
                         };
                         pushDelayedEvent(ev);
+                        emitted_pfc_count += 1;
                     }
                     state.pfc_cnt[pri] += 1;
                 } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
@@ -279,6 +291,7 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
                             .paused = 0,
                         };
                         pushDelayedEvent(ev);
+                        emitted_pfc_count += 1;
                     }
                     state.paused_upstream_count[pri] = 0;
                 }
@@ -334,6 +347,7 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
         if (cfg.pfc_enabled == 0) {
             continue;
         }
+        checked_port_count += 1;
         PortPfcState &state = ctx.get<PortPfcState>(ingress_e);
 
         double buf_by_pri[PFC_MAX_PRIORITY] {};
@@ -387,6 +401,7 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
                         .paused = 1,
                     };
                     pushDelayedEvent(ev);
+                    emitted_pfc_count += 1;
                 }
                 state.pfc_cnt[pri] += 1;
             } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
@@ -410,6 +425,7 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
                         .paused = 0,
                     };
                     pushDelayedEvent(ev);
+                    emitted_pfc_count += 1;
                 }
                 state.paused_upstream_count[pri] = 0;
             }
@@ -458,6 +474,11 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
             clearPfcPauseTimer(ingress_port);
             clearPfcResumeTimer(ingress_port);
         }
+    }
+
+    if (log_enabled) {
+        printSystemPfcDetectSummary(step, now, checked_port_count,
+            emitted_pfc_count, numPfcPauseTimers, numPfcResumeTimers);
     }
 }
 

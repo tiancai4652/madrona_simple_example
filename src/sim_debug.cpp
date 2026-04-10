@@ -72,6 +72,9 @@ void printSystemPfcState(uint64_t, Time, const PfcControlEv &, int32_t, int32_t)
 void printSystemPfcSummary(uint64_t, Time, int32_t, int32_t) {}
 void printSystemAllocPort(uint64_t, Time, int32_t, double, int32_t, int32_t, double, double, int32_t, int32_t, int32_t) {}
 void printSystemAllocSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
+void printSystemEmitSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
+void printSystemPfcDetectSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t) {}
+void printSystemClearSummary(uint64_t, Time, int32_t) {}
 #else
 const bool init_log_print_enabled = []() {
     const char *env = std::getenv("init_log_print_enabled");
@@ -172,39 +175,62 @@ void printInitTopoLog(const Sim &sim, Engine &ctx)
                   << "\n";
     }
 
-    constexpr int32_t route_samples[][2] = {
-        {0, 1},
-        {0, 32},
-        {32, 0},
-        {64, 0},
-        {64, 32},
-        {0, 64},
-        {0, 66},
-        {66, 0},
-        {64, 66},
-    };
-
-    for (const auto &sample : route_samples) {
-        int32_t src_slot = sim.findNodeSlot(sample[0]);
-        int32_t dst_slot = sim.findNodeSlot(sample[1]);
-        NodeId route = -1;
-        int32_t ecmp_count = 0;
-        if (src_slot >= 0 && dst_slot >= 0) {
-            route = sim.routeTable[src_slot][dst_slot];
-            ecmp_count = sim.ecmpCount[src_slot][dst_slot];
+    NodeId node_ids[MAX_TOPO_NODES] {};
+    for (int32_t i = 0; i < sim.numTopoNodes; i++) {
+        node_ids[i] = sim.topoNodes[i].id;
+    }
+    for (int32_t i = 0; i < sim.numTopoNodes; i++) {
+        for (int32_t j = i + 1; j < sim.numTopoNodes; j++) {
+            if (node_ids[j] < node_ids[i]) {
+                NodeId tmp = node_ids[i];
+                node_ids[i] = node_ids[j];
+                node_ids[j] = tmp;
+            }
         }
+    }
 
-        std::cout << "[INIT][ROUTE] src=" << sample[0]
-                  << " dst=" << sample[1]
-                  << " route=" << route
-                  << " ecmp_count=" << ecmp_count
-                  << " ecmp=";
-        if (src_slot >= 0 && dst_slot >= 0) {
-            printNodeList(sim.ecmpNextHops[src_slot][dst_slot], ecmp_count);
-        } else {
-            std::cout << "[]";
+    for (int32_t i = 0; i < sim.numTopoNodes; i++) {
+        for (int32_t j = 0; j < sim.numTopoNodes; j++) {
+            NodeId src = node_ids[i];
+            NodeId dst = node_ids[j];
+            if (src == dst) {
+                continue;
+            }
+
+            int32_t src_slot = sim.findNodeSlot(src);
+            int32_t dst_slot = sim.findNodeSlot(dst);
+            NodeId route = -1;
+            int32_t ecmp_count = 0;
+            NodeId sorted_ecmp[MAX_ECMP_NEXT_HOPS] {};
+            if (src_slot >= 0 && dst_slot >= 0) {
+                route = sim.routeTable[src_slot][dst_slot];
+                ecmp_count = sim.ecmpCount[src_slot][dst_slot];
+                for (int32_t k = 0; k < ecmp_count; k++) {
+                    sorted_ecmp[k] = sim.ecmpNextHops[src_slot][dst_slot][k];
+                }
+                for (int32_t a = 0; a < ecmp_count; a++) {
+                    for (int32_t b = a + 1; b < ecmp_count; b++) {
+                        if (sorted_ecmp[b] < sorted_ecmp[a]) {
+                            NodeId tmp = sorted_ecmp[a];
+                            sorted_ecmp[a] = sorted_ecmp[b];
+                            sorted_ecmp[b] = tmp;
+                        }
+                    }
+                }
+            }
+
+            std::cout << "[INIT][ROUTE] src=" << src
+                      << " dst=" << dst
+                      << " route=" << route
+                      << " ecmp_count=" << ecmp_count
+                      << " ecmp=";
+            if (src_slot >= 0 && dst_slot >= 0) {
+                printNodeList(sorted_ecmp, ecmp_count);
+            } else {
+                std::cout << "[]";
+            }
+            std::cout << "\n";
         }
-        std::cout << "\n";
     }
 }
 
@@ -535,6 +561,46 @@ void printSystemAllocSummary(uint64_t step, Time now,
               << " dirty_port_count=" << dirty_port_count
               << " processed_port_count=" << processed_port_count
               << " dirty_tag_count=" << dirty_tag_count
+              << "\n";
+}
+
+void printSystemEmitSummary(uint64_t step, Time now,
+                            int32_t dirty_port_count,
+                            int32_t arrival_emit_count,
+                            int32_t bwupdate_emit_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][EMIT][SUMMARY] step=" << step
+              << " now=" << now
+              << " dirty_port_count=" << dirty_port_count
+              << " arrival_emit_count=" << arrival_emit_count
+              << " bwupdate_emit_count=" << bwupdate_emit_count
+              << "\n";
+}
+
+void printSystemPfcDetectSummary(uint64_t step, Time now,
+                                 int32_t checked_port_count,
+                                 int32_t emitted_pfc_count,
+                                 int32_t pause_timer_count,
+                                 int32_t resume_timer_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][PFCDETECT][SUMMARY] step=" << step
+              << " now=" << now
+              << " checked_port_count=" << checked_port_count
+              << " emitted_pfc_count=" << emitted_pfc_count
+              << " pause_timer_count=" << pause_timer_count
+              << " resume_timer_count=" << resume_timer_count
+              << "\n";
+}
+
+void printSystemClearSummary(uint64_t step, Time now,
+                             int32_t cleared_port_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][CLEAR][SUMMARY] step=" << step
+              << " now=" << now
+              << " cleared_port_count=" << cleared_port_count
               << "\n";
 }
 #endif

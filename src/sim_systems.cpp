@@ -648,7 +648,12 @@ void Sim::bwUpdateIngressSystem(Engine &ctx)
 
 void Sim::clearDirtyPorts(Engine &ctx)
 {
+    constexpr const char *scope = "emit_pfc";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
     numLastDirtyPortIDs = 0;
+    int32_t cleared_port_count = 0;
+
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
@@ -660,7 +665,12 @@ void Sim::clearDirtyPorts(Engine &ctx)
                 lastDirtyPortIDs[numLastDirtyPortIDs++] = port_id;
             }
             dirty.isDirty = 0;
+            cleared_port_count += 1;
         }
+    }
+
+    if (log_enabled) {
+        printSystemClearSummary(step, now, cleared_port_count);
     }
 }
 

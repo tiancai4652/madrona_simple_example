@@ -569,11 +569,19 @@ void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
 
 void Sim::downstreamEmitSystem(Engine &ctx)
 {
+    constexpr const char *scope = "emit_pfc";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    int32_t dirty_port_count = 0;
+    int32_t arrival_emit_count = 0;
+    int32_t bwupdate_emit_count = 0;
+
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none() || ctx.get<DirtyPort>(port_e).isDirty == 0) {
             continue;
         }
+        dirty_port_count += 1;
 
         for (int32_t i = 0; i < numTagIndexEntries; i++) {
             if (tagIndex[i].port_id != port_id) {
@@ -602,6 +610,7 @@ void Sim::downstreamEmitSystem(Engine &ctx)
                     };
                     pushDelayedEvent(ev);
                     tag.downstream_created = 1;
+                    arrival_emit_count += 1;
                 }
                 continue;
             }
@@ -617,7 +626,13 @@ void Sim::downstreamEmitSystem(Engine &ctx)
                 .in_bw = tag.out_bw,
             };
             pushDelayedEvent(ev);
+            bwupdate_emit_count += 1;
         }
+    }
+
+    if (log_enabled) {
+        printSystemEmitSummary(step, now, dirty_port_count,
+            arrival_emit_count, bwupdate_emit_count);
     }
 }
 
