@@ -1,4 +1,5 @@
 #include "sim.hpp"
+#include "sim_debug.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -11,6 +12,10 @@ namespace madsimple {
 void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
 {
     (void)dt;
+
+    constexpr const char *scope = "alloc";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
 
     int32_t dirty_ports[MAX_TOPO_PORTS] {};
     int32_t num_dirty_ports = 0;
@@ -25,8 +30,14 @@ void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
     }
 
     if (num_dirty_ports == 0) {
+        if (log_enabled) {
+            printSystemAllocSummary(step, now, 0, 0, 0);
+        }
         return;
     }
+
+    int32_t processed_port_count = 0;
+    int32_t dirty_tag_count = 0;
 
     for (int32_t i = 0; i < num_dirty_ports; i++) {
         int32_t pid = dirty_ports[i];
@@ -112,6 +123,9 @@ void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
             continue;
         }
 
+        processed_port_count += 1;
+        dirty_tag_count += num_tags;
+
         for (int32_t i = 0; i < num_tags; i++) {
             FlowTagState &tag = ctx.get<FlowTagState>(tags[i]);
             if (tag.is_source != 0) {
@@ -146,6 +160,7 @@ void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
             continue;
         }
 
+        double current_sum_in = live_sum_in;
         bool is_dest_only = false;
         if (qosMode != QOS_NONE) {
             int32_t node_slot = findNodeSlot(portToNode[port_id]);
@@ -500,6 +515,27 @@ void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
             pb.net_buffer_rate = live_sum_in - out_total;
         }
 
+        if (log_enabled) {
+            bool has_buffer = false;
+            if (port_buf != nullptr) {
+                if (qosMode == QOS_SP || qosMode == QOS_WRR) {
+                    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+                        PriorityBuffer &pb = port_buf->prior_bufs[pri];
+                        if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
+                            has_buffer = true;
+                            break;
+                        }
+                    }
+                } else {
+                    PriorityBuffer &pb = port_buf->prior_bufs[0];
+                    has_buffer = pb.buf_cnt > 1e-15 && pb.num_chunks > 0;
+                }
+            }
+            printSystemAllocPort(step, now, port_id, port_bw, num_tags, num_live,
+                current_sum_in, out_total, qosMode, is_dest_only ? 1 : 0,
+                has_buffer ? 1 : 0);
+        }
+
         for (int32_t i = 0; i < num_live; i++) {
             FlowTagState &tag = ctx.get<FlowTagState>(live_tags[i]);
             if (tag.is_source != 0) {
@@ -523,6 +559,11 @@ void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
                 }
             }
         }
+    }
+
+    if (log_enabled) {
+        printSystemAllocSummary(step, now, num_dirty_ports,
+            processed_port_count, dirty_tag_count);
     }
 }
 

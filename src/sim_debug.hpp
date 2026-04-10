@@ -60,5 +60,19 @@ void printSystemPfcState(uint64_t step, Time now, const PfcControlEv &ev,
 void printSystemPfcSummary(uint64_t step, Time now,
                            int32_t applied_count,
                            int32_t skipped_count);
+void printSystemAllocPort(uint64_t step, Time now,
+                          int32_t port_id,
+                          double port_bw,
+                          int32_t num_tags,
+                          int32_t num_live,
+                          double sum_in,
+                          double sum_out,
+                          int32_t qos_mode,
+                          int32_t is_dest_only,
+                          int32_t has_buffer);
+void printSystemAllocSummary(uint64_t step, Time now,
+                             int32_t dirty_port_count,
+                             int32_t processed_port_count,
+                             int32_t dirty_tag_count);
 
 }

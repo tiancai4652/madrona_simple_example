@@ -70,6 +70,8 @@ void printSystemBwUpdateComplete(uint64_t, Time, FlowId) {}
 void printSystemBwUpdateSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t) {}
 void printSystemPfcState(uint64_t, Time, const PfcControlEv &, int32_t, int32_t) {}
 void printSystemPfcSummary(uint64_t, Time, int32_t, int32_t) {}
+void printSystemAllocPort(uint64_t, Time, int32_t, double, int32_t, int32_t, double, double, int32_t, int32_t, int32_t) {}
+void printSystemAllocSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
 #else
 const bool init_log_print_enabled = []() {
     const char *env = std::getenv("init_log_print_enabled");
@@ -493,6 +495,46 @@ void printSystemPfcSummary(uint64_t step, Time now,
               << " now=" << now
               << " applied_count=" << applied_count
               << " skipped_count=" << skipped_count
+              << "\n";
+}
+
+void printSystemAllocPort(uint64_t step, Time now,
+                          int32_t port_id,
+                          double port_bw,
+                          int32_t num_tags,
+                          int32_t num_live,
+                          double sum_in,
+                          double sum_out,
+                          int32_t qos_mode,
+                          int32_t is_dest_only,
+                          int32_t has_buffer)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][ALLOC][PORT] step=" << step
+              << " now=" << now
+              << " port_id=" << port_id
+              << " port_bw=" << port_bw
+              << " num_tags=" << num_tags
+              << " num_live=" << num_live
+              << " sum_in=" << sum_in
+              << " sum_out=" << sum_out
+              << " qos_mode=" << qos_mode
+              << " is_dest_only=" << is_dest_only
+              << " has_buffer=" << has_buffer
+              << "\n";
+}
+
+void printSystemAllocSummary(uint64_t step, Time now,
+                             int32_t dirty_port_count,
+                             int32_t processed_port_count,
+                             int32_t dirty_tag_count)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][ALLOC][SUMMARY] step=" << step
+              << " now=" << now
+              << " dirty_port_count=" << dirty_port_count
+              << " processed_port_count=" << processed_port_count
+              << " dirty_tag_count=" << dirty_tag_count
               << "\n";
 }
 #endif
