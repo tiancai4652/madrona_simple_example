@@ -233,6 +233,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     : WorldBase(ctx),
       episodeMgr(init.episodeMgr),
       grid(init.grid),
+      network(init.network),
       maxEpisodeLength(cfg.maxEpisodeLength),
       now(0.0),
       nextPortID(0),
@@ -256,6 +257,15 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     for (int32_t i = 0; i < PFC_MAX_PRIORITY; i++) {
         priorWeights[i] = cfg.prior_weights[i];
     }
+
+    Entity agent = ctx.makeEntity<Agent>();
+    ctx.get<Reset>(agent) = Reset { .resetNow = 0 };
+    ctx.get<Action>(agent) = Action::None;
+    ctx.get<GridPos>(agent) = GridPos { .y = 0, .x = 0 };
+    ctx.get<Reward>(agent) = Reward { .r = 0.f };
+    ctx.get<Done>(agent) = Done { .episodeDone = 0.f };
+    ctx.get<CurStep>(agent) = CurStep { .step = 0 };
+
     loadTopo(ctx);
     loadFlow(ctx);
 }

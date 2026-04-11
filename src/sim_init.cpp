@@ -139,96 +139,28 @@ int32_t Sim::createPort(Engine &ctx, NodeId node_id, int32_t port_idx, Bw port_b
     return port_id;
 }
 
-void Sim::buildHardcodedTopo(NodeDef *nodes,
-                             int32_t &num_nodes,
-                             LinkDef *links,
-                             int32_t &num_links) const
-{
-    constexpr Bw host_bw = 25000000.0;
-    constexpr Bw fabric_bw = 800000000.0;
-    constexpr Time host_leaf_delay = 0.25;
-    constexpr Time leaf_spine_delay = 0.5;
-
-    num_nodes = 67;
-    for (int32_t node_id = 0; node_id < 64; node_id++) {
-        nodes[node_id] = NodeDef {
-            .id = node_id,
-            .type = NodeType::Host,
-            .port_bw = host_bw,
-        };
-    }
-    nodes[64] = NodeDef { .id = 64, .type = NodeType::Switch, .port_bw = fabric_bw };
-    nodes[65] = NodeDef { .id = 65, .type = NodeType::Switch, .port_bw = fabric_bw };
-    nodes[66] = NodeDef { .id = 66, .type = NodeType::Switch, .port_bw = fabric_bw };
-
-    num_links = 0;
-    for (int32_t host_id = 0; host_id < 32; host_id++) {
-        links[num_links++] = LinkDef {
-            .src = host_id,
-            .dst = 64,
-            .delay = host_leaf_delay,
-            .bandwidth = host_bw,
-        };
-    }
-    for (int32_t host_id = 32; host_id < 64; host_id++) {
-        links[num_links++] = LinkDef {
-            .src = host_id,
-            .dst = 65,
-            .delay = host_leaf_delay,
-            .bandwidth = host_bw,
-        };
-    }
-    links[num_links++] = LinkDef {
-        .src = 64,
-        .dst = 66,
-        .delay = leaf_spine_delay,
-        .bandwidth = fabric_bw,
-    };
-    links[num_links++] = LinkDef {
-        .src = 65,
-        .dst = 66,
-        .delay = leaf_spine_delay,
-        .bandwidth = fabric_bw,
-    };
-}
-
-void Sim::buildHardcodedFlows(FlowDef *flows, int32_t &num_flows) const
-{
-    constexpr Bytes flow_size = 2097152.0;
-    constexpr Time start_time = 0.002;
-    constexpr int32_t domain_size = 8;
-    constexpr int32_t num_domains = 8;
-
-    num_flows = 0;
-    FlowId flow_id = 1;
-    for (int32_t domain = 0; domain < num_domains; domain++) {
-        int32_t domain_base = domain * domain_size;
-        for (int32_t src = domain_base; src < domain_base + domain_size; src++) {
-            for (int32_t dst = domain_base; dst < domain_base + domain_size; dst++) {
-                if (src == dst) {
-                    continue;
-                }
-
-                flows[num_flows++] = FlowDef {
-                    .id = flow_id++,
-                    .src_node = src,
-                    .dst_node = dst,
-                    .size = flow_size,
-                    .start_time = start_time,
-                    .priority = 0,
-                };
-            }
-        }
-    }
-}
-
 void Sim::loadTopo(Engine &ctx)
 {
-    NodeDef node_defs[MAX_TOPO_NODES] {};
-    LinkDef input_links[MAX_TOPO_LINKS] {};
-    int32_t num_node_defs = 0;
-    int32_t num_input_links = 0;
-    buildHardcodedTopo(node_defs, num_node_defs, input_links, num_input_links);
+    if (network == nullptr) {
+        FATAL("Network input is missing");
+    }
+
+    const NodeDef *node_defs = network->nodes;
+    const LinkDef *input_links = network->links;
+    int32_t num_node_defs = network->numNodes;
+    int32_t num_input_links = network->numLinks;
+
+    if (num_node_defs > MAX_TOPO_NODES) {
+        FATAL("Topology node count exceeds MAX_TOPO_NODES");
+    }
+
+    if (num_input_links > MAX_TOPO_LINKS) {
+        FATAL("Topology link count exceeds MAX_TOPO_LINKS");
+    }
+
+    if (num_input_links * 2 > MAX_TOPO_LINKS) {
+        FATAL("Directional topology links exceed MAX_TOPO_LINKS");
+    }
 
     numTopoNodes = num_node_defs;
     for (int32_t i = 0; i < numTopoNodes; i++) {
@@ -272,6 +204,9 @@ void Sim::loadTopo(Engine &ctx)
         }
 
         int32_t neighbor_idx = topoNodes[src_slot].num_neighbors;
+        if (neighbor_idx >= MAX_NODE_NEIGHBORS) {
+            FATAL("Topology node exceeds MAX_NODE_NEIGHBORS");
+        }
         topoNodes[src_slot].num_neighbors += 1;
         int32_t port_idx = neighbor_idx;
         Bw port_bw = topoLinks[i].bandwidth > 0.0 ? topoLinks[i].bandwidth : topoNodes[src_slot].port_bw;
@@ -314,16 +249,21 @@ void Sim::loadFlow(Engine &ctx)
 {
     (void)ctx;
 
-    FlowDef flows[MAX_FLOWS] {};
-    int32_t flow_count = 0;
-    buildHardcodedFlows(flows, flow_count);
+    if (network == nullptr) {
+        FATAL("Network input is missing");
+    }
+
+    int32_t flow_count = network->numFlows;
+    if (flow_count > MAX_FLOWS) {
+        FATAL("Flow count exceeds MAX_FLOWS");
+    }
 
     numFlowDefs = flow_count;
     numPendingFlows = flow_count;
 
     for (int32_t i = 0; i < flow_count; i++) {
-        flowDefs[i] = flows[i];
-        pendingFlows[i] = flows[i];
+        flowDefs[i] = network->flows[i];
+        pendingFlows[i] = network->flows[i];
     }
 
     for (int32_t i = 0; i < numPendingFlows; i++) {

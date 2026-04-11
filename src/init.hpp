@@ -48,9 +48,19 @@ struct FlowCompletionRecord {
     }
 };
 
+struct NetworkInit {
+    const NodeDef *nodes;
+    int32_t numNodes;
+    const LinkDef *links;
+    int32_t numLinks;
+    const FlowDef *flows;
+    int32_t numFlows;
+};
+
 struct WorldInit {
     EpisodeManager *episodeMgr;
     const GridState *grid;
+    const NetworkInit *network;
 };
 
 }

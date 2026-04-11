@@ -250,10 +250,21 @@ Entity Sim::createTagOnPort(Engine &ctx,
 
 void Sim::injectFlow(int32_t src_port_id, const FlowDef &flow)
 {
-    int32_t src_slot = findNodeSlot(flow.src_node);
     Bw src_in_bw = 0.0;
-    if (src_slot >= 0) {
-        src_in_bw = topoNodes[src_slot].port_bw;
+    if (src_port_id >= 0 && src_port_id < numPorts) {
+        int32_t src_node = portToNode[src_port_id];
+        int32_t src_slot = findNodeSlot(src_node);
+        if (src_slot >= 0) {
+            const TopoNodeState &node = topoNodes[src_slot];
+            for (int32_t i = 0; i < node.num_neighbors; i++) {
+                if (node.neighbors[i].port_id == src_port_id) {
+                    src_in_bw = topoLinks[src_port_id].bandwidth > 0.0
+                        ? topoLinks[src_port_id].bandwidth
+                        : node.port_bw;
+                    break;
+                }
+            }
+        }
     }
 
     DelayedEvent ev {};

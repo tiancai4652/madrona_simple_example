@@ -11,6 +11,8 @@
 #endif
 
 #include <charconv>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -21,17 +23,63 @@ using namespace madrona::py;
 
 namespace madsimple {
 
+namespace {
+
+inline uint64_t alignOffset(uint64_t offset, uint64_t alignment)
+{
+    uint64_t remainder = offset % alignment;
+    if (remainder == 0) {
+        return offset;
+    }
+    return offset + (alignment - remainder);
+}
+
+struct NetworkLayout {
+    uint64_t totalBytes;
+    uint64_t nodesOffset;
+    uint64_t linksOffset;
+    uint64_t flowsOffset;
+};
+
+inline NetworkLayout getNetworkLayout(const NetworkInit &src_network)
+{
+    uint64_t offset = sizeof(NetworkInit);
+    offset = alignOffset(offset, alignof(NodeDef));
+    uint64_t nodes_offset = offset;
+    offset += sizeof(NodeDef) * (uint64_t)src_network.numNodes;
+
+    offset = alignOffset(offset, alignof(LinkDef));
+    uint64_t links_offset = offset;
+    offset += sizeof(LinkDef) * (uint64_t)src_network.numLinks;
+
+    offset = alignOffset(offset, alignof(FlowDef));
+    uint64_t flows_offset = offset;
+    offset += sizeof(FlowDef) * (uint64_t)src_network.numFlows;
+
+    return NetworkLayout {
+        .totalBytes = offset,
+        .nodesOffset = nodes_offset,
+        .linksOffset = links_offset,
+        .flowsOffset = flows_offset,
+    };
+}
+
+} // namespace
+
 struct Manager::Impl {
     Config cfg;
     EpisodeManager *episodeMgr;
     GridState *gridData;
+    NetworkInit *networkData;
 
     inline Impl(const Config &c,
                 EpisodeManager *ep_mgr,
-                GridState *grid_data)
+                GridState *grid_data,
+                NetworkInit *network_data)
         : cfg(c),
           episodeMgr(ep_mgr),
-          gridData(grid_data)
+          gridData(grid_data),
+          networkData(network_data)
     {}
 
     inline virtual ~Impl() {}
@@ -39,8 +87,18 @@ struct Manager::Impl {
     virtual void run() = 0;
     virtual Tensor exportTensor(ExportID slot, TensorElementType type,
                                 Span<const int64_t> dims) = 0;
+    virtual double simulationTime() = 0;
+    virtual int32_t numFlowDefs() = 0;
+    virtual int32_t numPendingFlows() = 0;
+    virtual int32_t numDelayedEvents() = 0;
+    virtual int32_t numActiveTags() = 0;
+    virtual int32_t numSourceTags() = 0;
+    virtual int32_t numFlowCompletions() = 0;
+    virtual FlowCompletionRecord flowCompletion(int32_t idx) = 0;
 
-    static inline Impl * init(const Config &cfg, const GridState &src_grid);
+    static inline Impl * init(const Config &cfg,
+                              const GridState &src_grid,
+                              const NetworkInit &src_network);
 };
 
 struct Manager::CPUImpl final : Manager::Impl {
@@ -51,8 +109,9 @@ struct Manager::CPUImpl final : Manager::Impl {
                    const Sim::Config &sim_cfg,
                    EpisodeManager *episode_mgr,
                    GridState *grid_data,
+                   NetworkInit *network_data,
                    WorldInit *world_inits)
-        : Impl(mgr_cfg, episode_mgr, grid_data),
+        : Impl(mgr_cfg, episode_mgr, grid_data, network_data),
           cpuExec({
                   .numWorlds = mgr_cfg.numWorlds,
                   .numExportedBuffers = (uint32_t)ExportID::NumExports,
@@ -62,16 +121,61 @@ struct Manager::CPUImpl final : Manager::Impl {
     inline virtual ~CPUImpl() final {
         delete episodeMgr;
         free(gridData);
+        free(networkData);
     }
 
     inline virtual void run() final { cpuExec.run(); }
-    
+
     inline virtual Tensor exportTensor(ExportID slot,
                                        TensorElementType type,
                                        Span<const int64_t> dims) final
     {
         void *dev_ptr = cpuExec.getExported((uint32_t)slot);
         return Tensor(dev_ptr, type, dims, Optional<int>::none());
+    }
+
+    inline virtual double simulationTime() final
+    {
+        return cpuExec.getWorldData(0).now;
+    }
+
+    inline virtual int32_t numFlowDefs() final
+    {
+        return cpuExec.getWorldData(0).numFlowDefs;
+    }
+
+    inline virtual int32_t numPendingFlows() final
+    {
+        return cpuExec.getWorldData(0).numPendingFlows;
+    }
+
+    inline virtual int32_t numDelayedEvents() final
+    {
+        return cpuExec.getWorldData(0).numDelayedEvents;
+    }
+
+    inline virtual int32_t numActiveTags() final
+    {
+        return cpuExec.getWorldData(0).numTagIndexEntries;
+    }
+
+    inline virtual int32_t numSourceTags() final
+    {
+        return cpuExec.getWorldData(0).numSourceTags;
+    }
+
+    inline virtual int32_t numFlowCompletions() final
+    {
+        return cpuExec.getWorldData(0).numFlowCompletions;
+    }
+
+    inline virtual FlowCompletionRecord flowCompletion(int32_t idx) final
+    {
+        const Sim &world = cpuExec.getWorldData(0);
+        if (idx < 0 || idx >= world.numFlowCompletions) {
+            return FlowCompletionRecord {};
+        }
+        return world.flowCompletions[idx].record;
     }
 };
 
@@ -85,8 +189,9 @@ struct Manager::GPUImpl final : Manager::Impl {
                    const Sim::Config &sim_cfg,
                    EpisodeManager *episode_mgr,
                    GridState *grid_data,
+                   NetworkInit *network_data,
                    WorldInit *world_inits)
-        : Impl(mgr_cfg, episode_mgr, grid_data),
+        : Impl(mgr_cfg, episode_mgr, grid_data, network_data),
           gpuExec({
                   .worldInitPtr = world_inits,
                   .numWorldInitBytes = sizeof(WorldInit),
@@ -96,35 +201,77 @@ struct Manager::GPUImpl final : Manager::Impl {
                   .worldDataAlignment = alignof(Sim),
                   .numWorlds = mgr_cfg.numWorlds,
                   .numTaskGraphs = 1,
-                  .numExportedBuffers = (uint32_t)ExportID::NumExports, 
+                  .numExportedBuffers = (uint32_t)ExportID::NumExports,
               }, {
                   { SIMPLE_SRC_LIST },
                   { SIMPLE_COMPILE_FLAGS },
                   CompileConfig::OptMode::LTO,
               }, cu_ctx),
           stepGraph(gpuExec.buildLaunchGraph(0))
-          
+
     {}
 
     inline virtual ~GPUImpl() final {
         REQ_CUDA(cudaFree(episodeMgr));
         REQ_CUDA(cudaFree(gridData));
+        REQ_CUDA(cudaFree(networkData));
     }
 
     inline virtual void run() final { gpuExec.run(stepGraph); }
-    
+
     virtual inline Tensor exportTensor(ExportID slot, TensorElementType type,
                                        Span<const int64_t> dims) final
     {
         void *dev_ptr = gpuExec.getExported((uint32_t)slot);
         return Tensor(dev_ptr, type, dims, cfg.gpuID);
     }
+
+    inline virtual double simulationTime() final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
+
+    inline virtual int32_t numFlowDefs() final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
+
+    inline virtual int32_t numPendingFlows() final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
+
+    inline virtual int32_t numDelayedEvents() final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
+
+    inline virtual int32_t numActiveTags() final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
+
+    inline virtual int32_t numSourceTags() final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
+
+    inline virtual int32_t numFlowCompletions() final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
+
+    inline virtual FlowCompletionRecord flowCompletion(int32_t) final
+    {
+        FATAL("Simulation inspection is not implemented for CUDA mode");
+    }
 };
 #endif
 
 static HeapArray<WorldInit> setupWorldInitData(int64_t num_worlds,
                                                EpisodeManager *episode_mgr,
-                                               const GridState *grid)
+                                               const GridState *grid,
+                                               const NetworkInit *network)
 {
     HeapArray<WorldInit> world_inits(num_worlds);
 
@@ -132,6 +279,7 @@ static HeapArray<WorldInit> setupWorldInitData(int64_t num_worlds,
         world_inits[i] = WorldInit {
             episode_mgr,
             grid,
+            network,
         };
     }
 
@@ -139,7 +287,8 @@ static HeapArray<WorldInit> setupWorldInitData(int64_t num_worlds,
 }
 
 Manager::Impl * Manager::Impl::init(const Config &cfg,
-                                    const GridState &src_grid)
+                                    const GridState &src_grid,
+                                    const NetworkInit &src_network)
 {
     static_assert(sizeof(GridState) % alignof(Cell) == 0);
 
@@ -180,10 +329,39 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
 
         memcpy(cpu_cell_data, src_grid.cells, num_cell_bytes);
 
-        HeapArray<WorldInit> world_inits = setupWorldInitData(cfg.numWorlds,
-            episode_mgr, cpu_grid);
+        NetworkLayout network_layout = getNetworkLayout(src_network);
+        auto *network_data = (char *)malloc(network_layout.totalBytes);
+        NetworkInit *cpu_network = (NetworkInit *)network_data;
+        NodeDef *cpu_nodes = (NodeDef *)(network_data + network_layout.nodesOffset);
+        LinkDef *cpu_links = (LinkDef *)(network_data + network_layout.linksOffset);
+        FlowDef *cpu_flows = (FlowDef *)(network_data + network_layout.flowsOffset);
 
-        return new CPUImpl(cfg, sim_cfg, episode_mgr, cpu_grid,
+        *cpu_network = NetworkInit {
+            .nodes = cpu_nodes,
+            .numNodes = src_network.numNodes,
+            .links = cpu_links,
+            .numLinks = src_network.numLinks,
+            .flows = cpu_flows,
+            .numFlows = src_network.numFlows,
+        };
+
+        if (src_network.numNodes > 0) {
+            memcpy(cpu_nodes, src_network.nodes,
+                   sizeof(NodeDef) * (uint64_t)src_network.numNodes);
+        }
+        if (src_network.numLinks > 0) {
+            memcpy(cpu_links, src_network.links,
+                   sizeof(LinkDef) * (uint64_t)src_network.numLinks);
+        }
+        if (src_network.numFlows > 0) {
+            memcpy(cpu_flows, src_network.flows,
+                   sizeof(FlowDef) * (uint64_t)src_network.numFlows);
+        }
+
+        HeapArray<WorldInit> world_inits = setupWorldInitData(cfg.numWorlds,
+            episode_mgr, cpu_grid, cpu_network);
+
+        return new CPUImpl(cfg, sim_cfg, episode_mgr, cpu_grid, cpu_network,
                            world_inits.data());
     } break;
     case ExecMode::CUDA: {
@@ -192,9 +370,8 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
 #else
         CUcontext cu_ctx = MWCudaExecutor::initCUDA(cfg.gpuID);
 
-        EpisodeManager *episode_mgr = 
+        EpisodeManager *episode_mgr =
             (EpisodeManager *)cu::allocGPU(sizeof(EpisodeManager));
-        // Set the current episode count to 0
         REQ_CUDA(cudaMemset(episode_mgr, 0, sizeof(EpisodeManager)));
 
         uint64_t num_cell_bytes =
@@ -212,18 +389,55 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
             .height = src_grid.height,
         };
 
-        cudaMemcpy(grid_data, &grid_staging, sizeof(GridState),
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(gpu_cell_data, src_grid.cells, num_cell_bytes,
-                   cudaMemcpyHostToDevice);
+        REQ_CUDA(cudaMemcpy(grid_data, &grid_staging, sizeof(GridState),
+                            cudaMemcpyHostToDevice));
+        if (num_cell_bytes > 0) {
+            REQ_CUDA(cudaMemcpy(gpu_cell_data, src_grid.cells, num_cell_bytes,
+                                cudaMemcpyHostToDevice));
+        }
 
         GridState *gpu_grid = (GridState *)grid_data;
 
+        NetworkLayout network_layout = getNetworkLayout(src_network);
+        auto *network_data = (char *)cu::allocGPU(network_layout.totalBytes);
+        NodeDef *gpu_nodes = (NodeDef *)(network_data + network_layout.nodesOffset);
+        LinkDef *gpu_links = (LinkDef *)(network_data + network_layout.linksOffset);
+        FlowDef *gpu_flows = (FlowDef *)(network_data + network_layout.flowsOffset);
+
+        NetworkInit network_staging {
+            .nodes = gpu_nodes,
+            .numNodes = src_network.numNodes,
+            .links = gpu_links,
+            .numLinks = src_network.numLinks,
+            .flows = gpu_flows,
+            .numFlows = src_network.numFlows,
+        };
+
+        REQ_CUDA(cudaMemcpy(network_data, &network_staging, sizeof(NetworkInit),
+                            cudaMemcpyHostToDevice));
+        if (src_network.numNodes > 0) {
+            REQ_CUDA(cudaMemcpy(gpu_nodes, src_network.nodes,
+                                sizeof(NodeDef) * (uint64_t)src_network.numNodes,
+                                cudaMemcpyHostToDevice));
+        }
+        if (src_network.numLinks > 0) {
+            REQ_CUDA(cudaMemcpy(gpu_links, src_network.links,
+                                sizeof(LinkDef) * (uint64_t)src_network.numLinks,
+                                cudaMemcpyHostToDevice));
+        }
+        if (src_network.numFlows > 0) {
+            REQ_CUDA(cudaMemcpy(gpu_flows, src_network.flows,
+                                sizeof(FlowDef) * (uint64_t)src_network.numFlows,
+                                cudaMemcpyHostToDevice));
+        }
+
+        NetworkInit *gpu_network = (NetworkInit *)network_data;
+
         HeapArray<WorldInit> world_inits = setupWorldInitData(cfg.numWorlds,
-            episode_mgr, gpu_grid);
+            episode_mgr, gpu_grid, gpu_network);
 
         return new GPUImpl(cu_ctx, cfg, sim_cfg, episode_mgr, gpu_grid,
-                           world_inits.data());
+                           gpu_network, world_inits.data());
 #endif
     } break;
     default: return nullptr;
@@ -231,8 +445,9 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
 }
 
 Manager::Manager(const Config &cfg,
-                 const GridState &src_grid)
-    : impl_(Impl::init(cfg, src_grid))
+                 const GridState &src_grid,
+                 const NetworkInit &src_network)
+    : impl_(Impl::init(cfg, src_grid, src_network))
 {}
 
 Manager::~Manager() {}
@@ -270,6 +485,46 @@ Tensor Manager::doneTensor() const
 {
     return impl_->exportTensor(ExportID::Done, TensorElementType::Float32,
         {impl_->cfg.numWorlds, 1});
+}
+
+double Manager::simulationTime()
+{
+    return impl_->simulationTime();
+}
+
+int32_t Manager::numFlowDefs()
+{
+    return impl_->numFlowDefs();
+}
+
+int32_t Manager::numPendingFlows()
+{
+    return impl_->numPendingFlows();
+}
+
+int32_t Manager::numDelayedEvents()
+{
+    return impl_->numDelayedEvents();
+}
+
+int32_t Manager::numActiveTags()
+{
+    return impl_->numActiveTags();
+}
+
+int32_t Manager::numSourceTags()
+{
+    return impl_->numSourceTags();
+}
+
+int32_t Manager::numFlowCompletions()
+{
+    return impl_->numFlowCompletions();
+}
+
+FlowCompletionRecord Manager::flowCompletion(int32_t idx)
+{
+    return impl_->flowCompletion(idx);
 }
 
 }

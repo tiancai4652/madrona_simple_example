@@ -59,6 +59,10 @@ madrona_python_module(_madrona_simple_example_cpp
     bindings.cpp
 )
 
+target_include_directories(_madrona_simple_example_cpp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 target_link_libraries(_madrona_simple_example_cpp PRIVATE
     madrona_hdrs
     madrona_simple_ex_mgr

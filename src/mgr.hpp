@@ -11,6 +11,7 @@
 #include <madrona/exec_mode.hpp>
 
 #include "grid.hpp"
+#include "init.hpp"
 
 namespace madsimple {
 
@@ -23,7 +24,9 @@ public:
         int gpuID;
     };
 
-    MGR_EXPORT Manager(const Config &cfg, const GridState &src_grid);
+    MGR_EXPORT Manager(const Config &cfg,
+                       const GridState &src_grid,
+                       const NetworkInit &src_network);
     MGR_EXPORT ~Manager();
 
     MGR_EXPORT void step();
@@ -33,6 +36,15 @@ public:
     MGR_EXPORT madrona::py::Tensor observationTensor() const;
     MGR_EXPORT madrona::py::Tensor rewardTensor() const;
     MGR_EXPORT madrona::py::Tensor doneTensor() const;
+
+    MGR_EXPORT double simulationTime();
+    MGR_EXPORT int32_t numFlowDefs();
+    MGR_EXPORT int32_t numPendingFlows();
+    MGR_EXPORT int32_t numDelayedEvents();
+    MGR_EXPORT int32_t numActiveTags();
+    MGR_EXPORT int32_t numSourceTags();
+    MGR_EXPORT int32_t numFlowCompletions();
+    MGR_EXPORT FlowCompletionRecord flowCompletion(int32_t idx);
 
 private:
     struct Impl;

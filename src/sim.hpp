@@ -211,6 +211,7 @@ struct Sim : public madrona::WorldBase {
 
     EpisodeManager *episodeMgr;
     const GridState *grid;
+    const NetworkInit *network;
     uint32_t maxEpisodeLength;
 
     Time now;
