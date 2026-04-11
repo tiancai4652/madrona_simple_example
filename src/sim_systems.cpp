@@ -676,8 +676,13 @@ void Sim::clearDirtyPorts(Engine &ctx)
 
 void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
 {
+    constexpr const char *scope = "progress";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
     Time next_now = now + dt;
     bool need_check_finish = cachedNextFinishTime < std::numeric_limits<Time>::max() && cachedNextFinishTime <= dt + 1e-12;
+    int32_t finished_source_count = 0;
+    int32_t emitted_cleanup_count = 0;
 
     if (need_check_finish) {
         Entity finished[MAX_SOURCE_TAGS] {};
@@ -695,6 +700,7 @@ void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
                 if (num_finished < MAX_SOURCE_TAGS) {
                     finished[num_finished++] = tag_e;
                 }
+                finished_source_count += 1;
                 if (tag.next_port_id >= 0) {
                     DelayedEvent ev {};
                     ev.t = next_now + computePropagationTimeForPort(tag.port_id, tag.next_port_id) - now;
@@ -705,6 +711,7 @@ void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
                         .in_bw = 0.0,
                     };
                     pushDelayedEvent(ev);
+                    emitted_cleanup_count += 1;
                 }
             } else if (tag.out_bw > 1e-15) {
                 Time t_finish = tag.remaining / tag.out_bw;
@@ -935,6 +942,13 @@ void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
                 }
             }
         }
+    }
+
+    if (log_enabled) {
+        double next_finish_gap = cachedNextFinishTime < std::numeric_limits<Time>::max()
+            ? cachedNextFinishTime : std::numeric_limits<double>::max();
+        printSystemProgressSummary(step, now, dt, finished_source_count,
+            emitted_cleanup_count, next_now, next_finish_gap);
     }
 }
 

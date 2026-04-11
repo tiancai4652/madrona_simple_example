@@ -98,5 +98,11 @@ void printSystemBufferSummary(uint64_t step, Time now,
                               int32_t processed_port_count,
                               int32_t destroy_count,
                               double total_buf_cnt);
+void printSystemProgressSummary(uint64_t step, Time now,
+                                double dt,
+                                int32_t finished_source_count,
+                                int32_t emitted_cleanup_count,
+                                double next_now,
+                                double next_finish_gap);
 
 }
