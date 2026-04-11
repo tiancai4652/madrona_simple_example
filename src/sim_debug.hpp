@@ -94,5 +94,9 @@ void printSystemDTSummary(uint64_t step, Time now,
                           double pfc_pause_gap,
                           double pfc_resume_gap,
                           double chosen_dt);
+void printSystemBufferSummary(uint64_t step, Time now,
+                              int32_t processed_port_count,
+                              int32_t destroy_count,
+                              double total_buf_cnt);
 
 }

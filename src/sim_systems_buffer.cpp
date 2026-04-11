@@ -1,4 +1,5 @@
 #include "sim.hpp"
+#include "sim_debug.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -126,7 +127,14 @@ void Sim::materializeBufCnt(PortBuffer &port_buf, Time at_time)
 
 void Sim::bufferUpdateSystem(Engine &ctx, Time dt)
 {
+    constexpr const char *scope = "buffer";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+
     if (enableBuffer == 0 || dt < 1e-15) {
+        if (log_enabled) {
+            printSystemBufferSummary(step, now, 0, 0, 0.0);
+        }
         return;
     }
 
@@ -181,6 +189,8 @@ void Sim::bufferUpdateSystem(Engine &ctx, Time dt)
     Time frame_end = now + dt;
     Entity tags_to_destroy[MAX_TAG_INDEX] {};
     int32_t num_destroy = 0;
+    int32_t processed_port_count = 0;
+    double total_buf_cnt = 0.0;
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         if (!processPorts[port_id]) {
@@ -204,6 +214,7 @@ void Sim::bufferUpdateSystem(Engine &ctx, Time dt)
         if (num_tags == 0) {
             continue;
         }
+        processed_port_count += 1;
 
         double port_bw = ctx.get<PortState>(port_e).port_bw;
         bool multi_pri = (qosMode == QOS_SP || qosMode == QOS_WRR);
@@ -476,12 +487,20 @@ void Sim::bufferUpdateSystem(Engine &ctx, Time dt)
         }
 
         port_buf.last_update_time = frame_end;
+        for (int32_t pri = pri_begin; pri < pri_end; pri++) {
+            total_buf_cnt += port_buf.prior_bufs[pri].buf_cnt;
+        }
     }
 
     for (int32_t i = 0; i < num_destroy; i++) {
         if (tags_to_destroy[i] != Entity::none()) {
             destroyTag(ctx, tags_to_destroy[i], true, frame_end);
         }
+    }
+
+    if (log_enabled) {
+        printSystemBufferSummary(step, now, processed_port_count,
+            num_destroy, total_buf_cnt);
     }
 }
 

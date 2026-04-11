@@ -76,6 +76,7 @@ void printSystemEmitSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
 void printSystemPfcDetectSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t) {}
 void printSystemClearSummary(uint64_t, Time, int32_t) {}
 void printSystemDTSummary(uint64_t, Time, double, double, double, double, double, double, double, double) {}
+void printSystemBufferSummary(uint64_t, Time, int32_t, int32_t, double) {}
 #else
 const bool init_log_print_enabled = []() {
     const char *env = std::getenv("init_log_print_enabled");
@@ -626,6 +627,20 @@ void printSystemDTSummary(uint64_t step, Time now,
               << " pfc_pause_gap=" << pfc_pause_gap
               << " pfc_resume_gap=" << pfc_resume_gap
               << " chosen_dt=" << chosen_dt
+              << "\n";
+}
+
+void printSystemBufferSummary(uint64_t step, Time now,
+                              int32_t processed_port_count,
+                              int32_t destroy_count,
+                              double total_buf_cnt)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][BUFFER][SUMMARY] step=" << step
+              << " now=" << now
+              << " processed_port_count=" << processed_port_count
+              << " destroy_count=" << destroy_count
+              << " total_buf_cnt=" << total_buf_cnt
               << "\n";
 }
 #endif
