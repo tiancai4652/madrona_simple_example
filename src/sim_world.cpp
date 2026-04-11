@@ -1,4 +1,5 @@
 #include "sim.hpp"
+#include "sim_debug.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -277,11 +278,23 @@ Time Sim::computePropagationTimeForPort(int32_t src_port_id, int32_t dst_port_id
 
 Time Sim::chooseDT() const
 {
+    constexpr const char *scope = "dt";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+
     Time dt_event = std::numeric_limits<Time>::max();
+    double delayed_gap = std::numeric_limits<double>::max();
+    double pending_gap = std::numeric_limits<double>::max();
+    double finish_gap = std::numeric_limits<double>::max();
+    double drain_gap = std::numeric_limits<double>::max();
+    double backlog_gap = std::numeric_limits<double>::max();
+    double pfc_pause_gap = std::numeric_limits<double>::max();
+    double pfc_resume_gap = std::numeric_limits<double>::max();
 
     if (numDelayedEvents > 0) {
         Time gap = delayedEvents[0].t - now;
         if (gap > 1e-15) {
+            delayed_gap = gap;
             dt_event = std::min(dt_event, gap);
         }
     }
@@ -289,21 +302,25 @@ Time Sim::chooseDT() const
     if (numPendingFlows > 0) {
         Time gap = pendingFlows[0].start_time - now;
         if (gap > 1e-15) {
+            pending_gap = gap;
             dt_event = std::min(dt_event, gap);
         }
     }
 
     if (cachedNextFinishTime > 1e-15 && cachedNextFinishTime < std::numeric_limits<Time>::max()) {
+        finish_gap = cachedNextFinishTime;
         dt_event = std::min(dt_event, cachedNextFinishTime);
     }
 
     if (enableBuffer != 0 && cachedNextDrainTime > 1e-15 && cachedNextDrainTime < std::numeric_limits<Time>::max()) {
+        drain_gap = cachedNextDrainTime;
         dt_event = std::min(dt_event, cachedNextDrainTime);
     }
 
     if (enableBuffer != 0) {
         for (int32_t i = 0; i < numBacklogDrainTimers; i++) {
             if (backlogDrainTimers[i] > 1e-15) {
+                backlog_gap = std::min(backlog_gap, (double)backlogDrainTimers[i]);
                 dt_event = std::min(dt_event, backlogDrainTimers[i]);
             }
         }
@@ -312,11 +329,13 @@ Time Sim::chooseDT() const
     if (enablePfc != 0) {
         for (int32_t i = 0; i < numPfcPauseTimers; i++) {
             if (pfcPauseTimers[i] > 1e-9) {
+                pfc_pause_gap = std::min(pfc_pause_gap, (double)pfcPauseTimers[i]);
                 dt_event = std::min(dt_event, pfcPauseTimers[i]);
             }
         }
         for (int32_t i = 0; i < numPfcResumeTimers; i++) {
             if (pfcResumeTimers[i] > 1e-9) {
+                pfc_resume_gap = std::min(pfc_resume_gap, (double)pfcResumeTimers[i]);
                 dt_event = std::min(dt_event, pfcResumeTimers[i]);
             }
         }
@@ -328,6 +347,18 @@ Time Sim::chooseDT() const
     }
     if (dt > 1e12 || dt == std::numeric_limits<Time>::max()) {
         dt = 0.001;
+    }
+
+    if (log_enabled) {
+        printSystemDTSummary(step, now,
+            delayed_gap,
+            pending_gap,
+            finish_gap,
+            drain_gap,
+            backlog_gap,
+            pfc_pause_gap,
+            pfc_resume_gap,
+            dt);
     }
     return dt;
 }

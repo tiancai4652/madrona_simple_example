@@ -75,6 +75,7 @@ void printSystemAllocSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
 void printSystemEmitSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
 void printSystemPfcDetectSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t) {}
 void printSystemClearSummary(uint64_t, Time, int32_t) {}
+void printSystemDTSummary(uint64_t, Time, double, double, double, double, double, double, double, double) {}
 #else
 const bool init_log_print_enabled = []() {
     const char *env = std::getenv("init_log_print_enabled");
@@ -601,6 +602,30 @@ void printSystemClearSummary(uint64_t step, Time now,
               << "[SYS][CLEAR][SUMMARY] step=" << step
               << " now=" << now
               << " cleared_port_count=" << cleared_port_count
+              << "\n";
+}
+
+void printSystemDTSummary(uint64_t step, Time now,
+                          double delayed_gap,
+                          double pending_gap,
+                          double finish_gap,
+                          double drain_gap,
+                          double backlog_gap,
+                          double pfc_pause_gap,
+                          double pfc_resume_gap,
+                          double chosen_dt)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][DT][SUMMARY] step=" << step
+              << " now=" << now
+              << " delayed_gap=" << delayed_gap
+              << " pending_gap=" << pending_gap
+              << " finish_gap=" << finish_gap
+              << " drain_gap=" << drain_gap
+              << " backlog_gap=" << backlog_gap
+              << " pfc_pause_gap=" << pfc_pause_gap
+              << " pfc_resume_gap=" << pfc_resume_gap
+              << " chosen_dt=" << chosen_dt
               << "\n";
 }
 #endif

@@ -85,5 +85,14 @@ void printSystemPfcDetectSummary(uint64_t step, Time now,
                                  int32_t resume_timer_count);
 void printSystemClearSummary(uint64_t step, Time now,
                              int32_t cleared_port_count);
+void printSystemDTSummary(uint64_t step, Time now,
+                          double delayed_gap,
+                          double pending_gap,
+                          double finish_gap,
+                          double drain_gap,
+                          double backlog_gap,
+                          double pfc_pause_gap,
+                          double pfc_resume_gap,
+                          double chosen_dt);
 
 }
