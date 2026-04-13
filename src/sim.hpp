@@ -188,6 +188,8 @@ struct Sim : public madrona::WorldBase {
                     bool propagate_cleanup,
                     Time logical_now);
     void recordFlowCompletion(FlowId flow_id, Time end_time);
+    void removeFlowDef(FlowId flow_id);
+    void removeFlowRoute(FlowId flow_id);
     void materializeBacklog(FlowTagState &tag, Time at_time);
     void materializeRemaining(FlowTagState &tag, Time at_time);
     void materializeBufCnt(PortBuffer &port_buf, Time at_time);

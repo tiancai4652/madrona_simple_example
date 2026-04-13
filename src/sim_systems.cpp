@@ -41,6 +41,36 @@ Entity Sim::findTag(int32_t port_id, FlowId flow_id) const
     return Entity::none();
 }
 
+void Sim::removeFlowDef(FlowId flow_id)
+{
+    for (int32_t i = 0; i < numFlowDefs; i++) {
+        if (flowDefs[i].id != flow_id) {
+            continue;
+        }
+        for (int32_t j = i + 1; j < numFlowDefs; j++) {
+            flowDefs[j - 1] = flowDefs[j];
+        }
+        numFlowDefs -= 1;
+        flowDefs[numFlowDefs] = FlowDef {};
+        return;
+    }
+}
+
+void Sim::removeFlowRoute(FlowId flow_id)
+{
+    for (int32_t i = 0; i < numFlowRoutes; i++) {
+        if (flowRoutes[i].flow_id != flow_id) {
+            continue;
+        }
+        for (int32_t j = i + 1; j < numFlowRoutes; j++) {
+            flowRoutes[j - 1] = flowRoutes[j];
+        }
+        numFlowRoutes -= 1;
+        flowRoutes[numFlowRoutes] = FlowRouteState {};
+        return;
+    }
+}
+
 void Sim::recordFlowCompletion(FlowId flow_id, Time end_time)
 {
     for (int32_t i = 0; i < numFlowCompletions; i++) {
@@ -48,11 +78,15 @@ void Sim::recordFlowCompletion(FlowId flow_id, Time end_time)
             if (end_time > flowCompletions[i].record.end_time) {
                 flowCompletions[i].record.end_time = end_time;
             }
+            removeFlowRoute(flow_id);
+            removeFlowDef(flow_id);
             return;
         }
     }
 
     if (numFlowCompletions >= MAX_FLOW_COMPLETIONS) {
+        removeFlowRoute(flow_id);
+        removeFlowDef(flow_id);
         return;
     }
 
@@ -69,9 +103,13 @@ void Sim::recordFlowCompletion(FlowId flow_id, Time end_time)
                 .end_time = end_time,
                 .priority = flowDefs[i].priority,
             };
+            removeFlowRoute(flow_id);
+            removeFlowDef(flow_id);
             return;
         }
     }
+
+    removeFlowRoute(flow_id);
 }
 
 void Sim::destroyTag(Engine &ctx,
