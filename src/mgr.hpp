@@ -22,6 +22,14 @@ public:
         madrona::ExecMode execMode;
         uint32_t numWorlds;
         int gpuID;
+        double propagation_interval = 0.0;
+        int32_t enable_pfc = 0;
+        int32_t pfc_egress = 0;
+        double pfc_xoff_threshold = 1e9;
+        double pfc_xon_threshold = 0.5e9;
+        double dt_min = 0.0;
+        int32_t qos_mode = 0;
+        double prior_weights[8] = {};
     };
 
     MGR_EXPORT Manager(const Config &cfg,

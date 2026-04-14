@@ -296,16 +296,19 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
         .maxEpisodeLength = cfg.maxEpisodeLength,
         .enableViewer = false,
         .default_link_delay = 0.001,
-        .propagation_interval = 0.0,
+        .propagation_interval = cfg.propagation_interval,
         .enable_buffer = 1,
-        .enable_pfc = 0,
-        .pfc_egress = 0,
-        .pfc_xoff_threshold = 1e9,
-        .pfc_xon_threshold = 0.5e9,
-        .dt_min = 0.0,
-        .qos_mode = QOS_NONE,
+        .enable_pfc = cfg.enable_pfc,
+        .pfc_egress = cfg.pfc_egress,
+        .pfc_xoff_threshold = cfg.pfc_xoff_threshold,
+        .pfc_xon_threshold = cfg.pfc_xon_threshold,
+        .dt_min = cfg.dt_min,
+        .qos_mode = cfg.qos_mode,
         .prior_weights = {},
     };
+    for (int i = 0; i < 8; i++) {
+        sim_cfg.prior_weights[i] = cfg.prior_weights[i];
+    }
 
     switch (cfg.execMode) {
     case ExecMode::CPU: {

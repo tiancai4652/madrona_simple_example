@@ -239,7 +239,16 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                             int64_t max_episode_length,
                             madrona::py::PyExecMode exec_mode,
                             int64_t num_worlds,
-                            int64_t gpu_id) {
+                            int64_t gpu_id,
+                            double propagation_interval,
+                            int32_t enable_pfc,
+                            int32_t pfc_egress,
+                            double pfc_xoff_threshold,
+                            double pfc_xon_threshold,
+                            double dt_min,
+                            int32_t qos_mode,
+                            nb::ndarray<double, nb::shape<-1>,
+                                nb::c_contig, nb::device::cpu> prior_weights) {
             int64_t grid_y = (int64_t)walls.shape(0);
             int64_t grid_x = (int64_t)walls.shape(1);
 
@@ -258,11 +267,28 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                 setupFlowData(flow_ids, flow_src_nodes, flow_dst_nodes,
                               flow_sizes, flow_start_times, flow_priorities));
 
+            double prior_weights_arr[8] = {};
+            int64_t num_weights = (int64_t)prior_weights.shape(0);
+            for (int64_t i = 0; i < num_weights && i < 8; i++) {
+                prior_weights_arr[i] = prior_weights.data()[i];
+            }
+
             new (self) Manager(Manager::Config {
                 .maxEpisodeLength = (uint32_t)max_episode_length,
                 .execMode = exec_mode,
                 .numWorlds = (uint32_t)num_worlds,
                 .gpuID = (int)gpu_id,
+                .propagation_interval = propagation_interval,
+                .enable_pfc = enable_pfc,
+                .pfc_egress = pfc_egress,
+                .pfc_xoff_threshold = pfc_xoff_threshold,
+                .pfc_xon_threshold = pfc_xon_threshold,
+                .dt_min = dt_min,
+                .qos_mode = qos_mode,
+                .prior_weights = {prior_weights_arr[0], prior_weights_arr[1],
+                                  prior_weights_arr[2], prior_weights_arr[3],
+                                  prior_weights_arr[4], prior_weights_arr[5],
+                                  prior_weights_arr[6], prior_weights_arr[7]},
             }, GridState {
                 .cells = cells.get(),
                 .startX = (int32_t)start_x,
@@ -298,7 +324,15 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
            nb::arg("max_episode_length"),
            nb::arg("exec_mode"),
            nb::arg("num_worlds"),
-           nb::arg("gpu_id") = -1)
+           nb::arg("gpu_id") = -1,
+           nb::arg("propagation_interval") = 0.0,
+           nb::arg("enable_pfc") = 0,
+           nb::arg("pfc_egress") = 0,
+           nb::arg("pfc_xoff_threshold") = 1e9,
+           nb::arg("pfc_xon_threshold") = 0.5e9,
+           nb::arg("dt_min") = 0.0,
+           nb::arg("qos_mode") = 0,
+           nb::arg("prior_weights") = nb::ndarray<double, nb::shape<-1>, nb::c_contig, nb::device::cpu>())
         .def("step", &Manager::step)
         .def("reset_tensor", &Manager::resetTensor)
         .def("action_tensor", &Manager::actionTensor)

@@ -30,6 +30,15 @@ def parse_args():
     parser.add_argument("--num-worlds", type=int, default=1)
     parser.add_argument("--max-steps", type=int, default=20000)
     parser.add_argument("--gpu", action="store_true")
+    parser.add_argument("--t-max", type=float, default=1000.0)
+    parser.add_argument("--prop-interval", type=float, default=0.0)
+    parser.add_argument("--pfc", action="store_true")
+    parser.add_argument("--pfc-egress", action="store_true")
+    parser.add_argument("--pfc-xoff", type=float, default=1e9)
+    parser.add_argument("--pfc-xon", type=float, default=0.5e9)
+    parser.add_argument("--dt-min", type=float, default=0.0)
+    parser.add_argument("--qos", type=str, default="none")
+    parser.add_argument("--prior-weights", type=str, default="")
     return parser.parse_args()
 
 
@@ -49,6 +58,10 @@ def main():
     network_inputs = load_network_inputs_from_files(Path(args.topo), Path(args.flows))
     walls, rewards, end_cells, start_cell = build_grid_inputs()
 
+    prior_weights = []
+    if args.prior_weights:
+        prior_weights = [float(x) for x in args.prior_weights.split(',')]
+
     world = GridWorld(
         args.num_worlds,
         start_cell,
@@ -58,6 +71,14 @@ def main():
         gpu_sim=args.gpu,
         gpu_id=0,
         network_inputs=network_inputs,
+        propagation_interval=args.prop_interval,
+        enable_pfc=1 if args.pfc else 0,
+        pfc_egress=1 if args.pfc_egress else 0,
+        pfc_xoff_threshold=args.pfc_xoff,
+        pfc_xon_threshold=args.pfc_xon,
+        dt_min=args.dt_min,
+        qos_mode={"none": 0, "sp": 1, "wrr": 2}.get(args.qos, 0),
+        prior_weights=prior_weights if prior_weights else None,
     )
 
     if os.environ.get("init_log_print_enabled") not in (None, "", "0"):

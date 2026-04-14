@@ -197,6 +197,14 @@ class GridWorld:
                  gpu_sim = False,
                  gpu_id = 0,
                  network_inputs = None,
+                 propagation_interval = 0.0,
+                 enable_pfc = 0,
+                 pfc_egress = 0,
+                 pfc_xoff_threshold = 1e9,
+                 pfc_xon_threshold = 0.5e9,
+                 dt_min = 0.0,
+                 qos_mode = 0,
+                 prior_weights = None,
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -204,6 +212,13 @@ class GridWorld:
         self.rewards_input = rewards
         self.walls = walls
         self.network_inputs = make_default_network_inputs() if network_inputs is None else network_inputs
+
+        if prior_weights is None:
+            prior_weights = np.zeros(8, dtype=np.float64)
+        else:
+            prior_weights = np.array(prior_weights).astype(np.float64)
+            if len(prior_weights) < 8:
+                prior_weights = np.pad(prior_weights, (0, 8 - len(prior_weights)))
 
         self.sim = SimpleGridworldSimulator(
                 walls = np.array(walls).astype(np.bool_),
@@ -228,6 +243,14 @@ class GridWorld:
                 exec_mode = madrona.ExecMode.CUDA if gpu_sim else madrona.ExecMode.CPU,
                 num_worlds = num_worlds,
                 gpu_id = gpu_id,
+                propagation_interval = propagation_interval,
+                enable_pfc = enable_pfc,
+                pfc_egress = pfc_egress,
+                pfc_xoff_threshold = pfc_xoff_threshold,
+                pfc_xon_threshold = pfc_xon_threshold,
+                dt_min = dt_min,
+                qos_mode = qos_mode,
+                prior_weights = prior_weights,
             )
 
         self.force_reset = self.sim.reset_tensor().to_torch()
