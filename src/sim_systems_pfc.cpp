@@ -378,7 +378,6 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
         bool state_changed = false;
         for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
             double buf = buf_by_pri[pri];
-            double net_rate = net_rate_by_pri[pri];
             if (state.pause_active[pri] == 0 && buf >= cfg.xoff[pri] - 0.5) {
                 state.pause_active[pri] = 1;
                 state_changed = true;
@@ -429,7 +428,18 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
                 }
                 state.paused_upstream_count[pri] = 0;
             }
+        }
 
+        if (state_changed) {
+            clearPfcPauseTimer(ingress_port);
+            clearPfcResumeTimer(ingress_port);
+        }
+
+        // Rebuild timers from the post-transition state so a newly entered
+        // pause period can immediately schedule its matching resume timer.
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            double buf = buf_by_pri[pri];
+            double net_rate = net_rate_by_pri[pri];
             if (state.pause_active[pri] == 0 && net_rate > 1.0) {
                 double gap = cfg.xoff[pri] - buf;
                 if (gap > 1e-9) {
@@ -468,11 +478,6 @@ void Sim::pfcThresholdDetectSystem(Engine &ctx)
                     }
                 }
             }
-        }
-
-        if (state_changed) {
-            clearPfcPauseTimer(ingress_port);
-            clearPfcResumeTimer(ingress_port);
         }
     }
 
