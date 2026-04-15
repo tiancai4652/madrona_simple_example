@@ -751,8 +751,16 @@ void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
                 }
                 finished_source_count += 1;
                 if (tag.next_port_id >= 0) {
+                    Time link_delay = defaultLinkDelay;
+                    int32_t src_node_slot = findNodeSlot(portToNode[tag.port_id]);
+                    int32_t dst_node_slot = findNodeSlot(portToNode[tag.next_port_id]);
+                    if (src_node_slot >= 0 && dst_node_slot >= 0 &&
+                        linkDelays[src_node_slot][dst_node_slot] >= 0.0) {
+                        link_delay = linkDelays[src_node_slot][dst_node_slot];
+                    }
+
                     DelayedEvent ev {};
-                    ev.t = next_now + computePropagationTimeForPort(tag.port_id, tag.next_port_id) - now;
+                    ev.t = next_now + link_delay;
                     ev.type = DelayedEvent::Type::BwUpdate;
                     ev.bwupd = BwUpdateEv {
                         .port_id = tag.next_port_id,
