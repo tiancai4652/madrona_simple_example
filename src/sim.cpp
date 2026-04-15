@@ -142,6 +142,9 @@ struct StepChooseDTNode : public NodeBase {
     {
         Engine &ctx = (Engine &)ctx_base;
         ctx.data().nextDT = ctx.data().chooseDT();
+        if (ctx.data().nextDT < 1e-9) {
+            ctx.data().nextDT = 0.001;
+        }
     }
 
     static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
