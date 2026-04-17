@@ -183,18 +183,42 @@ struct Sim : public madrona::WorldBase {
     void flowArrivalSystem(madrona::Context &ctx);
     void bwUpdateIngressSystem(madrona::Context &ctx);
     void pfcPropagateSystem(madrona::Context &ctx);
-    void portBandwidthAllocSystem(madrona::Context &ctx, Time dt);
     void pfcThresholdDetectSystem(madrona::Context &ctx);
     void downstreamEmitSystem(madrona::Context &ctx);
     Time chooseDT() const;
     void bufferUpdateSystem(madrona::Context &ctx, Time dt);
     void flowProgressAndCleanupSystem(madrona::Context &ctx, Time dt);
 
-    // Phase B.1: per-Port worker for the DirtyPort reset step and the
-    // matching singleton that snapshots the dirty-port set in a
-    // deterministic port_id ascending order. All other per-Port workers
-    // (allocOnePort / advanceOnePortBuffer) come online in later phases.
+    // Phase B.1 singleton: consumes PortTraceLast.was_dirty_at_clear written
+    // by the per-Port clearDirtyOnePortSystem to rebuild lastDirtyPortIDs in
+    // port_id ascending order.
     void snapshotDirtyPorts(madrona::Context &ctx);
+
+    // Phase B.2: per-Port bandwidth allocation worker. Reads global
+    // topology/tagIndex read-only and writes only to the port's own
+    // components or the supplied hint / cleanup / trace buffers. All
+    // cross-port state (cachedNextDrainTime / cachedDrainPortID /
+    // cachedNextFinishTime / backlogDrainTimers / destroyTag effects) is
+    // deferred to the dedicated singleton flush systems below.
+    void allocOnePort(madrona::Context &ctx,
+                      int32_t port_id,
+                      PortState &port_state,
+                      PortBuffer &port_buf,
+                      DirtyPort &dirty,
+                      PortPfcConfig &pfc_cfg,
+                      PortPfcState &pfc_state,
+                      PortCachedHints &hints,
+                      PortDrainHint &drain_hint,
+                      PortCleanup &cleanup,
+                      PortTraceLast &trace);
+
+    // Phase B.2 singletons (driven by SimDriverArch). They walk
+    // portEntities[] in port_id ascending order so per-frame outputs are
+    // deterministic even when allocOnePort runs in parallel on GPU.
+    void reducePortCachedHints(madrona::Context &ctx);
+    void flushPortDrainHints(madrona::Context &ctx);
+    void flushPortTagCleanup(madrona::Context &ctx);
+    void logAllocTraces(madrona::Context &ctx);
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;
     madrona::Entity createTagOnPort(madrona::Context &ctx,

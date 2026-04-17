@@ -42,10 +42,51 @@ void pfcPropagateStepSystem(Engine &ctx, SimDriver &)
     }
 }
 
-void portAllocStepSystem(Engine &ctx, SimDriver &)
+// Phase B.2: per-Port ParallelForNode that runs the bandwidth alloc phase
+// for a single port. allocOnePort only touches this port's components plus
+// read-only topology/tagIndex/FlowTagState for tags belonging to this port,
+// so the fan-out is race-free. Cross-port side-effects (drain timer cache,
+// finish-time cache, deferred destroyTag) are collected into the hint /
+// cleanup / trace components and flushed by the singletons below.
+void allocOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortPfcConfig &pfc_cfg,
+    PortPfcState &pfc_state,
+    PortCachedHints &hints,
+    PortDrainHint &drain_hint,
+    PortCleanup &cleanup,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    sim.portBandwidthAllocSystem(ctx, 0.0);
+    sim.allocOnePort(ctx, port_state.port_id, port_state, port_buf, dirty,
+        pfc_cfg, pfc_state, hints, drain_hint, cleanup, trace);
+}
+
+void reduceHintsStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.reducePortCachedHints(ctx);
+}
+
+void flushDrainHintsStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushPortDrainHints(ctx);
+}
+
+void flushTagCleanupStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushPortTagCleanup(ctx);
+}
+
+void logAllocTracesStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.logAllocTraces(ctx);
 }
 
 void pfcDetectStepSystem(Engine &ctx, SimDriver &)
@@ -153,8 +194,27 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         bwUpdateStepSystem, SimDriver>>({n2});
     auto n4 = builder.addToGraph<ParallelForNode<Engine,
         pfcPropagateStepSystem, SimDriver>>({n3});
+    // Phase B.2: per-Port fan-out of the bandwidth alloc phase, followed by
+    // four SimDriver singletons that fold the hint / cleanup / trace buffers
+    // back into global state in port_id ascending order. Sequencing the
+    // singletons this way matches the legacy effective-order:
+    //   - reducePortCachedHints: cachedNextDrainTime/cachedNextFinishTime
+    //   - flushPortDrainHints: backlogDrainTimers clear-then-set
+    //   - flushPortTagCleanup: deferred destroyTag in port_id order
+    //   - logAllocTraces: alloc-scope log lines
+    auto n5a = builder.addToGraph<ParallelForNode<Engine,
+        allocOnePortStepSystem,
+        PortState, PortBuffer, DirtyPort,
+        PortPfcConfig, PortPfcState,
+        PortCachedHints, PortDrainHint, PortCleanup, PortTraceLast>>({n4});
+    auto n5b = builder.addToGraph<ParallelForNode<Engine,
+        reduceHintsStepSystem, SimDriver>>({n5a});
+    auto n5c = builder.addToGraph<ParallelForNode<Engine,
+        flushDrainHintsStepSystem, SimDriver>>({n5b});
+    auto n5d = builder.addToGraph<ParallelForNode<Engine,
+        flushTagCleanupStepSystem, SimDriver>>({n5c});
     auto n5 = builder.addToGraph<ParallelForNode<Engine,
-        portAllocStepSystem, SimDriver>>({n4});
+        logAllocTracesStepSystem, SimDriver>>({n5d});
     auto n6 = builder.addToGraph<ParallelForNode<Engine,
         pfcDetectStepSystem, SimDriver>>({n5});
     auto n7 = builder.addToGraph<ParallelForNode<Engine,

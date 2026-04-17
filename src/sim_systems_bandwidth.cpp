@@ -9,55 +9,52 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
+void Sim::allocOnePort(
+    Context &ctx,
+    int32_t port_id,
+    PortState &port_state,
+    PortBuffer &port_buf_ref,
+    DirtyPort &dirty,
+    PortPfcConfig &,
+    PortPfcState &pfc_state_ref,
+    PortCachedHints &hints,
+    PortDrainHint &drain_hint,
+    PortCleanup &cleanup,
+    PortTraceLast &trace)
 {
-    (void)dt;
+    // Reset per-frame phase-B scratch. Keep buffer-trace fields untouched so
+    // B.3's advanceOnePortBuffer can reuse the same PortTraceLast slot.
+    hints.has_drain_hint = 0;
+    hints.has_finish_hint = 0;
+    hints.drain_hint_t = 0.0;
+    hints.finish_hint_t = 0.0;
+    drain_hint.want_clear = 0;
+    drain_hint.want_set = 0;
+    drain_hint.set_t = 0.0;
+    cleanup.num = 0;
+    trace.has_alloc_trace = 0;
+    trace.alloc_port_bw = 0.0;
+    trace.alloc_num_tags = 0;
+    trace.alloc_num_live = 0;
+    trace.alloc_sum_in = 0.0;
+    trace.alloc_sum_out = 0.0;
+    trace.alloc_is_dest_only = 0;
+    trace.alloc_has_buffer = 0;
+    trace.was_dirty_at_alloc = 0;
 
-    constexpr const char *scope = "alloc";
-    uint64_t step = systemLogStep;
-    bool log_enabled = systemLogEnabled(scope, step);
-
-    int32_t dirty_ports[MAX_TOPO_PORTS] {};
-    int32_t num_dirty_ports = 0;
-    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none()) {
-            continue;
-        }
-        if (ctx.get<DirtyPort>(port_e).isDirty != 0) {
-            dirty_ports[num_dirty_ports++] = port_id;
-        }
-    }
-
-    if (num_dirty_ports == 0) {
-        if (log_enabled) {
-            printSystemAllocSummary(step, now, 0, 0, 0);
-        }
+    if (dirty.isDirty == 0) {
         return;
     }
+    trace.was_dirty_at_alloc = 1;
+    // Legacy code called clearBacklogDrainTimer(pid) up-front for every
+    // dirty port; we defer the clear to flushPortDrainHints so each port
+    // only touches its own hint buffer in the parallel phase.
+    drain_hint.want_clear = 1;
 
-    int32_t processed_port_count = 0;
-    int32_t dirty_tag_count = 0;
-
-    for (int32_t i = 0; i < num_dirty_ports; i++) {
-        int32_t pid = dirty_ports[i];
-        if (pid == cachedDrainPortID) {
-            cachedNextDrainTime = std::numeric_limits<Time>::max();
-            cachedDrainPortID = -1;
-        }
-        clearBacklogDrainTimer(pid);
-    }
-
-    for (int32_t d = 0; d < num_dirty_ports; d++) {
-        int32_t port_id = dirty_ports[d];
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none()) {
-            continue;
-        }
-
-        double port_bw = ctx.get<PortState>(port_e).port_bw;
-        PortBuffer *port_buf = &ctx.get<PortBuffer>(port_e);
-        PortPfcState *pfc_state = enablePfc ? &ctx.get<PortPfcState>(port_e) : nullptr;
+    {
+        double port_bw = port_state.port_bw;
+        PortBuffer *port_buf = &port_buf_ref;
+        PortPfcState *pfc_state = enablePfc ? &pfc_state_ref : nullptr;
 
         materializeBufCnt(*port_buf, now);
         for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
@@ -106,7 +103,6 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
 
         Entity tags[MAX_TAG_INDEX] {};
         int32_t num_tags = 0;
-        double sum_in = 0.0;
         for (int32_t i = 0; i < numTagIndexEntries; i++) {
             if (tagIndex[i].port_id != port_id) {
                 continue;
@@ -116,15 +112,11 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
                 continue;
             }
             tags[num_tags++] = tag_e;
-            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
-            sum_in += tag.in_bw;
         }
         if (num_tags == 0) {
-            continue;
+            return;
         }
-
-        processed_port_count += 1;
-        dirty_tag_count += num_tags;
+        trace.alloc_num_tags = num_tags;
 
         for (int32_t i = 0; i < num_tags; i++) {
             FlowTagState &tag = ctx.get<FlowTagState>(tags[i]);
@@ -140,7 +132,13 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
             FlowTagState &tag = ctx.get<FlowTagState>(tags[i]);
             if (tag.is_source == 0 && tag.in_bw == 0.0 && tag.backlog < 1.0) {
                 tag.backlog = 0.0;
-                destroyTag(ctx, tags[i], true, now);
+                // Defer destroyTag to flushPortTagCleanup so the parallel
+                // alloc phase only touches this port's own scratch buffers.
+                if (cleanup.num < MAX_PORT_CLEANUP) {
+                    cleanup.tags[cleanup.num] = tags[i];
+                    cleanup.propagate[cleanup.num] = 1;
+                    cleanup.num += 1;
+                }
                 tags[i] = Entity::none();
             }
         }
@@ -157,8 +155,10 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
             live_sum_in += tag.in_bw;
         }
         if (num_live == 0) {
-            continue;
+            // Stat was counted via trace.alloc_num_tags; skip log/timer.
+            return;
         }
+        trace.alloc_num_live = num_live;
 
         double current_sum_in = live_sum_in;
         bool is_dest_only = false;
@@ -406,9 +406,11 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
                         BufferChunk &front = pb.buf_chunks[pb.head];
                         if (front.chunk_bytes > 1e-15) {
                             Time td = front.chunk_bytes / out_pri;
-                            if (td > 1e-15 && td < cachedNextDrainTime) {
-                                cachedNextDrainTime = td;
-                                cachedDrainPortID = port_id;
+                            if (td > 1e-15) {
+                                if (!hints.has_drain_hint || td < hints.drain_hint_t) {
+                                    hints.has_drain_hint = 1;
+                                    hints.drain_hint_t = td;
+                                }
                             }
                         }
                     }
@@ -445,7 +447,8 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
             PriorityBuffer &pb = port_buf->prior_bufs[0];
             bool has_buffer = pb.buf_cnt > 1e-15 && pb.num_chunks > 0;
             if (!has_buffer && live_sum_in < 1e-18) {
-                continue;
+                // num_tags already recorded via trace.alloc_num_tags; no log.
+                return;
             }
             bool is_congested = live_sum_in >= port_bw;
             if (has_buffer) {
@@ -506,35 +509,38 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
                 BufferChunk &front = pb.buf_chunks[pb.head];
                 if (port_bw > 1e-6 && front.chunk_bytes > 1e-15) {
                     Time td = front.chunk_bytes / port_bw;
-                    if (td > 1e-15 && td < cachedNextDrainTime) {
-                        cachedNextDrainTime = td;
-                        cachedDrainPortID = port_id;
+                    if (td > 1e-15) {
+                        if (!hints.has_drain_hint || td < hints.drain_hint_t) {
+                            hints.has_drain_hint = 1;
+                            hints.drain_hint_t = td;
+                        }
                     }
                 }
             }
             pb.net_buffer_rate = live_sum_in - out_total;
         }
 
-        if (log_enabled) {
-            bool has_buffer = false;
-            if (port_buf != nullptr) {
-                if (qosMode == QOS_SP || qosMode == QOS_WRR) {
-                    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
-                        PriorityBuffer &pb = port_buf->prior_bufs[pri];
-                        if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
-                            has_buffer = true;
-                            break;
-                        }
-                    }
-                } else {
-                    PriorityBuffer &pb = port_buf->prior_bufs[0];
-                    has_buffer = pb.buf_cnt > 1e-15 && pb.num_chunks > 0;
+        // Populate trace fields so logAllocTraces singleton can replay the
+        // per-port log line deterministically (in port_id ascending order).
+        bool has_buffer = false;
+        if (qosMode == QOS_SP || qosMode == QOS_WRR) {
+            for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+                PriorityBuffer &pb = port_buf->prior_bufs[pri];
+                if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
+                    has_buffer = true;
+                    break;
                 }
             }
-            printSystemAllocPort(step, now, port_id, port_bw, num_tags, num_live,
-                current_sum_in, out_total, qosMode, is_dest_only ? 1 : 0,
-                has_buffer ? 1 : 0);
+        } else {
+            PriorityBuffer &pb = port_buf->prior_bufs[0];
+            has_buffer = pb.buf_cnt > 1e-15 && pb.num_chunks > 0;
         }
+        trace.has_alloc_trace = 1;
+        trace.alloc_port_bw = port_bw;
+        trace.alloc_sum_in = current_sum_in;
+        trace.alloc_sum_out = out_total;
+        trace.alloc_is_dest_only = is_dest_only ? 1 : 0;
+        trace.alloc_has_buffer = has_buffer ? 1 : 0;
 
         for (int32_t i = 0; i < num_live; i++) {
             FlowTagState &tag = ctx.get<FlowTagState>(live_tags[i]);
@@ -544,26 +550,27 @@ void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
                 }
                 if (tag.out_bw > 1e-15 && tag.remaining > 0.0) {
                     Time t_finish = tag.remaining / tag.out_bw;
-                    if (t_finish > 0.0 && t_finish < cachedNextFinishTime) {
-                        cachedNextFinishTime = t_finish;
+                    if (t_finish > 0.0) {
+                        if (!hints.has_finish_hint || t_finish < hints.finish_hint_t) {
+                            hints.has_finish_hint = 1;
+                            hints.finish_hint_t = t_finish;
+                        }
                     }
                 }
             }
             if (tag.is_source == 0 && tag.in_bw == 0.0 && tag.backlog > 1e-15 && tag.out_bw > 1e-15) {
                 Time t_bl_drain = tag.backlog / tag.out_bw;
                 if (t_bl_drain > 1e-15 && t_bl_drain < 1e6) {
-                    int32_t idx = findBacklogDrainTimerIndex(port_id);
-                    if (idx < 0 || t_bl_drain < backlogDrainTimers[idx]) {
-                        setBacklogDrainTimer(port_id, t_bl_drain);
+                    // want_clear=1 was set at the top of this function, so
+                    // flushPortDrainHints clears first, then applies
+                    // set_t (min over this port's eligible tags).
+                    if (!drain_hint.want_set || t_bl_drain < drain_hint.set_t) {
+                        drain_hint.want_set = 1;
+                        drain_hint.set_t = t_bl_drain;
                     }
                 }
             }
         }
-    }
-
-    if (log_enabled) {
-        printSystemAllocSummary(step, now, num_dirty_ports,
-            processed_port_count, dirty_tag_count);
     }
 }
 

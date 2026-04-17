@@ -727,6 +727,148 @@ void Sim::snapshotDirtyPorts(Context &ctx)
     }
 }
 
+// Phase B.2 singleton: consume PortCachedHints produced in parallel by
+// allocOnePort and fold them into the global cachedNextDrainTime /
+// cachedDrainPortID / cachedNextFinishTime. Walks portEntities[] in
+// port_id ascending order so the chosen drain/finish port is identical to
+// the legacy sequential loop. Also reimplements the legacy rule that if
+// the currently cached drain port is being re-processed this frame, its
+// global drain cache is reset before taking new per-port hints.
+void Sim::reducePortCachedHints(Context &ctx)
+{
+    bool reset_drain = false;
+    if (cachedDrainPortID >= 0 && cachedDrainPortID < numPorts) {
+        Entity cached_port_e = portEntities[cachedDrainPortID];
+        if (cached_port_e != Entity::none()) {
+            if (ctx.get<PortTraceLast>(cached_port_e).was_dirty_at_alloc != 0) {
+                reset_drain = true;
+            }
+        }
+    }
+    if (reset_drain) {
+        cachedNextDrainTime = std::numeric_limits<Time>::max();
+        cachedDrainPortID = -1;
+    }
+
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
+        if (hints.has_drain_hint != 0) {
+            if (hints.drain_hint_t < cachedNextDrainTime) {
+                cachedNextDrainTime = hints.drain_hint_t;
+                cachedDrainPortID = port_id;
+            }
+        }
+        if (hints.has_finish_hint != 0) {
+            if (hints.finish_hint_t < cachedNextFinishTime) {
+                cachedNextFinishTime = hints.finish_hint_t;
+            }
+        }
+    }
+}
+
+// Phase B.2 singleton: walk ports in ascending id order and materialize the
+// PortDrainHint write requests into backlogDrainTimers. Clears happen first,
+// then sets with the usual min-take-if-shorter semantics. Each port only
+// touches its own entry, but sequencing via a singleton keeps ordering
+// identical across backends.
+void Sim::flushPortDrainHints(Context &ctx)
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortDrainHint &hint = ctx.get<PortDrainHint>(port_e);
+        if (hint.want_clear != 0) {
+            clearBacklogDrainTimer(port_id);
+        }
+    }
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortDrainHint &hint = ctx.get<PortDrainHint>(port_e);
+        if (hint.want_set != 0) {
+            int32_t idx = findBacklogDrainTimerIndex(port_id);
+            if (idx < 0 || hint.set_t < backlogDrainTimers[idx]) {
+                setBacklogDrainTimer(port_id, hint.set_t);
+            }
+        }
+    }
+}
+
+// Phase B.2 singleton: replay the destroyTag calls that allocOnePort
+// deferred into PortCleanup. Walks ports in ascending id so tagIndex /
+// sourceTags compaction is identical across CPU/GPU.
+void Sim::flushPortTagCleanup(Context &ctx)
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortCleanup &cleanup = ctx.get<PortCleanup>(port_e);
+        for (int32_t i = 0; i < cleanup.num; i++) {
+            if (cleanup.tags[i] == Entity::none()) {
+                continue;
+            }
+            destroyTag(ctx, cleanup.tags[i], cleanup.propagate[i] != 0, now);
+        }
+        cleanup.num = 0;
+    }
+}
+
+// Phase B.2 singleton: re-emit the "alloc" scope log lines using the
+// PortTraceLast snapshot that allocOnePort recorded in parallel. We walk
+// ports in port_id ascending order so the log output matches the legacy
+// sequential implementation byte-for-byte on the happy path.
+void Sim::logAllocTraces(Context &ctx)
+{
+    constexpr const char *scope = "alloc";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+
+    int32_t num_dirty = 0;
+    int32_t processed = 0;
+    int32_t dirty_tag_count = 0;
+
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        if (trace.was_dirty_at_alloc == 0) {
+            continue;
+        }
+        num_dirty += 1;
+        if (trace.alloc_num_tags > 0) {
+            processed += 1;
+            dirty_tag_count += trace.alloc_num_tags;
+        }
+        if (log_enabled && trace.has_alloc_trace != 0) {
+            printSystemAllocPort(step, now, port_id,
+                trace.alloc_port_bw,
+                trace.alloc_num_tags,
+                trace.alloc_num_live,
+                trace.alloc_sum_in,
+                trace.alloc_sum_out,
+                qosMode,
+                trace.alloc_is_dest_only,
+                trace.alloc_has_buffer);
+        }
+    }
+
+    if (log_enabled) {
+        printSystemAllocSummary(step, now, num_dirty, processed, dirty_tag_count);
+    }
+}
+
 void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
 {
     constexpr const char *scope = "progress";
