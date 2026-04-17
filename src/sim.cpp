@@ -60,10 +60,23 @@ void downstreamEmitStepSystem(Engine &ctx, SimDriver &)
     sim.downstreamEmitSystem(ctx);
 }
 
-void clearDirtyStepSystem(Engine &ctx, SimDriver &)
+// Phase B.1: per-Port ParallelForNode that snapshots and resets DirtyPort.
+// Each port only touches its own DirtyPort / PortTraceLast, so this is safe
+// to iterate in parallel on the GPU backend.
+void clearDirtyOnePortSystem(Engine &ctx, DirtyPort &dirty, PortTraceLast &trace)
+{
+    (void)ctx;
+    trace.was_dirty_at_clear = (dirty.isDirty != 0) ? 1 : 0;
+    dirty.isDirty = 0;
+}
+
+// Singleton driven by SimDriver: walks portEntities[] in port_id ascending
+// order (the same order the legacy sequential code used) and rebuilds
+// lastDirtyPortIDs / emits the clear-summary log line.
+void snapshotDirtyStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
-    sim.clearDirtyPorts(ctx);
+    sim.snapshotDirtyPorts(ctx);
 }
 
 void chooseDTStepSystem(Engine &ctx, SimDriver &)
@@ -108,6 +121,10 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortBuffer>();
     registry.registerComponent<PortPfcConfig>();
     registry.registerComponent<PortPfcState>();
+    registry.registerComponent<PortCachedHints>();
+    registry.registerComponent<PortDrainHint>();
+    registry.registerComponent<PortCleanup>();
+    registry.registerComponent<PortTraceLast>();
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
@@ -142,8 +159,14 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         pfcDetectStepSystem, SimDriver>>({n5});
     auto n7 = builder.addToGraph<ParallelForNode<Engine,
         downstreamEmitStepSystem, SimDriver>>({n6});
+    // Phase B.1: per-Port clearDirtyOnePortSystem fans out over every Port
+    // entity; the follow-up SimDriver singleton snapshotDirtyStepSystem
+    // collapses the per-port snapshots into lastDirtyPortIDs in
+    // port_id ascending order and emits the clear-summary log.
+    auto n8a = builder.addToGraph<ParallelForNode<Engine,
+        clearDirtyOnePortSystem, DirtyPort, PortTraceLast>>({n7});
     auto n8 = builder.addToGraph<ParallelForNode<Engine,
-        clearDirtyStepSystem, SimDriver>>({n7});
+        snapshotDirtyStepSystem, SimDriver>>({n8a});
     auto n9 = builder.addToGraph<ParallelForNode<Engine,
         chooseDTStepSystem, SimDriver>>({n8});
     auto n10 = builder.addToGraph<ParallelForNode<Engine,

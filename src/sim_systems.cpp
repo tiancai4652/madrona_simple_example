@@ -695,7 +695,11 @@ void Sim::bwUpdateIngressSystem(Context &ctx)
     }
 }
 
-void Sim::clearDirtyPorts(Context &ctx)
+// Phase B.1 singleton: consume the was_dirty_at_clear snapshots that the
+// per-Port clearDirtyOnePortSystem produced in parallel, and rebuild
+// lastDirtyPortIDs in port_id ascending order (same order the previous
+// sequential clearDirtyPorts used). Logging stays bit-for-bit identical.
+void Sim::snapshotDirtyPorts(Context &ctx)
 {
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;
@@ -708,13 +712,13 @@ void Sim::clearDirtyPorts(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        DirtyPort &dirty = ctx.get<DirtyPort>(port_e);
-        if (dirty.isDirty != 0) {
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        if (trace.was_dirty_at_clear != 0) {
             if (numLastDirtyPortIDs < MAX_TOPO_PORTS) {
                 lastDirtyPortIDs[numLastDirtyPortIDs++] = port_id;
             }
-            dirty.isDirty = 0;
             cleared_port_count += 1;
+            trace.was_dirty_at_clear = 0;
         }
     }
 

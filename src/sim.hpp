@@ -186,10 +186,15 @@ struct Sim : public madrona::WorldBase {
     void portBandwidthAllocSystem(madrona::Context &ctx, Time dt);
     void pfcThresholdDetectSystem(madrona::Context &ctx);
     void downstreamEmitSystem(madrona::Context &ctx);
-    void clearDirtyPorts(madrona::Context &ctx);
     Time chooseDT() const;
     void bufferUpdateSystem(madrona::Context &ctx, Time dt);
     void flowProgressAndCleanupSystem(madrona::Context &ctx, Time dt);
+
+    // Phase B.1: per-Port worker for the DirtyPort reset step and the
+    // matching singleton that snapshots the dirty-port set in a
+    // deterministic port_id ascending order. All other per-Port workers
+    // (allocOnePort / advanceOnePortBuffer) come online in later phases.
+    void snapshotDirtyPorts(madrona::Context &ctx);
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;
     madrona::Entity createTagOnPort(madrona::Context &ctx,
