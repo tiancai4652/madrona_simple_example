@@ -68,7 +68,7 @@ def main():
         end_cells,
         rewards,
         walls,
-        gpu_sim=False,
+        gpu_sim=bool(args.gpu),
         gpu_id=0,
         network_inputs=network_inputs,
         propagation_interval=args.prop_interval,

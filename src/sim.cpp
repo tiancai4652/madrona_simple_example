@@ -8,32 +8,33 @@ namespace madsimple {
 
 namespace {
 
-void scheduleStepSystem(Engine &ctx, CurStep &)
+void scheduleStepSystem(Engine &ctx, SimDriver &driver)
 {
     Sim &sim = ctx.data();
     sim.systemLogStep += 1;
+    driver.tick += 1;
     sim.schedulePendingFlows();
 }
 
-void deliverStepSystem(Engine &ctx, CurStep &)
+void deliverStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.deliverEvents();
 }
 
-void arrivalStepSystem(Engine &ctx, CurStep &)
+void arrivalStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.flowArrivalSystem(ctx);
 }
 
-void bwUpdateStepSystem(Engine &ctx, CurStep &)
+void bwUpdateStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.bwUpdateIngressSystem(ctx);
 }
 
-void pfcPropagateStepSystem(Engine &ctx, CurStep &)
+void pfcPropagateStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     if (sim.enablePfc != 0) {
@@ -41,31 +42,31 @@ void pfcPropagateStepSystem(Engine &ctx, CurStep &)
     }
 }
 
-void portAllocStepSystem(Engine &ctx, CurStep &)
+void portAllocStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.portBandwidthAllocSystem(ctx, 0.0);
 }
 
-void pfcDetectStepSystem(Engine &ctx, CurStep &)
+void pfcDetectStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.pfcThresholdDetectSystem(ctx);
 }
 
-void downstreamEmitStepSystem(Engine &ctx, CurStep &)
+void downstreamEmitStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.downstreamEmitSystem(ctx);
 }
 
-void clearDirtyStepSystem(Engine &ctx, CurStep &)
+void clearDirtyStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.clearDirtyPorts(ctx);
 }
 
-void chooseDTStepSystem(Engine &ctx, CurStep &)
+void chooseDTStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.nextDT = sim.chooseDT();
@@ -74,13 +75,13 @@ void chooseDTStepSystem(Engine &ctx, CurStep &)
     }
 }
 
-void bufferUpdateStepSystem(Engine &ctx, CurStep &)
+void bufferUpdateStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.bufferUpdateSystem(ctx, sim.nextDT);
 }
 
-void flowProgressStepSystem(Engine &ctx, CurStep &)
+void flowProgressStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
@@ -99,6 +100,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Reward>();
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
+    registry.registerComponent<SimDriver>();
 
     registry.registerComponent<DirtyPort>();
     registry.registerComponent<PortState>();
@@ -108,6 +110,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortPfcState>();
 
     registry.registerArchetype<Agent>();
+    registry.registerArchetype<SimDriverArch>();
     registry.registerArchetype<Port>();
     registry.registerArchetype<FlowTag>();
 
@@ -124,29 +127,29 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
 
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
-        scheduleStepSystem, CurStep>>({});
+        scheduleStepSystem, SimDriver>>({});
     auto n1 = builder.addToGraph<ParallelForNode<Engine,
-        deliverStepSystem, CurStep>>({n0});
+        deliverStepSystem, SimDriver>>({n0});
     auto n2 = builder.addToGraph<ParallelForNode<Engine,
-        arrivalStepSystem, CurStep>>({n1});
+        arrivalStepSystem, SimDriver>>({n1});
     auto n3 = builder.addToGraph<ParallelForNode<Engine,
-        bwUpdateStepSystem, CurStep>>({n2});
+        bwUpdateStepSystem, SimDriver>>({n2});
     auto n4 = builder.addToGraph<ParallelForNode<Engine,
-        pfcPropagateStepSystem, CurStep>>({n3});
+        pfcPropagateStepSystem, SimDriver>>({n3});
     auto n5 = builder.addToGraph<ParallelForNode<Engine,
-        portAllocStepSystem, CurStep>>({n4});
+        portAllocStepSystem, SimDriver>>({n4});
     auto n6 = builder.addToGraph<ParallelForNode<Engine,
-        pfcDetectStepSystem, CurStep>>({n5});
+        pfcDetectStepSystem, SimDriver>>({n5});
     auto n7 = builder.addToGraph<ParallelForNode<Engine,
-        downstreamEmitStepSystem, CurStep>>({n6});
+        downstreamEmitStepSystem, SimDriver>>({n6});
     auto n8 = builder.addToGraph<ParallelForNode<Engine,
-        clearDirtyStepSystem, CurStep>>({n7});
+        clearDirtyStepSystem, SimDriver>>({n7});
     auto n9 = builder.addToGraph<ParallelForNode<Engine,
-        chooseDTStepSystem, CurStep>>({n8});
+        chooseDTStepSystem, SimDriver>>({n8});
     auto n10 = builder.addToGraph<ParallelForNode<Engine,
-        bufferUpdateStepSystem, CurStep>>({n9});
+        bufferUpdateStepSystem, SimDriver>>({n9});
     auto n11 = builder.addToGraph<ParallelForNode<Engine,
-        flowProgressStepSystem, CurStep>>({n10});
+        flowProgressStepSystem, SimDriver>>({n10});
 
 #ifdef MADRONA_GPU_MODE
     auto recycle_entities = builder.addToGraph<RecycleEntitiesNode>({n11});
@@ -192,6 +195,9 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<Reward>(agent) = Reward { .r = 0.f };
     ctx.get<Done>(agent) = Done { .episodeDone = 0.f };
     ctx.get<CurStep>(agent) = CurStep { .step = 0 };
+
+    Entity driver = ctx.makeEntity<SimDriverArch>();
+    ctx.get<SimDriver>(driver) = SimDriver { .tick = 0 };
 
     loadTopo(ctx);
     loadFlow(ctx);

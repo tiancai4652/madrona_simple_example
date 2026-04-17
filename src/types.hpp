@@ -53,6 +53,18 @@ struct Agent : public madrona::Archetype<
     CurStep
 > {};
 
+// Singleton driver used by task-graph-level systems that need a single
+// parallel entry point (scheduling, event delivery, global reductions,
+// singleton flush nodes). per-entity parallel systems must not live on
+// SimDriverArch; they should iterate over Port / FlowTag directly.
+struct SimDriver {
+    int32_t tick = 0;
+};
+
+struct SimDriverArch : public madrona::Archetype<
+    SimDriver
+> {};
+
 using Time = double;
 using Bw = double;
 using Bytes = double;
