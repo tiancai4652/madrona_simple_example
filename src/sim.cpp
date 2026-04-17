@@ -129,10 +129,35 @@ void chooseDTStepSystem(Engine &ctx, SimDriver &)
     }
 }
 
-void bufferUpdateStepSystem(Engine &ctx, SimDriver &)
+// Phase B.3: per-Port ParallelForNode that advances a single port's
+// buffer state for dt = sim.nextDT. Mirrors allocOnePortStepSystem in
+// that each port only touches its own components plus read-only
+// topology/tagIndex scans; cross-port mutation (destroyTag) is deferred
+// into PortCleanup and flushed by the singleton that follows.
+void advanceOnePortBufferStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortPfcState &pfc_state,
+    PortCleanup &cleanup,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    sim.bufferUpdateSystem(ctx, sim.nextDT);
+    sim.advanceOnePortBuffer(ctx, port_state.port_id, sim.nextDT,
+        port_state, port_buf, dirty, pfc_state, cleanup, trace);
+}
+
+void flushBufferTagCleanupStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushBufferTagCleanup(ctx);
+}
+
+void logBufferTracesStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.logBufferTraces(ctx);
 }
 
 void flowProgressStepSystem(Engine &ctx, SimDriver &)
@@ -229,8 +254,18 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         snapshotDirtyStepSystem, SimDriver>>({n8a});
     auto n9 = builder.addToGraph<ParallelForNode<Engine,
         chooseDTStepSystem, SimDriver>>({n8});
+    // Phase B.3: per-Port fan-out of the buffer advance phase, followed by
+    // two SimDriver singletons. flushBufferTagCleanup replays deferred
+    // destroyTag in port_id ascending order; logBufferTraces sums the
+    // per-port buffer summary fields before we advance `now`.
+    auto n10a = builder.addToGraph<ParallelForNode<Engine,
+        advanceOnePortBufferStepSystem,
+        PortState, PortBuffer, DirtyPort,
+        PortPfcState, PortCleanup, PortTraceLast>>({n9});
+    auto n10b = builder.addToGraph<ParallelForNode<Engine,
+        flushBufferTagCleanupStepSystem, SimDriver>>({n10a});
     auto n10 = builder.addToGraph<ParallelForNode<Engine,
-        bufferUpdateStepSystem, SimDriver>>({n9});
+        logBufferTracesStepSystem, SimDriver>>({n10b});
     auto n11 = builder.addToGraph<ParallelForNode<Engine,
         flowProgressStepSystem, SimDriver>>({n10});
 

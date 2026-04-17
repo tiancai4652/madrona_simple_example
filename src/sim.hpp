@@ -186,7 +186,6 @@ struct Sim : public madrona::WorldBase {
     void pfcThresholdDetectSystem(madrona::Context &ctx);
     void downstreamEmitSystem(madrona::Context &ctx);
     Time chooseDT() const;
-    void bufferUpdateSystem(madrona::Context &ctx, Time dt);
     void flowProgressAndCleanupSystem(madrona::Context &ctx, Time dt);
 
     // Phase B.1 singleton: consumes PortTraceLast.was_dirty_at_clear written
@@ -219,6 +218,29 @@ struct Sim : public madrona::WorldBase {
     void flushPortDrainHints(madrona::Context &ctx);
     void flushPortTagCleanup(madrona::Context &ctx);
     void logAllocTraces(madrona::Context &ctx);
+
+    // Phase B.3: per-Port buffer-advance worker. Computes the legacy
+    // processPorts decision locally (lastDirtyPortIDs / cachedDrainPortID /
+    // backlogDrainTimers / any-priority-empty heuristic) and, if the port
+    // is eligible, advances that port's PortBuffer / FlowTagState in
+    // place. Tags queued for destruction land in PortCleanup and are
+    // flushed sequentially by flushBufferTagCleanup below.
+    void advanceOnePortBuffer(madrona::Context &ctx,
+                              int32_t port_id,
+                              Time dt,
+                              PortState &port_state,
+                              PortBuffer &port_buf,
+                              DirtyPort &dirty,
+                              PortPfcState &pfc_state,
+                              PortCleanup &cleanup,
+                              PortTraceLast &trace);
+
+    // Phase B.3 singletons. flushBufferTagCleanup replays the buffer-phase
+    // destroyTag calls in port_id ascending order; logBufferTraces sums
+    // the per-port buffer summary fields for the "buffer" scope log.
+    void flushBufferTagCleanup(madrona::Context &ctx);
+    void logBufferTraces(madrona::Context &ctx);
+
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;
     madrona::Entity createTagOnPort(madrona::Context &ctx,

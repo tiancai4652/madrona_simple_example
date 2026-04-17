@@ -125,48 +125,64 @@ void Sim::materializeBufCnt(PortBuffer &port_buf, Time at_time)
     }
 }
 
-void Sim::bufferUpdateSystem(Context &ctx, Time dt)
+// Phase B.3: per-Port worker for the buffer-advance phase. Only touches
+// this port's own components (PortBuffer / DirtyPort / PortCleanup /
+// PortTraceLast), plus FlowTagState for tags whose tagIndex entry points
+// to this port. Cross-port reads go through findTag / tagIndex which are
+// immutable during this parallel phase (destroyTag runs in the
+// flushBufferTagCleanup singleton afterwards), so different ports can run
+// in parallel without racing. "should_process" mirrors the legacy
+// processPorts union (lastDirtyPortIDs + cachedDrainPortID expiring +
+// backlogDrainTimers expiring + any-priority-empty heuristic) but is
+// computed locally so no global scratch set needs to be materialised.
+void Sim::advanceOnePortBuffer(
+    Context &ctx,
+    int32_t port_id,
+    Time dt,
+    PortState &port_state,
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortPfcState &pfc_state,
+    PortCleanup &cleanup,
+    PortTraceLast &trace)
 {
-    constexpr const char *scope = "buffer";
-    uint64_t step = systemLogStep;
-    bool log_enabled = systemLogEnabled(scope, step);
+    cleanup.num = 0;
+    trace.buffer_processed = 0;
+    trace.buffer_destroy_count = 0;
+    trace.buffer_total_buf_cnt = 0.0;
 
     if (enableBuffer == 0 || dt < 1e-15) {
-        if (log_enabled) {
-            printSystemBufferSummary(step, now, 0, 0, 0.0);
-        }
         return;
     }
 
-    bool processPorts[MAX_TOPO_PORTS] {};
-    for (int32_t i = 0; i < numLastDirtyPortIDs; i++) {
-        if (lastDirtyPortIDs[i] >= 0 && lastDirtyPortIDs[i] < numPorts) {
-            processPorts[lastDirtyPortIDs[i]] = true;
-        }
-    }
-    if (cachedDrainPortID >= 0 && cachedNextDrainTime < std::numeric_limits<Time>::max() && cachedNextDrainTime <= dt + 1e-12) {
-        processPorts[cachedDrainPortID] = true;
-    }
-    for (int32_t i = 0; i < numBacklogDrainTimers; i++) {
-        if (backlogDrainTimers[i] <= dt + 1e-12 && backlogDrainPortIDs[i] >= 0) {
-            processPorts[backlogDrainPortIDs[i]] = true;
-        }
-    }
-
     constexpr double BUFFER_EPSILON = 1.0;
-    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (processPorts[port_id]) {
-            continue;
+
+    bool should_process = false;
+    for (int32_t i = 0; i < numLastDirtyPortIDs && !should_process; i++) {
+        if (lastDirtyPortIDs[i] == port_id) {
+            should_process = true;
         }
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none()) {
-            continue;
+    }
+    if (!should_process
+        && cachedDrainPortID == port_id
+        && cachedNextDrainTime < std::numeric_limits<Time>::max()
+        && cachedNextDrainTime <= dt + 1e-12) {
+        should_process = true;
+    }
+    if (!should_process) {
+        for (int32_t i = 0; i < numBacklogDrainTimers && !should_process; i++) {
+            if (backlogDrainPortIDs[i] == port_id
+                && backlogDrainTimers[i] <= dt + 1e-12) {
+                should_process = true;
+            }
         }
-        PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
-        bool any_pri_empty = false;
+    }
+    if (!should_process) {
         for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
             PriorityBuffer &pb = port_buf.prior_bufs[pri];
-            if (pb.buf_cnt < 1e-15 && pb.num_chunks == 0 && std::abs(pb.net_buffer_rate) < 1e-15) {
+            if (pb.buf_cnt < 1e-15
+                && pb.num_chunks == 0
+                && std::abs(pb.net_buffer_rate) < 1e-15) {
                 continue;
             }
             double eff = pb.buf_cnt;
@@ -177,46 +193,33 @@ void Sim::bufferUpdateSystem(Context &ctx, Time dt)
                 }
             }
             if (eff < BUFFER_EPSILON) {
-                any_pri_empty = true;
+                should_process = true;
                 break;
             }
         }
-        if (any_pri_empty) {
-            processPorts[port_id] = true;
-        }
+    }
+    if (!should_process) {
+        return;
     }
 
     Time frame_end = now + dt;
-    Entity tags_to_destroy[MAX_TAG_INDEX] {};
-    int32_t num_destroy = 0;
-    int32_t processed_port_count = 0;
-    double total_buf_cnt = 0.0;
 
-    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (!processPorts[port_id]) {
-            continue;
-        }
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none()) {
-            continue;
-        }
+    materializeBufCnt(port_buf, now);
 
-        PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
-        materializeBufCnt(port_buf, now);
-
-        Entity tags[MAX_TAG_INDEX] {};
-        int32_t num_tags = 0;
-        for (int32_t i = 0; i < numTagIndexEntries; i++) {
-            if (tagIndex[i].port_id == port_id && tagIndex[i].entity != Entity::none()) {
-                tags[num_tags++] = tagIndex[i].entity;
-            }
+    Entity tags[MAX_TAG_INDEX] {};
+    int32_t num_tags = 0;
+    for (int32_t i = 0; i < numTagIndexEntries; i++) {
+        if (tagIndex[i].port_id == port_id && tagIndex[i].entity != Entity::none()) {
+            tags[num_tags++] = tagIndex[i].entity;
         }
-        if (num_tags == 0) {
-            continue;
-        }
-        processed_port_count += 1;
+    }
+    if (num_tags == 0) {
+        return;
+    }
+    trace.buffer_processed = 1;
 
-        double port_bw = ctx.get<PortState>(port_e).port_bw;
+    {
+        (void)port_state;
         bool multi_pri = (qosMode == QOS_SP || qosMode == QOS_WRR);
         int32_t pri_begin = multi_pri ? 0 : 0;
         int32_t pri_end = multi_pri ? PFC_MAX_PRIORITY : 1;
@@ -373,7 +376,7 @@ void Sim::bufferUpdateSystem(Context &ctx, Time dt)
                 bool chunk_consumed = pb.num_chunks < chunks_before;
                 bool buffer_emptied = buf_before > 1e-15 && pb.buf_cnt < 1e-15;
                 if (chunk_consumed || buffer_emptied) {
-                    ctx.get<DirtyPort>(port_e).isDirty = 1;
+                    dirty.isDirty = 1;
                 }
 
                 if (chunk_consumed && !buffer_emptied) {
@@ -427,7 +430,7 @@ void Sim::bufferUpdateSystem(Context &ctx, Time dt)
                         pb.tail = (pb.tail + 1) % MAX_BUFFER_CHUNKS;
                         pb.num_chunks += 1;
                     }
-                    ctx.get<DirtyPort>(port_e).isDirty = 1;
+                    dirty.isDirty = 1;
                 } else {
                     for (int32_t i = 0; i < pri_counts[pri]; i++) {
                         ctx.get<FlowTagState>(pri_tags[pri][i]).last_backlog_time = frame_end;
@@ -458,15 +461,17 @@ void Sim::bufferUpdateSystem(Context &ctx, Time dt)
                     }
                 }
                 if (tag.backlog < 1e-15) {
-                    if (!upstream_alive && num_destroy < MAX_TAG_INDEX) {
-                        tags_to_destroy[num_destroy++] = pri_tags[pri][i];
+                    if (!upstream_alive && cleanup.num < MAX_PORT_CLEANUP) {
+                        cleanup.tags[cleanup.num] = pri_tags[pri][i];
+                        cleanup.propagate[cleanup.num] = 1;
+                        cleanup.num += 1;
                     }
                     continue;
                 }
                 if (tag.out_bw == 0.0) {
                     bool pfc_paused = false;
                     if (enablePfc != 0) {
-                        pfc_paused = ctx.get<PortPfcState>(port_e).paused[std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1)] != 0;
+                        pfc_paused = pfc_state.paused[std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1)] != 0;
                     }
                     bool sp_starved = false;
                     if (qosMode != QOS_NONE) {
@@ -478,8 +483,10 @@ void Sim::bufferUpdateSystem(Context &ctx, Time dt)
                     }
                     if (!pfc_paused && !upstream_alive && !sp_starved) {
                         tag.backlog = 0.0;
-                        if (num_destroy < MAX_TAG_INDEX) {
-                            tags_to_destroy[num_destroy++] = pri_tags[pri][i];
+                        if (cleanup.num < MAX_PORT_CLEANUP) {
+                            cleanup.tags[cleanup.num] = pri_tags[pri][i];
+                            cleanup.propagate[cleanup.num] = 1;
+                            cleanup.num += 1;
                         }
                     }
                 }
@@ -487,21 +494,69 @@ void Sim::bufferUpdateSystem(Context &ctx, Time dt)
         }
 
         port_buf.last_update_time = frame_end;
+        double port_total = 0.0;
         for (int32_t pri = pri_begin; pri < pri_end; pri++) {
-            total_buf_cnt += port_buf.prior_bufs[pri].buf_cnt;
+            port_total += port_buf.prior_bufs[pri].buf_cnt;
         }
+        trace.buffer_total_buf_cnt = port_total;
     }
 
-    for (int32_t i = 0; i < num_destroy; i++) {
-        if (tags_to_destroy[i] != Entity::none()) {
-            destroyTag(ctx, tags_to_destroy[i], true, frame_end);
+    trace.buffer_destroy_count = cleanup.num;
+}
+
+// Phase B.3 singleton: replay the destroyTag calls that advanceOnePortBuffer
+// deferred into PortCleanup. Walks ports in port_id ascending order so
+// tagIndex / sourceTags / ingressTags compaction is identical across
+// CPU / GPU. The legacy code called destroyTag with frame_end = now + dt;
+// nextDT holds dt for the current frame (not yet applied to now), so we
+// reconstruct the same timestamp here.
+void Sim::flushBufferTagCleanup(Context &ctx)
+{
+    Time frame_end = now + nextDT;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
         }
+        PortCleanup &cleanup = ctx.get<PortCleanup>(port_e);
+        for (int32_t i = 0; i < cleanup.num; i++) {
+            if (cleanup.tags[i] == Entity::none()) {
+                continue;
+            }
+            destroyTag(ctx, cleanup.tags[i], cleanup.propagate[i] != 0, frame_end);
+        }
+        cleanup.num = 0;
+    }
+}
+
+// Phase B.3 singleton: sum the per-port buffer traces and emit the
+// "buffer" scope summary log line. Walks in port_id ascending order, which
+// is irrelevant for the sum but preserves any tie-breaking in later
+// ports' summaries.
+void Sim::logBufferTraces(Context &ctx)
+{
+    constexpr const char *scope = "buffer";
+    uint64_t step = systemLogStep;
+    bool log_enabled = systemLogEnabled(scope, step);
+    if (!log_enabled) {
+        return;
     }
 
-    if (log_enabled) {
-        printSystemBufferSummary(step, now, processed_port_count,
-            num_destroy, total_buf_cnt);
+    int32_t processed = 0;
+    int32_t destroy_count = 0;
+    double total_buf_cnt = 0.0;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        processed += trace.buffer_processed;
+        destroy_count += trace.buffer_destroy_count;
+        total_buf_cnt += trace.buffer_total_buf_cnt;
     }
+
+    printSystemBufferSummary(step, now, processed, destroy_count, total_buf_cnt);
 }
 
 }
