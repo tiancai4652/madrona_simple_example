@@ -147,7 +147,10 @@ struct Sim : public madrona::WorldBase {
     void injectFlowDef(const FlowDef &flow);
     void injectFlow(int32_t src_port_id, const FlowDef &flow);
     void schedulePendingFlows();
-    void deliverEvents();
+    void deliverEvents(madrona::Context &ctx);
+    // Legacy ingress-chain singletons retained for non-task-graph
+    // helpers; the live task graph now uses pfcPropagateOnePort /
+    // flowArrivalOnePort / bwUpdateOnePort (Phase E).
     void flowArrivalSystem(madrona::Context &ctx);
     void bwUpdateIngressSystem(madrona::Context &ctx);
     void pfcPropagateSystem(madrona::Context &ctx);
@@ -248,6 +251,50 @@ struct Sim : public madrona::WorldBase {
     void flushPortPfcTimers(madrona::Context &ctx);
     void logPfcDetectTraces(madrona::Context &ctx);
     void logEmitTraces(madrona::Context &ctx);
+
+    // Phase E: per-Port ingress-chain workers. They consume the target
+    // port's PortInbox (dispatched by deliverEvents) and only write to
+    // the port's own components plus the deferred PortCreateList /
+    // PortCleanup / PortCompletionList / PortOutbox; all global mutation
+    // is flushed by the singletons below.
+    void pfcPropagateOnePort(madrona::Context &ctx,
+                             int32_t port_id,
+                             PortState &port_state,
+                             PortPfcState &pfc_state,
+                             DirtyPort &dirty,
+                             PortInbox &inbox,
+                             PortTraceLast &trace);
+    void flowArrivalOnePort(madrona::Context &ctx,
+                            int32_t port_id,
+                            PortState &port_state,
+                            DirtyPort &dirty,
+                            PortInbox &inbox,
+                            PortTagList &tag_list,
+                            PortCreateList &create_list,
+                            PortTraceLast &trace);
+    void bwUpdateOnePort(madrona::Context &ctx,
+                         int32_t port_id,
+                         PortState &port_state,
+                         PortBuffer &port_buf,
+                         DirtyPort &dirty,
+                         PortInbox &inbox,
+                         PortTagList &tag_list,
+                         PortCreateList &create_list,
+                         PortCleanup &cleanup,
+                         PortOutbox &outbox,
+                         PortCompletionList &completions,
+                         PortTraceLast &trace);
+
+    // Phase E singletons. flushPortInboxReset zeroes every port's
+    // PortInbox before deliverEvents writes into it; dispatchEvents (the
+    // new deliverEvents variant that owns ctx) walks delayedEvents in
+    // arrival order and writes each due event into the target port's
+    // PortInbox. flushTagCreate / flushFlowCompletion materialise the
+    // deferred per-Port requests in port_id ascending order.
+    void dispatchEvents(madrona::Context &ctx);
+    void flushTagCreate(madrona::Context &ctx);
+    void flushFlowCompletion(madrona::Context &ctx);
+    void logIngressChain(madrona::Context &ctx);
 
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;

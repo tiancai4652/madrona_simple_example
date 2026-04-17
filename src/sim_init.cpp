@@ -145,6 +145,9 @@ int32_t Sim::createPort(Engine &ctx, NodeId node_id, int32_t port_idx, Bw port_b
     ctx.get<PortTraceLast>(port_entity) = PortTraceLast {};
     ctx.get<PortOutbox>(port_entity) = PortOutbox {};
     ctx.get<PortTagList>(port_entity) = PortTagList {};
+    ctx.get<PortInbox>(port_entity) = PortInbox {};
+    ctx.get<PortCreateList>(port_entity) = PortCreateList {};
+    ctx.get<PortCompletionList>(port_entity) = PortCompletionList {};
 
     return port_id;
 }

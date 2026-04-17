@@ -19,27 +19,74 @@ void scheduleStepSystem(Engine &ctx, SimDriver &driver)
 void deliverStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
-    sim.deliverEvents();
+    sim.deliverEvents(ctx);
 }
 
-void arrivalStepSystem(Engine &ctx, SimDriver &)
+// Phase E: per-Port ingress-chain workers. Each operates on a single
+// port's inbox + local components only; all cross-port effects are
+// deferred to flushTagCreate / flushFlowCompletion / flushPortOutbox /
+// flushTagCleanup singletons that follow.
+void pfcPropagateOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortPfcState &pfc_state,
+    DirtyPort &dirty,
+    PortInbox &inbox,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    sim.flowArrivalSystem(ctx);
+    sim.pfcPropagateOnePort(ctx, port_state.port_id, port_state, pfc_state,
+        dirty, inbox, trace);
 }
 
-void bwUpdateStepSystem(Engine &ctx, SimDriver &)
+void arrivalOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    DirtyPort &dirty,
+    PortInbox &inbox,
+    PortTagList &tag_list,
+    PortCreateList &create_list,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    sim.bwUpdateIngressSystem(ctx);
+    sim.flowArrivalOnePort(ctx, port_state.port_id, port_state, dirty, inbox,
+        tag_list, create_list, trace);
 }
 
-void pfcPropagateStepSystem(Engine &ctx, SimDriver &)
+void bwUpdateOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortInbox &inbox,
+    PortTagList &tag_list,
+    PortCreateList &create_list,
+    PortCleanup &cleanup,
+    PortOutbox &outbox,
+    PortCompletionList &completions,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    if (sim.enablePfc != 0) {
-        sim.pfcPropagateSystem(ctx);
-    }
+    sim.bwUpdateOnePort(ctx, port_state.port_id, port_state, port_buf, dirty,
+        inbox, tag_list, create_list, cleanup, outbox, completions, trace);
+}
+
+void flushTagCreateStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushTagCreate(ctx);
+}
+
+void flushFlowCompletionStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushFlowCompletion(ctx);
+}
+
+void logIngressChainStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.logIngressChain(ctx);
 }
 
 // Phase B.2: per-Port ParallelForNode that runs the bandwidth alloc phase
@@ -244,6 +291,9 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortTraceLast>();
     registry.registerComponent<PortOutbox>();
     registry.registerComponent<PortTagList>();
+    registry.registerComponent<PortInbox>();
+    registry.registerComponent<PortCreateList>();
+    registry.registerComponent<PortCompletionList>();
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
@@ -266,12 +316,38 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         scheduleStepSystem, SimDriver>>({});
     auto n1 = builder.addToGraph<ParallelForNode<Engine,
         deliverStepSystem, SimDriver>>({n0});
-    auto n2 = builder.addToGraph<ParallelForNode<Engine,
-        arrivalStepSystem, SimDriver>>({n1});
-    auto n3 = builder.addToGraph<ParallelForNode<Engine,
-        bwUpdateStepSystem, SimDriver>>({n2});
+    // Phase E: per-Port ingress chain. deliverEvents (n1) already
+    // dispatched each due event into the target port's PortInbox and
+    // zeroed the per-port PortCreateList / PortCompletionList. We run
+    // pfcPropagate → arrival → flushTagCreate → bwUpdate →
+    // flushTagCreate → flushTagCleanup → flushFlowCompletion →
+    // flushPortOutbox → logIngressChain, matching the effective order
+    // the legacy singleton path produced.
+    auto n2pfc = builder.addToGraph<ParallelForNode<Engine,
+        pfcPropagateOnePortStepSystem,
+        PortState, PortPfcState, DirtyPort,
+        PortInbox, PortTraceLast>>({n1});
+    auto n2arr = builder.addToGraph<ParallelForNode<Engine,
+        arrivalOnePortStepSystem,
+        PortState, DirtyPort, PortInbox, PortTagList,
+        PortCreateList, PortTraceLast>>({n2pfc});
+    auto n2createA = builder.addToGraph<ParallelForNode<Engine,
+        flushTagCreateStepSystem, SimDriver>>({n2arr});
+    auto n2bw = builder.addToGraph<ParallelForNode<Engine,
+        bwUpdateOnePortStepSystem,
+        PortState, PortBuffer, DirtyPort, PortInbox, PortTagList,
+        PortCreateList, PortCleanup, PortOutbox,
+        PortCompletionList, PortTraceLast>>({n2createA});
+    auto n2createB = builder.addToGraph<ParallelForNode<Engine,
+        flushTagCreateStepSystem, SimDriver>>({n2bw});
+    auto n2cleanup = builder.addToGraph<ParallelForNode<Engine,
+        flushTagCleanupStepSystem, SimDriver>>({n2createB});
+    auto n2complete = builder.addToGraph<ParallelForNode<Engine,
+        flushFlowCompletionStepSystem, SimDriver>>({n2cleanup});
+    auto n2outbox = builder.addToGraph<ParallelForNode<Engine,
+        flushPortOutboxStepSystem, SimDriver>>({n2complete});
     auto n4 = builder.addToGraph<ParallelForNode<Engine,
-        pfcPropagateStepSystem, SimDriver>>({n3});
+        logIngressChainStepSystem, SimDriver>>({n2outbox});
     // Phase B.2: per-Port fan-out of the bandwidth alloc phase, followed by
     // four SimDriver singletons that fold the hint / cleanup / trace buffers
     // back into global state in port_id ascending order. Sequencing the

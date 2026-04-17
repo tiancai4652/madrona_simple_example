@@ -261,6 +261,27 @@ struct PortTraceLast {
     // consumed by snapshotDirtyPorts to rebuild lastDirtyPortIDs in a
     // deterministic port_id ascending order.
     int32_t was_dirty_at_clear = 0;
+    // Phase E: ingress_chain per-Port summary counters. The per-Port
+    // arrival/bwUpdate/pfcPropagate workers increment these; the
+    // logIngressChainSystem singleton emits the single summary line
+    // aggregated across all ports (same format as the legacy
+    // printSystemArrivalSummary / printSystemBwUpdateSummary /
+    // printSystemPfcSummary). The per-event detail log lines (create /
+    // update / destroy / buffered_zero / forward / complete) are still
+    // emitted from within the per-Port worker; scope "ingress_chain" is
+    // canonical-sorted, so per-port interleaving is tolerated.
+    int32_t arrival_created = 0;
+    int32_t arrival_updated = 0;
+    int32_t arrival_skipped = 0;
+    int32_t bwupd_created = 0;
+    int32_t bwupd_updated = 0;
+    int32_t bwupd_buffered_zero = 0;
+    int32_t bwupd_destroyed = 0;
+    int32_t bwupd_forwarded = 0;
+    int32_t bwupd_completed = 0;
+    int32_t bwupd_skipped = 0;
+    int32_t pfc_applied = 0;
+    int32_t pfc_skipped = 0;
 };
 
 // Phase C: per-Port outbox for DelayedEvents produced by pfcDetectOnePort
@@ -289,6 +310,58 @@ struct PortTagList {
     madrona::Entity tags[MAX_TAGS_PER_PORT] {};
 };
 
+// Phase E: per-Port inbox. The deliverEvents singleton dispatches each
+// delayedEvent whose t <= now to the target port's inbox (arrival/bwupd
+// target ev.port_id, pfc target ev.target_port_id). Per-Port workers
+// arrival/bwUpdate/pfcPropagate then consume their local inbox without
+// scanning the global Sim::inbox* arrays.
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 64;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 64;
+constexpr int32_t MAX_PORT_INBOX_PFC = 32;
+
+struct PortInbox {
+    int32_t num_arrival = 0;
+    FlowArrivalEv arrivals[MAX_PORT_INBOX_ARRIVAL] {};
+    int32_t num_bwupd = 0;
+    BwUpdateEv bwupds[MAX_PORT_INBOX_BWUPD] {};
+    int32_t num_pfc = 0;
+    PfcControlEv pfcs[MAX_PORT_INBOX_PFC] {};
+};
+
+// Phase E: deferred tag-create requests. Per-Port arrival/bwUpdate
+// workers must not call ctx.makeEntity<FlowTag>() directly (entity-id
+// assignment would be non-deterministic under parallel execution), so
+// they push requests here and flushTagCreateSystem (singleton) walks
+// port_id ascending and actually creates the tags via createTagOnPort.
+struct PortCreateReq {
+    int32_t from_arrival = 0;
+    FlowId flow_id = -1;
+    Bw in_bw = 0.0;
+    Bytes size = 0.0;
+    int32_t is_source = 0;
+    int32_t priority = 0;
+    int32_t log_enabled = 0;
+    const char *log_label = nullptr;
+};
+
+constexpr int32_t MAX_PORT_CREATE = 64;
+
+struct PortCreateList {
+    int32_t num = 0;
+    PortCreateReq reqs[MAX_PORT_CREATE] {};
+};
+
+// Phase E: deferred recordFlowCompletion requests. bwUpdate on a
+// terminal port must not mutate Sim::flowCompletions / flowDefs /
+// flowRoutes directly; it pushes the flow_id here and
+// flushFlowCompletionSystem applies them in port_id ascending order.
+constexpr int32_t MAX_PORT_COMPLETE = 32;
+
+struct PortCompletionList {
+    int32_t num = 0;
+    FlowId flow_ids[MAX_PORT_COMPLETE] {};
+};
+
 struct Port : public madrona::Archetype<
     DirtyPort,
     PortState,
@@ -300,7 +373,10 @@ struct Port : public madrona::Archetype<
     PortCleanup,
     PortTraceLast,
     PortOutbox,
-    PortTagList
+    PortTagList,
+    PortInbox,
+    PortCreateList,
+    PortCompletionList
 > {};
 
 struct FlowTag : public madrona::Archetype<
