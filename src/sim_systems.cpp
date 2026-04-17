@@ -869,6 +869,117 @@ void Sim::logAllocTraces(Context &ctx)
     }
 }
 
+// Phase C singleton: flush per-Port PortOutbox into Sim::delayedEvents in
+// port_id ascending order (within a port, keep insertion order). Runs once
+// after pfcDetectOnePort (to flush PFC events) and again after emitOnePort
+// (to flush Arrival/BwUpdate events), matching the legacy sequential
+// "all ports pfc then all ports emit" push order.
+void Sim::flushPortOutbox(Context &ctx)
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortOutbox &outbox = ctx.get<PortOutbox>(port_e);
+        for (int32_t i = 0; i < outbox.num_events; i++) {
+            pushDelayedEvent(outbox.events[i]);
+        }
+        outbox.num_events = 0;
+    }
+}
+
+// Phase C singleton: apply per-Port deferred PFC timer want_* mutations in
+// port_id ascending order. Mirrors the legacy order "clear-then-set" per
+// port (egress mode's state_changed case clears, ingress mode may set
+// pause/resume afterwards within the same port).
+void Sim::flushPortPfcTimers(Context &ctx)
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortPfcState &state = ctx.get<PortPfcState>(port_e);
+        if (state.want_clear_pause != 0) {
+            clearPfcPauseTimer(port_id);
+        }
+        if (state.want_clear_resume != 0) {
+            clearPfcResumeTimer(port_id);
+        }
+        if (state.want_set_pause != 0) {
+            setPfcPauseTimer(port_id, state.set_pause_t);
+        }
+        if (state.want_set_resume != 0) {
+            setPfcResumeTimer(port_id, state.set_resume_t);
+        }
+        state.want_clear_pause = 0;
+        state.want_clear_resume = 0;
+        state.want_set_pause = 0;
+        state.want_set_resume = 0;
+        state.set_pause_t = 0.0;
+        state.set_resume_t = 0.0;
+    }
+}
+
+// Phase C singleton: aggregate per-Port PortTraceLast pfc_detect_* fields
+// into the emit_pfc scope's printSystemPfcDetectSummary line. Runs after
+// flushPortPfcTimers so the printed pfc timer counts are final.
+void Sim::logPfcDetectTraces(Context &ctx)
+{
+    constexpr const char *scope = "emit_pfc";
+    uint64_t step = systemLogStep;
+    if (!systemLogEnabled(scope, step)) {
+        return;
+    }
+
+    int32_t checked = 0;
+    int32_t emitted = 0;
+    if (enablePfc != 0) {
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            Entity port_e = portEntities[port_id];
+            if (port_e == Entity::none()) {
+                continue;
+            }
+            PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+            checked += trace.pfc_detect_checked;
+            emitted += trace.pfc_detect_emitted;
+        }
+    }
+
+    printSystemPfcDetectSummary(step, now, checked, emitted,
+        numPfcPauseTimers, numPfcResumeTimers);
+}
+
+// Phase C singleton: aggregate per-Port PortTraceLast emit_* fields into
+// the emit_pfc scope's printSystemEmitSummary line. Runs after the second
+// flushPortOutbox so per-port emit state is consistent for the log.
+void Sim::logEmitTraces(Context &ctx)
+{
+    constexpr const char *scope = "emit_pfc";
+    uint64_t step = systemLogStep;
+    if (!systemLogEnabled(scope, step)) {
+        return;
+    }
+
+    int32_t dirty_count = 0;
+    int32_t arrival_count = 0;
+    int32_t bwupdate_count = 0;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        dirty_count += trace.emit_is_dirty;
+        arrival_count += trace.emit_arrival_count;
+        bwupdate_count += trace.emit_bwupdate_count;
+    }
+
+    printSystemEmitSummary(step, now, dirty_count,
+        arrival_count, bwupdate_count);
+}
+
 void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
 {
     constexpr const char *scope = "progress";

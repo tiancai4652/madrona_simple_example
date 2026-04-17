@@ -78,40 +78,8 @@ struct FlowRouteState {
     FlowRouteStep steps[MAX_FLOW_ROUTE_STEPS] {};
 };
 
-struct FlowArrivalEv {
-    int32_t port_id = -1;
-    FlowId flow_id = -1;
-    Bytes size = 0.0;
-    Bw in_bw = 0.0;
-    int32_t is_source = 0;
-    int32_t priority = 0;
-};
-
-struct BwUpdateEv {
-    int32_t port_id = -1;
-    FlowId flow_id = -1;
-    Bw in_bw = 0.0;
-};
-
-struct PfcControlEv {
-    int32_t target_port_id = -1;
-    int32_t source_port_id = -1;
-    int32_t priority = 0;
-    int32_t paused = 0;
-};
-
-struct DelayedEvent {
-    enum class Type : int32_t {
-        Arrival,
-        BwUpdate,
-        PfcControl,
-    } type = Type::Arrival;
-
-    Time t = 0.0;
-    FlowArrivalEv arrival {};
-    BwUpdateEv bwupd {};
-    PfcControlEv pfcctrl {};
-};
+// FlowArrivalEv / BwUpdateEv / PfcControlEv / DelayedEvent were moved to
+// types.hpp (phase C) so PortOutbox can embed them in the Port archetype.
 
 struct TagIndexEntry {
     int32_t port_id = -1;
@@ -183,8 +151,11 @@ struct Sim : public madrona::WorldBase {
     void flowArrivalSystem(madrona::Context &ctx);
     void bwUpdateIngressSystem(madrona::Context &ctx);
     void pfcPropagateSystem(madrona::Context &ctx);
+    // Legacy singleton-style pfcThresholdDetect. Kept as a non-task-graph
+    // helper for any future debugging path; the active task graph uses
+    // pfcDetectOnePort below. downstreamEmitSystem was fully replaced by
+    // emitOnePort; the legacy declaration has been removed.
     void pfcThresholdDetectSystem(madrona::Context &ctx);
-    void downstreamEmitSystem(madrona::Context &ctx);
     Time chooseDT() const;
     void flowProgressAndCleanupSystem(madrona::Context &ctx, Time dt);
 
@@ -240,6 +211,39 @@ struct Sim : public madrona::WorldBase {
     // the per-port buffer summary fields for the "buffer" scope log.
     void flushBufferTagCleanup(madrona::Context &ctx);
     void logBufferTraces(madrona::Context &ctx);
+
+    // Phase C: per-Port pfcDetect worker. Computes the egress- or
+    // ingress-mode PFC detect body for one port. Cross-port side-effects
+    // (pushDelayedEvent, setPfcPauseTimer/setPfcResumeTimer/clear*) are
+    // captured in PortOutbox and PortPfcState.want_* and flushed by the
+    // SimDriver singletons that follow.
+    void pfcDetectOnePort(madrona::Context &ctx,
+                          int32_t port_id,
+                          PortState &port_state,
+                          PortBuffer &port_buf,
+                          DirtyPort &dirty,
+                          PortPfcConfig &pfc_cfg,
+                          PortPfcState &pfc_state,
+                          PortOutbox &outbox,
+                          PortTraceLast &trace);
+
+    // Phase C: per-Port emit worker. Mirrors legacy downstreamEmitSystem
+    // but for a single port. Pushes Arrival/BwUpdate DelayedEvents into
+    // the port's PortOutbox only, never into Sim::delayedEvents directly.
+    void emitOnePort(madrona::Context &ctx,
+                     int32_t port_id,
+                     PortState &port_state,
+                     DirtyPort &dirty,
+                     PortOutbox &outbox,
+                     PortTraceLast &trace);
+
+    // Phase C singletons. They walk portEntities[] in port_id ascending
+    // order and fold per-Port PortOutbox / PortPfcState.want_* / trace
+    // fields back into the global Sim arrays deterministically.
+    void flushPortOutbox(madrona::Context &ctx);
+    void flushPortPfcTimers(madrona::Context &ctx);
+    void logPfcDetectTraces(madrona::Context &ctx);
+    void logEmitTraces(madrona::Context &ctx);
 
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;

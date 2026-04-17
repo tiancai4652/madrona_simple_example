@@ -89,16 +89,62 @@ void logAllocTracesStepSystem(Engine &ctx, SimDriver &)
     sim.logAllocTraces(ctx);
 }
 
-void pfcDetectStepSystem(Engine &ctx, SimDriver &)
+// Phase C: per-Port PFC threshold detect. Writes to this port's own
+// PortPfcState (want_* deferred timers + pause_active flips),
+// PortOutbox (pause/resume events), and PortTraceLast (summary counters).
+// Cross-port DirtyPort reads are read-only during this node.
+void pfcDetectOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortPfcConfig &pfc_cfg,
+    PortPfcState &pfc_state,
+    PortOutbox &outbox,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    sim.pfcThresholdDetectSystem(ctx);
+    sim.pfcDetectOnePort(ctx, port_state.port_id, port_state, port_buf,
+        dirty, pfc_cfg, pfc_state, outbox, trace);
 }
 
-void downstreamEmitStepSystem(Engine &ctx, SimDriver &)
+// Phase C: per-Port downstream emit. Pushes Arrival/BwUpdate events into
+// this port's own PortOutbox; flushPortOutbox later appends them to
+// Sim::delayedEvents in port_id ascending order.
+void emitOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    DirtyPort &dirty,
+    PortOutbox &outbox,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    sim.downstreamEmitSystem(ctx);
+    sim.emitOnePort(ctx, port_state.port_id, port_state, dirty, outbox, trace);
+}
+
+// Phase C singletons.
+void flushPfcTimersStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushPortPfcTimers(ctx);
+}
+
+void logPfcDetectStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.logPfcDetectTraces(ctx);
+}
+
+void flushPortOutboxStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushPortOutbox(ctx);
+}
+
+void logEmitStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.logEmitTraces(ctx);
 }
 
 // Phase B.1: per-Port ParallelForNode that snapshots and resets DirtyPort.
@@ -191,6 +237,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortDrainHint>();
     registry.registerComponent<PortCleanup>();
     registry.registerComponent<PortTraceLast>();
+    registry.registerComponent<PortOutbox>();
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
@@ -240,10 +287,34 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         flushTagCleanupStepSystem, SimDriver>>({n5c});
     auto n5 = builder.addToGraph<ParallelForNode<Engine,
         logAllocTracesStepSystem, SimDriver>>({n5d});
+    // Phase C: per-Port pfcDetect fan-out, followed by singletons that
+    // apply deferred want_* PFC timer mutations and emit the
+    // pfc_detect summary log in port_id ascending order. We then flush
+    // the PFC-phase PortOutbox into Sim::delayedEvents BEFORE the emit
+    // per-Port nodes write their own Arrival/BwUpdate events into the
+    // same outbox, so the final delayedEvents ordering matches the
+    // legacy order (all PFC events in port_id order, then all emit
+    // events in port_id order).
+    auto n6a = builder.addToGraph<ParallelForNode<Engine,
+        pfcDetectOnePortStepSystem,
+        PortState, PortBuffer, DirtyPort,
+        PortPfcConfig, PortPfcState,
+        PortOutbox, PortTraceLast>>({n5});
+    auto n6b = builder.addToGraph<ParallelForNode<Engine,
+        flushPfcTimersStepSystem, SimDriver>>({n6a});
+    auto n6c = builder.addToGraph<ParallelForNode<Engine,
+        flushPortOutboxStepSystem, SimDriver>>({n6b});
     auto n6 = builder.addToGraph<ParallelForNode<Engine,
-        pfcDetectStepSystem, SimDriver>>({n5});
+        logPfcDetectStepSystem, SimDriver>>({n6c});
+    // Phase C: per-Port downstream emit fan-out, followed by an outbox
+    // flush and the emit summary log singleton.
+    auto n7a = builder.addToGraph<ParallelForNode<Engine,
+        emitOnePortStepSystem,
+        PortState, DirtyPort, PortOutbox, PortTraceLast>>({n6});
+    auto n7b = builder.addToGraph<ParallelForNode<Engine,
+        flushPortOutboxStepSystem, SimDriver>>({n7a});
     auto n7 = builder.addToGraph<ParallelForNode<Engine,
-        downstreamEmitStepSystem, SimDriver>>({n6});
+        logEmitStepSystem, SimDriver>>({n7b});
     // Phase B.1: per-Port clearDirtyOnePortSystem fans out over every Port
     // entity; the follow-up SimDriver singleton snapshotDirtyStepSystem
     // collapses the per-port snapshots into lastDirtyPortIDs in

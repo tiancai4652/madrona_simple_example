@@ -574,37 +574,47 @@ void Sim::allocOnePort(
     }
 }
 
-void Sim::downstreamEmitSystem(Context &ctx)
+// Phase C: per-Port downstream emit worker. Each port only sees its own
+// DirtyPort / PortOutbox / PortTraceLast and the tags whose tagIndex entry
+// belongs to this port (read-only scan of tagIndex). DelayedEvents are
+// written into the port's own outbox; the flushPortOutbox singleton
+// appends them to Sim::delayedEvents in port_id ascending order so the
+// deliverEvents order matches the legacy sequential implementation.
+void Sim::emitOnePort(
+    Context &ctx,
+    int32_t port_id,
+    PortState & /*port_state*/,
+    DirtyPort &dirty,
+    PortOutbox &outbox,
+    PortTraceLast &trace)
 {
-    constexpr const char *scope = "emit_pfc";
-    uint64_t step = systemLogStep;
-    bool log_enabled = systemLogEnabled(scope, step);
-    int32_t dirty_port_count = 0;
-    int32_t arrival_emit_count = 0;
-    int32_t bwupdate_emit_count = 0;
+    outbox.num_events = 0;
+    trace.emit_is_dirty = 0;
+    trace.emit_arrival_count = 0;
+    trace.emit_bwupdate_count = 0;
 
-    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none() || ctx.get<DirtyPort>(port_e).isDirty == 0) {
+    if (dirty.isDirty == 0) {
+        return;
+    }
+    trace.emit_is_dirty = 1;
+
+    for (int32_t i = 0; i < numTagIndexEntries; i++) {
+        if (tagIndex[i].port_id != port_id) {
             continue;
         }
-        dirty_port_count += 1;
-
-        for (int32_t i = 0; i < numTagIndexEntries; i++) {
-            if (tagIndex[i].port_id != port_id) {
-                continue;
-            }
-            Entity tag_e = tagIndex[i].entity;
-            if (tag_e == Entity::none()) {
-                continue;
-            }
-            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
-            if (tag.next_port_id < 0) {
-                continue;
-            }
-            if (tag.downstream_created == 0) {
-                if (tag.out_bw > 1e-15) {
-                    DelayedEvent ev {};
+        Entity tag_e = tagIndex[i].entity;
+        if (tag_e == Entity::none()) {
+            continue;
+        }
+        FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+        if (tag.next_port_id < 0) {
+            continue;
+        }
+        if (tag.downstream_created == 0) {
+            if (tag.out_bw > 1e-15) {
+                if (outbox.num_events < MAX_PORT_OUTBOX) {
+                    DelayedEvent &ev = outbox.events[outbox.num_events++];
+                    ev = DelayedEvent {};
                     ev.t = computePropagationTimeForPort(tag.port_id, tag.next_port_id);
                     ev.type = DelayedEvent::Type::Arrival;
                     ev.arrival = FlowArrivalEv {
@@ -615,16 +625,18 @@ void Sim::downstreamEmitSystem(Context &ctx)
                         .is_source = 0,
                         .priority = tag.priority,
                     };
-                    pushDelayedEvent(ev);
                     tag.downstream_created = 1;
-                    arrival_emit_count += 1;
+                    trace.emit_arrival_count += 1;
                 }
-                continue;
             }
-            if (tag.out_bw == tag.prev_out_bw) {
-                continue;
-            }
-            DelayedEvent ev {};
+            continue;
+        }
+        if (tag.out_bw == tag.prev_out_bw) {
+            continue;
+        }
+        if (outbox.num_events < MAX_PORT_OUTBOX) {
+            DelayedEvent &ev = outbox.events[outbox.num_events++];
+            ev = DelayedEvent {};
             ev.t = computePropagationTimeForPort(tag.port_id, tag.next_port_id);
             ev.type = DelayedEvent::Type::BwUpdate;
             ev.bwupd = BwUpdateEv {
@@ -632,14 +644,8 @@ void Sim::downstreamEmitSystem(Context &ctx)
                 .flow_id = tag.flow_id,
                 .in_bw = tag.out_bw,
             };
-            pushDelayedEvent(ev);
-            bwupdate_emit_count += 1;
+            trace.emit_bwupdate_count += 1;
         }
-    }
-
-    if (log_enabled) {
-        printSystemEmitSummary(step, now, dirty_port_count,
-            arrival_emit_count, bwupdate_emit_count);
     }
 }
 

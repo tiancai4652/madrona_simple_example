@@ -71,6 +71,44 @@ using Bytes = double;
 using FlowId = int64_t;
 using NodeId = int32_t;
 
+// Event structs (moved from sim.hpp so PortOutbox can embed them in the
+// Port archetype). Kept POD so the Port component array stays fixed-size
+// and GPU-friendly.
+struct FlowArrivalEv {
+    int32_t port_id = -1;
+    FlowId flow_id = -1;
+    Bytes size = 0.0;
+    Bw in_bw = 0.0;
+    int32_t is_source = 0;
+    int32_t priority = 0;
+};
+
+struct BwUpdateEv {
+    int32_t port_id = -1;
+    FlowId flow_id = -1;
+    Bw in_bw = 0.0;
+};
+
+struct PfcControlEv {
+    int32_t target_port_id = -1;
+    int32_t source_port_id = -1;
+    int32_t priority = 0;
+    int32_t paused = 0;
+};
+
+struct DelayedEvent {
+    enum class Type : int32_t {
+        Arrival,
+        BwUpdate,
+        PfcControl,
+    } type = Type::Arrival;
+
+    Time t = 0.0;
+    FlowArrivalEv arrival {};
+    BwUpdateEv bwupd {};
+    PfcControlEv pfcctrl {};
+};
+
 enum class NodeType : int32_t {
     Host,
     Switch,
@@ -148,6 +186,17 @@ struct PortPfcState {
     int32_t paused_upstream_count[PFC_MAX_PRIORITY] {};
     int32_t paused_upstreams[PFC_MAX_PRIORITY][MAX_PAUSED_UPSTREAMS] {};
     int32_t pfc_cnt[PFC_MAX_PRIORITY] {};
+    // Phase C: deferred PFC timer mutations. The per-Port pfcDetectOnePort
+    // sets want_* flags on its own PortPfcState; the flushPortPfcTimers
+    // singleton applies clear-then-set to Sim::pfc{Pause,Resume}Timers in
+    // port_id ascending order so the global timer arrays stay race-free
+    // on GPU and deterministic across backends.
+    int32_t want_clear_pause = 0;
+    int32_t want_clear_resume = 0;
+    int32_t want_set_pause = 0;
+    int32_t want_set_resume = 0;
+    double set_pause_t = 0.0;
+    double set_resume_t = 0.0;
 };
 
 // --- Per-port scratch / hint components introduced in phase B. ---
@@ -191,6 +240,15 @@ struct PortTraceLast {
     int32_t buffer_processed = 0;
     int32_t buffer_destroy_count = 0;
     double buffer_total_buf_cnt = 0.0;
+    // Phase C: per-Port emit (downstream) summary.
+    int32_t emit_is_dirty = 0;
+    int32_t emit_arrival_count = 0;
+    int32_t emit_bwupdate_count = 0;
+    // Phase C: per-Port pfcDetect summary. emitted_pfc counts events pushed
+    // into PortOutbox; checked counts ports that actually ran the detect
+    // body (i.e. participated in the emit_pfc summary "checked_port_count").
+    int32_t pfc_detect_checked = 0;
+    int32_t pfc_detect_emitted = 0;
     // Snapshot of DirtyPort captured at alloc time (before emit/clear run);
     // consumed by the cachedNextDrainTime reduction singleton. Populated by
     // allocOnePort once phase B.2 lands.
@@ -199,6 +257,19 @@ struct PortTraceLast {
     // consumed by snapshotDirtyPorts to rebuild lastDirtyPortIDs in a
     // deterministic port_id ascending order.
     int32_t was_dirty_at_clear = 0;
+};
+
+// Phase C: per-Port outbox for DelayedEvents produced by pfcDetectOnePort
+// and emitOnePort. The per-Port worker fills `events[0..num_events)` on
+// the port's own component and the singleton `flushPortOutbox` appends
+// them to Sim::delayedEvents in port_id ascending order. Size is set so
+// one port can hold a full pause-all-priorities wave (PFC_MAX_PRIORITY *
+// MAX_PAUSED_UPSTREAMS = 128 events) plus a generous emit batch.
+constexpr int32_t MAX_PORT_OUTBOX = 256;
+
+struct PortOutbox {
+    int32_t num_events = 0;
+    DelayedEvent events[MAX_PORT_OUTBOX] {};
 };
 
 struct Port : public madrona::Archetype<
@@ -210,7 +281,8 @@ struct Port : public madrona::Archetype<
     PortCachedHints,
     PortDrainHint,
     PortCleanup,
-    PortTraceLast
+    PortTraceLast,
+    PortOutbox
 > {};
 
 struct FlowTag : public madrona::Archetype<
