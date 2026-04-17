@@ -1,9 +1,11 @@
 #include "sim_debug.hpp"
 
+#if !defined(__CUDA_ARCH__)
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#endif
 
 namespace madsimple {
 

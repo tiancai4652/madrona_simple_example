@@ -9,7 +9,7 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
+void Sim::portBandwidthAllocSystem(Context &ctx, Time dt)
 {
     (void)dt;
 
@@ -567,7 +567,7 @@ void Sim::portBandwidthAllocSystem(Engine &ctx, Time dt)
     }
 }
 
-void Sim::downstreamEmitSystem(Engine &ctx)
+void Sim::downstreamEmitSystem(Context &ctx)
 {
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;

@@ -119,7 +119,7 @@ void Sim::clearPfcResumeTimer(int32_t ingress_port_id)
     numPfcResumeTimers -= 1;
 }
 
-void Sim::pfcPropagateSystem(Engine &ctx)
+void Sim::pfcPropagateSystem(Context &ctx)
 {
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
@@ -173,7 +173,7 @@ void Sim::pfcPropagateSystem(Engine &ctx)
     }
 }
 
-void Sim::pfcThresholdDetectSystem(Engine &ctx)
+void Sim::pfcThresholdDetectSystem(Context &ctx)
 {
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;

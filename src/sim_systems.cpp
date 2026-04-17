@@ -112,7 +112,7 @@ void Sim::recordFlowCompletion(FlowId flow_id, Time end_time)
     removeFlowRoute(flow_id);
 }
 
-void Sim::destroyTag(Engine &ctx,
+void Sim::destroyTag(Context &ctx,
                      Entity tag_entity,
                      bool propagate_cleanup,
                      Time logical_now)
@@ -201,7 +201,7 @@ void Sim::destroyTag(Engine &ctx,
     ctx.destroyEntity(tag_entity);
 }
 
-Entity Sim::createTagOnPort(Engine &ctx,
+Entity Sim::createTagOnPort(Context &ctx,
                             int32_t port_id,
                             FlowId flow_id,
                             Bw in_bw,
@@ -488,7 +488,7 @@ void Sim::deliverEvents()
     }
 }
 
-void Sim::flowArrivalSystem(Engine &ctx)
+void Sim::flowArrivalSystem(Context &ctx)
 {
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
@@ -554,7 +554,7 @@ void Sim::flowArrivalSystem(Engine &ctx)
     }
 }
 
-void Sim::bwUpdateIngressSystem(Engine &ctx)
+void Sim::bwUpdateIngressSystem(Context &ctx)
 {
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
@@ -695,7 +695,7 @@ void Sim::bwUpdateIngressSystem(Engine &ctx)
     }
 }
 
-void Sim::clearDirtyPorts(Engine &ctx)
+void Sim::clearDirtyPorts(Context &ctx)
 {
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;
@@ -723,7 +723,7 @@ void Sim::clearDirtyPorts(Engine &ctx)
     }
 }
 
-void Sim::flowProgressAndCleanupSystem(Engine &ctx, Time dt)
+void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
 {
     constexpr const char *scope = "progress";
     uint64_t step = systemLogStep;

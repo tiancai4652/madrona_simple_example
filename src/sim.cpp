@@ -8,180 +8,84 @@ namespace madsimple {
 
 namespace {
 
-struct StepScheduleNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().systemLogStep += 1;
-        ctx.data().schedulePendingFlows();
-    }
+void scheduleStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.systemLogStep += 1;
+    sim.schedulePendingFlows();
+}
 
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepScheduleNode>(deps);
-    }
-};
+void deliverStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.deliverEvents();
+}
 
-struct StepDeliverNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().deliverEvents();
-    }
+void arrivalStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.flowArrivalSystem(ctx);
+}
 
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepDeliverNode>(deps);
-    }
-};
+void bwUpdateStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.bwUpdateIngressSystem(ctx);
+}
 
-struct StepArrivalNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().flowArrivalSystem(ctx);
+void pfcPropagateStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    if (sim.enablePfc != 0) {
+        sim.pfcPropagateSystem(ctx);
     }
+}
 
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepArrivalNode>(deps);
-    }
-};
+void portAllocStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.portBandwidthAllocSystem(ctx, 0.0);
+}
 
-struct StepBwUpdateNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().bwUpdateIngressSystem(ctx);
-    }
+void pfcDetectStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.pfcThresholdDetectSystem(ctx);
+}
 
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepBwUpdateNode>(deps);
-    }
-};
+void downstreamEmitStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.downstreamEmitSystem(ctx);
+}
 
-struct StepPfcPropagateNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        if (ctx.data().enablePfc != 0) {
-            ctx.data().pfcPropagateSystem(ctx);
-        }
-    }
+void clearDirtyStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.clearDirtyPorts(ctx);
+}
 
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepPfcPropagateNode>(deps);
+void chooseDTStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.nextDT = sim.chooseDT();
+    if (sim.nextDT < 1e-9) {
+        sim.nextDT = 0.001;
     }
-};
+}
 
-struct StepPortAllocNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().portBandwidthAllocSystem(ctx, 0.0);
-    }
+void bufferUpdateStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.bufferUpdateSystem(ctx, sim.nextDT);
+}
 
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepPortAllocNode>(deps);
-    }
-};
-
-struct StepPfcDetectNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().pfcThresholdDetectSystem(ctx);
-    }
-
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepPfcDetectNode>(deps);
-    }
-};
-
-struct StepDownstreamEmitNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().downstreamEmitSystem(ctx);
-    }
-
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepDownstreamEmitNode>(deps);
-    }
-};
-
-struct StepClearDirtyNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().clearDirtyPorts(ctx);
-    }
-
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepClearDirtyNode>(deps);
-    }
-};
-
-struct StepChooseDTNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().nextDT = ctx.data().chooseDT();
-        if (ctx.data().nextDT < 1e-9) {
-            ctx.data().nextDT = 0.001;
-        }
-    }
-
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepChooseDTNode>(deps);
-    }
-};
-
-struct StepBufferUpdateNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().bufferUpdateSystem(ctx, ctx.data().nextDT);
-    }
-
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepBufferUpdateNode>(deps);
-    }
-};
-
-struct StepFlowProgressNode : public NodeBase {
-    void run(Context &ctx_base, TaskGraph &)
-    {
-        Engine &ctx = (Engine &)ctx_base;
-        ctx.data().flowProgressAndCleanupSystem(ctx, ctx.data().nextDT);
-        ctx.data().now += ctx.data().nextDT;
-    }
-
-    static TaskGraphNodeID addToGraph(StateManager &, TaskGraphBuilder &builder,
-                                      Span<const TaskGraphNodeID> deps)
-    {
-        return builder.addDefaultNode<StepFlowProgressNode>(deps);
-    }
-};
+void flowProgressStepSystem(Engine &ctx, CurStep &)
+{
+    Sim &sim = ctx.data();
+    sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
+    sim.now += sim.nextDT;
+}
 
 }
 
@@ -218,18 +122,38 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                      const Config &)
 {
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
-    TaskGraphNodeID n0 = builder.addToGraph<StepScheduleNode>({});
-    TaskGraphNodeID n1 = builder.addToGraph<StepDeliverNode>({n0});
-    TaskGraphNodeID n2 = builder.addToGraph<StepArrivalNode>({n1});
-    TaskGraphNodeID n3 = builder.addToGraph<StepBwUpdateNode>({n2});
-    TaskGraphNodeID n4 = builder.addToGraph<StepPfcPropagateNode>({n3});
-    TaskGraphNodeID n5 = builder.addToGraph<StepPortAllocNode>({n4});
-    TaskGraphNodeID n6 = builder.addToGraph<StepPfcDetectNode>({n5});
-    TaskGraphNodeID n7 = builder.addToGraph<StepDownstreamEmitNode>({n6});
-    TaskGraphNodeID n8 = builder.addToGraph<StepClearDirtyNode>({n7});
-    TaskGraphNodeID n9 = builder.addToGraph<StepChooseDTNode>({n8});
-    TaskGraphNodeID n10 = builder.addToGraph<StepBufferUpdateNode>({n9});
-    builder.addToGraph<StepFlowProgressNode>({n10});
+
+    auto n0 = builder.addToGraph<ParallelForNode<Engine,
+        scheduleStepSystem, CurStep>>({});
+    auto n1 = builder.addToGraph<ParallelForNode<Engine,
+        deliverStepSystem, CurStep>>({n0});
+    auto n2 = builder.addToGraph<ParallelForNode<Engine,
+        arrivalStepSystem, CurStep>>({n1});
+    auto n3 = builder.addToGraph<ParallelForNode<Engine,
+        bwUpdateStepSystem, CurStep>>({n2});
+    auto n4 = builder.addToGraph<ParallelForNode<Engine,
+        pfcPropagateStepSystem, CurStep>>({n3});
+    auto n5 = builder.addToGraph<ParallelForNode<Engine,
+        portAllocStepSystem, CurStep>>({n4});
+    auto n6 = builder.addToGraph<ParallelForNode<Engine,
+        pfcDetectStepSystem, CurStep>>({n5});
+    auto n7 = builder.addToGraph<ParallelForNode<Engine,
+        downstreamEmitStepSystem, CurStep>>({n6});
+    auto n8 = builder.addToGraph<ParallelForNode<Engine,
+        clearDirtyStepSystem, CurStep>>({n7});
+    auto n9 = builder.addToGraph<ParallelForNode<Engine,
+        chooseDTStepSystem, CurStep>>({n8});
+    auto n10 = builder.addToGraph<ParallelForNode<Engine,
+        bufferUpdateStepSystem, CurStep>>({n9});
+    auto n11 = builder.addToGraph<ParallelForNode<Engine,
+        flowProgressStepSystem, CurStep>>({n10});
+
+#ifdef MADRONA_GPU_MODE
+    auto recycle_entities = builder.addToGraph<RecycleEntitiesNode>({n11});
+    (void)recycle_entities;
+#else
+    (void)n11;
+#endif
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)

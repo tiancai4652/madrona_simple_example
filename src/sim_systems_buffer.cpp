@@ -125,7 +125,7 @@ void Sim::materializeBufCnt(PortBuffer &port_buf, Time at_time)
     }
 }
 
-void Sim::bufferUpdateSystem(Engine &ctx, Time dt)
+void Sim::bufferUpdateSystem(Context &ctx, Time dt)
 {
     constexpr const char *scope = "buffer";
     uint64_t step = systemLogStep;

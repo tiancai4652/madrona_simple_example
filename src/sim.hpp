@@ -30,6 +30,22 @@ constexpr int32_t QOS_NONE = 0;
 constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
 
+
+// constexpr int32_t MAX_TOPO_NODES = 1152;
+// constexpr int32_t MAX_TOPO_LINKS = 3200;
+// constexpr int32_t MAX_TOPO_PORTS = 3200;
+// constexpr int32_t MAX_NODE_NEIGHBORS = 56;
+// constexpr int32_t MAX_FLOWS = 287744;
+// constexpr int32_t MAX_PATH_NODES = 6;
+// constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
+// constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
+// constexpr int32_t MAX_DELAYED_EVENTS = 2088960;
+// constexpr int32_t MAX_EVENTS_PER_STEP = 261120;
+// constexpr int32_t MAX_TAG_INDEX = 1148928;
+// constexpr int32_t MAX_SOURCE_TAGS = 287744;
+// constexpr int32_t MAX_INGRESS_TAGS = 1148928;
+// constexpr int32_t MAX_FLOW_COMPLETIONS = 287744;
+
 struct TopoNeighbor {
     NodeId neighbor_id = -1;
     madrona::Entity port_entity = madrona::Entity::none();
@@ -164,26 +180,26 @@ struct Sim : public madrona::WorldBase {
     void injectFlow(int32_t src_port_id, const FlowDef &flow);
     void schedulePendingFlows();
     void deliverEvents();
-    void flowArrivalSystem(Engine &ctx);
-    void bwUpdateIngressSystem(Engine &ctx);
-    void pfcPropagateSystem(Engine &ctx);
-    void portBandwidthAllocSystem(Engine &ctx, Time dt);
-    void pfcThresholdDetectSystem(Engine &ctx);
-    void downstreamEmitSystem(Engine &ctx);
-    void clearDirtyPorts(Engine &ctx);
+    void flowArrivalSystem(madrona::Context &ctx);
+    void bwUpdateIngressSystem(madrona::Context &ctx);
+    void pfcPropagateSystem(madrona::Context &ctx);
+    void portBandwidthAllocSystem(madrona::Context &ctx, Time dt);
+    void pfcThresholdDetectSystem(madrona::Context &ctx);
+    void downstreamEmitSystem(madrona::Context &ctx);
+    void clearDirtyPorts(madrona::Context &ctx);
     Time chooseDT() const;
-    void bufferUpdateSystem(Engine &ctx, Time dt);
-    void flowProgressAndCleanupSystem(Engine &ctx, Time dt);
+    void bufferUpdateSystem(madrona::Context &ctx, Time dt);
+    void flowProgressAndCleanupSystem(madrona::Context &ctx, Time dt);
     int32_t lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const;
     madrona::Entity findTag(int32_t port_id, FlowId flow_id) const;
-    madrona::Entity createTagOnPort(Engine &ctx,
+    madrona::Entity createTagOnPort(madrona::Context &ctx,
                                     int32_t port_id,
                                     FlowId flow_id,
                                     Bw in_bw,
                                     Bytes size,
                                     bool is_source,
                                     int32_t priority);
-    void destroyTag(Engine &ctx,
+    void destroyTag(madrona::Context &ctx,
                     madrona::Entity tag_entity,
                     bool propagate_cleanup,
                     Time logical_now);
