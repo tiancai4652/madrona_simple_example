@@ -180,7 +180,8 @@ struct Sim : public madrona::WorldBase {
                       PortCachedHints &hints,
                       PortDrainHint &drain_hint,
                       PortCleanup &cleanup,
-                      PortTraceLast &trace);
+                      PortTraceLast &trace,
+                      PortTagList &tag_list);
 
     // Phase B.2 singletons (driven by SimDriverArch). They walk
     // portEntities[] in port_id ascending order so per-frame outputs are
@@ -204,7 +205,8 @@ struct Sim : public madrona::WorldBase {
                               DirtyPort &dirty,
                               PortPfcState &pfc_state,
                               PortCleanup &cleanup,
-                              PortTraceLast &trace);
+                              PortTraceLast &trace,
+                              PortTagList &tag_list);
 
     // Phase B.3 singletons. flushBufferTagCleanup replays the buffer-phase
     // destroyTag calls in port_id ascending order; logBufferTraces sums
@@ -225,7 +227,8 @@ struct Sim : public madrona::WorldBase {
                           PortPfcConfig &pfc_cfg,
                           PortPfcState &pfc_state,
                           PortOutbox &outbox,
-                          PortTraceLast &trace);
+                          PortTraceLast &trace,
+                          PortTagList &tag_list);
 
     // Phase C: per-Port emit worker. Mirrors legacy downstreamEmitSystem
     // but for a single port. Pushes Arrival/BwUpdate DelayedEvents into
@@ -235,7 +238,8 @@ struct Sim : public madrona::WorldBase {
                      PortState &port_state,
                      DirtyPort &dirty,
                      PortOutbox &outbox,
-                     PortTraceLast &trace);
+                     PortTraceLast &trace,
+                     PortTagList &tag_list);
 
     // Phase C singletons. They walk portEntities[] in port_id ascending
     // order and fold per-Port PortOutbox / PortPfcState.want_* / trace

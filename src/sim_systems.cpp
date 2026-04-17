@@ -171,6 +171,21 @@ void Sim::destroyTag(Context &ctx,
         }
     }
 
+    // Phase D: mirror the removal in the owning port's PortTagList using
+    // swap-last so the per-Port workers no longer need the global tagIndex
+    // scan. FlowTagState.port_entity is the cached owning port.
+    if (tag.port_entity != Entity::none()) {
+        PortTagList &ptl = ctx.get<PortTagList>(tag.port_entity);
+        for (int32_t i = 0; i < ptl.count; i++) {
+            if (ptl.tags[i] == tag_entity) {
+                ptl.tags[i] = ptl.tags[ptl.count - 1];
+                ptl.tags[ptl.count - 1] = Entity::none();
+                ptl.count -= 1;
+                break;
+            }
+        }
+    }
+
     for (int32_t i = 0; i < numIngressTags; i++) {
         if (ingressTags[i].entity == tag_entity) {
             for (int32_t j = i + 1; j < numIngressTags; j++) {
@@ -252,6 +267,10 @@ Entity Sim::createTagOnPort(Context &ctx,
         }
     }
 
+    // Phase D: cache the owning Port entity so destroyTag can O(1)-lookup
+    // PortTagList without rescanning portEntities[].
+    tag.port_entity = port_entity;
+
     ctx.get<FlowTagState>(tag_entity) = tag;
 
     if (numTagIndexEntries < MAX_TAG_INDEX) {
@@ -260,6 +279,18 @@ Entity Sim::createTagOnPort(Context &ctx,
             .flow_id = flow_id,
             .entity = tag_entity,
         };
+    }
+
+    // Phase D: mirror the new tag entity into the owning port's PortTagList
+    // so per-Port workers can iterate only this port's tags. Overflow here
+    // would silently drop the tag from the fast list, but tagIndex stays
+    // authoritative; the smoke test surfaces MAX_TAGS_PER_PORT overflow
+    // before parity runs.
+    {
+        PortTagList &ptl = ctx.get<PortTagList>(port_entity);
+        if (ptl.count < MAX_TAGS_PER_PORT) {
+            ptl.tags[ptl.count++] = tag_entity;
+        }
     }
 
     if (tag.ingress_port_id >= 0 && numIngressTags < MAX_INGRESS_TAGS) {

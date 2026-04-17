@@ -136,6 +136,16 @@ int32_t Sim::createPort(Engine &ctx, NodeId node_id, int32_t port_idx, Bw port_b
     ctx.get<PortPfcConfig>(port_entity) = pfc_cfg;
     ctx.get<PortPfcState>(port_entity) = PortPfcState {};
 
+    // Phase D: explicitly zero-initialize the components introduced in
+    // phases B/C/D so per-Port workers never see uninitialized memory
+    // (Madrona does not run default constructors on component storage).
+    ctx.get<PortCachedHints>(port_entity) = PortCachedHints {};
+    ctx.get<PortDrainHint>(port_entity) = PortDrainHint {};
+    ctx.get<PortCleanup>(port_entity) = PortCleanup {};
+    ctx.get<PortTraceLast>(port_entity) = PortTraceLast {};
+    ctx.get<PortOutbox>(port_entity) = PortOutbox {};
+    ctx.get<PortTagList>(port_entity) = PortTagList {};
+
     return port_id;
 }
 

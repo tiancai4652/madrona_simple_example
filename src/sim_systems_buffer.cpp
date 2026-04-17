@@ -144,7 +144,8 @@ void Sim::advanceOnePortBuffer(
     DirtyPort &dirty,
     PortPfcState &pfc_state,
     PortCleanup &cleanup,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     cleanup.num = 0;
     trace.buffer_processed = 0;
@@ -206,11 +207,15 @@ void Sim::advanceOnePortBuffer(
 
     materializeBufCnt(port_buf, now);
 
-    Entity tags[MAX_TAG_INDEX] {};
+    // Phase D: collect this port's tags via PortTagList instead of
+    // scanning the global tagIndex. The stack buffer is sized to
+    // MAX_TAGS_PER_PORT so we no longer need MAX_TAG_INDEX worth.
+    Entity tags[MAX_TAGS_PER_PORT] {};
     int32_t num_tags = 0;
-    for (int32_t i = 0; i < numTagIndexEntries; i++) {
-        if (tagIndex[i].port_id == port_id && tagIndex[i].entity != Entity::none()) {
-            tags[num_tags++] = tagIndex[i].entity;
+    for (int32_t i = 0; i < tag_list.count; i++) {
+        Entity te = tag_list.tags[i];
+        if (te != Entity::none()) {
+            tags[num_tags++] = te;
         }
     }
     if (num_tags == 0) {
@@ -224,7 +229,7 @@ void Sim::advanceOnePortBuffer(
         int32_t pri_begin = multi_pri ? 0 : 0;
         int32_t pri_end = multi_pri ? PFC_MAX_PRIORITY : 1;
 
-        Entity pri_tags[PFC_MAX_PRIORITY][MAX_TAG_INDEX] {};
+        Entity pri_tags[PFC_MAX_PRIORITY][MAX_TAGS_PER_PORT] {};
         int32_t pri_counts[PFC_MAX_PRIORITY] {};
         double pri_in[PFC_MAX_PRIORITY] {};
         double pri_out[PFC_MAX_PRIORITY] {};

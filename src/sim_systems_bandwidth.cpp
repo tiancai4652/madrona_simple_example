@@ -20,7 +20,8 @@ void Sim::allocOnePort(
     PortCachedHints &hints,
     PortDrainHint &drain_hint,
     PortCleanup &cleanup,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     // Reset per-frame phase-B scratch. Keep buffer-trace fields untouched so
     // B.3's advanceOnePortBuffer can reuse the same PortTraceLast slot.
@@ -63,11 +64,15 @@ void Sim::allocOnePort(
                 BufferChunk comp {};
                 comp.chunk_bytes = pb.buf_cnt;
                 int32_t weight_count = 0;
-                for (int32_t i = 0; i < numTagIndexEntries; i++) {
-                    if (tagIndex[i].port_id != port_id) {
+                // Phase D: iterate only this port's tag list instead of the
+                // global tagIndex. PortTagList is maintained by
+                // createTagOnPort/destroyTag so entries are always valid.
+                for (int32_t i = 0; i < tag_list.count; i++) {
+                    Entity te = tag_list.tags[i];
+                    if (te == Entity::none()) {
                         continue;
                     }
-                    FlowTagState &tag = ctx.get<FlowTagState>(tagIndex[i].entity);
+                    FlowTagState &tag = ctx.get<FlowTagState>(te);
                     int p = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
                     if (p != pri) {
                         continue;
@@ -101,13 +106,13 @@ void Sim::allocOnePort(
             alignChunksWithBufCnt(pb);
         }
 
-        Entity tags[MAX_TAG_INDEX] {};
+        // Phase D: collect tags via PortTagList instead of scanning the
+        // entire Sim::tagIndex. MAX_TAGS_PER_PORT caps the copy so we no
+        // longer need MAX_TAG_INDEX worth of stack.
+        Entity tags[MAX_TAGS_PER_PORT] {};
         int32_t num_tags = 0;
-        for (int32_t i = 0; i < numTagIndexEntries; i++) {
-            if (tagIndex[i].port_id != port_id) {
-                continue;
-            }
-            Entity tag_e = tagIndex[i].entity;
+        for (int32_t i = 0; i < tag_list.count; i++) {
+            Entity tag_e = tag_list.tags[i];
             if (tag_e == Entity::none()) {
                 continue;
             }
@@ -582,11 +587,12 @@ void Sim::allocOnePort(
 // deliverEvents order matches the legacy sequential implementation.
 void Sim::emitOnePort(
     Context &ctx,
-    int32_t port_id,
+    int32_t /*port_id*/,
     PortState & /*port_state*/,
     DirtyPort &dirty,
     PortOutbox &outbox,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     outbox.num_events = 0;
     trace.emit_is_dirty = 0;
@@ -598,11 +604,9 @@ void Sim::emitOnePort(
     }
     trace.emit_is_dirty = 1;
 
-    for (int32_t i = 0; i < numTagIndexEntries; i++) {
-        if (tagIndex[i].port_id != port_id) {
-            continue;
-        }
-        Entity tag_e = tagIndex[i].entity;
+    // Phase D: iterate PortTagList instead of scanning the global tagIndex.
+    for (int32_t i = 0; i < tag_list.count; i++) {
+        Entity tag_e = tag_list.tags[i];
         if (tag_e == Entity::none()) {
             continue;
         }

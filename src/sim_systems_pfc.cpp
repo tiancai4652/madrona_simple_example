@@ -189,7 +189,8 @@ void Sim::pfcDetectOnePort(
     PortPfcConfig &cfg,
     PortPfcState &state,
     PortOutbox &outbox,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     // Reset per-frame scratch for this port.
     outbox.num_events = 0;
@@ -220,11 +221,11 @@ void Sim::pfcDetectOnePort(
         int32_t upstream_ports[MAX_TOPO_PORTS] {};
         int32_t num_upstream_ports = 0;
 
-        for (int32_t i = 0; i < numTagIndexEntries; i++) {
-            if (tagIndex[i].port_id != port_id) {
-                continue;
-            }
-            Entity te = tagIndex[i].entity;
+        // Phase D: iterate this port's PortTagList rather than the global
+        // tagIndex. Same semantics since PortTagList is authoritative for
+        // tags whose FlowTagState.port_id == this port.
+        for (int32_t i = 0; i < tag_list.count; i++) {
+            Entity te = tag_list.tags[i];
             if (te == Entity::none()) {
                 continue;
             }

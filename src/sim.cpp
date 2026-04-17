@@ -58,11 +58,12 @@ void allocOnePortStepSystem(
     PortCachedHints &hints,
     PortDrainHint &drain_hint,
     PortCleanup &cleanup,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
     sim.allocOnePort(ctx, port_state.port_id, port_state, port_buf, dirty,
-        pfc_cfg, pfc_state, hints, drain_hint, cleanup, trace);
+        pfc_cfg, pfc_state, hints, drain_hint, cleanup, trace, tag_list);
 }
 
 void reduceHintsStepSystem(Engine &ctx, SimDriver &)
@@ -101,11 +102,12 @@ void pfcDetectOnePortStepSystem(
     PortPfcConfig &pfc_cfg,
     PortPfcState &pfc_state,
     PortOutbox &outbox,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
     sim.pfcDetectOnePort(ctx, port_state.port_id, port_state, port_buf,
-        dirty, pfc_cfg, pfc_state, outbox, trace);
+        dirty, pfc_cfg, pfc_state, outbox, trace, tag_list);
 }
 
 // Phase C: per-Port downstream emit. Pushes Arrival/BwUpdate events into
@@ -116,10 +118,12 @@ void emitOnePortStepSystem(
     PortState &port_state,
     DirtyPort &dirty,
     PortOutbox &outbox,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
-    sim.emitOnePort(ctx, port_state.port_id, port_state, dirty, outbox, trace);
+    sim.emitOnePort(ctx, port_state.port_id, port_state, dirty, outbox, trace,
+        tag_list);
 }
 
 // Phase C singletons.
@@ -187,11 +191,12 @@ void advanceOnePortBufferStepSystem(
     DirtyPort &dirty,
     PortPfcState &pfc_state,
     PortCleanup &cleanup,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
     sim.advanceOnePortBuffer(ctx, port_state.port_id, sim.nextDT,
-        port_state, port_buf, dirty, pfc_state, cleanup, trace);
+        port_state, port_buf, dirty, pfc_state, cleanup, trace, tag_list);
 }
 
 void flushBufferTagCleanupStepSystem(Engine &ctx, SimDriver &)
@@ -238,6 +243,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortCleanup>();
     registry.registerComponent<PortTraceLast>();
     registry.registerComponent<PortOutbox>();
+    registry.registerComponent<PortTagList>();
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
@@ -278,7 +284,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         allocOnePortStepSystem,
         PortState, PortBuffer, DirtyPort,
         PortPfcConfig, PortPfcState,
-        PortCachedHints, PortDrainHint, PortCleanup, PortTraceLast>>({n4});
+        PortCachedHints, PortDrainHint, PortCleanup, PortTraceLast,
+        PortTagList>>({n4});
     auto n5b = builder.addToGraph<ParallelForNode<Engine,
         reduceHintsStepSystem, SimDriver>>({n5a});
     auto n5c = builder.addToGraph<ParallelForNode<Engine,
@@ -299,7 +306,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         pfcDetectOnePortStepSystem,
         PortState, PortBuffer, DirtyPort,
         PortPfcConfig, PortPfcState,
-        PortOutbox, PortTraceLast>>({n5});
+        PortOutbox, PortTraceLast,
+        PortTagList>>({n5});
     auto n6b = builder.addToGraph<ParallelForNode<Engine,
         flushPfcTimersStepSystem, SimDriver>>({n6a});
     auto n6c = builder.addToGraph<ParallelForNode<Engine,
@@ -310,7 +318,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     // flush and the emit summary log singleton.
     auto n7a = builder.addToGraph<ParallelForNode<Engine,
         emitOnePortStepSystem,
-        PortState, DirtyPort, PortOutbox, PortTraceLast>>({n6});
+        PortState, DirtyPort, PortOutbox, PortTraceLast,
+        PortTagList>>({n6});
     auto n7b = builder.addToGraph<ParallelForNode<Engine,
         flushPortOutboxStepSystem, SimDriver>>({n7a});
     auto n7 = builder.addToGraph<ParallelForNode<Engine,
@@ -332,7 +341,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     auto n10a = builder.addToGraph<ParallelForNode<Engine,
         advanceOnePortBufferStepSystem,
         PortState, PortBuffer, DirtyPort,
-        PortPfcState, PortCleanup, PortTraceLast>>({n9});
+        PortPfcState, PortCleanup, PortTraceLast,
+        PortTagList>>({n9});
     auto n10b = builder.addToGraph<ParallelForNode<Engine,
         flushBufferTagCleanupStepSystem, SimDriver>>({n10a});
     auto n10 = builder.addToGraph<ParallelForNode<Engine,

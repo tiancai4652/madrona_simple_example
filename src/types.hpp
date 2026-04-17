@@ -147,6 +147,10 @@ struct FlowTagState {
     int32_t downstream_created = 0;
     int32_t next_port_id = -1;
     int32_t ingress_port_id = -1;
+    // Phase D: cached owning port entity so destroyTag can remove this tag
+    // from PortTagList without rescanning portEntities[]. Written by
+    // createTagOnPort, cleared on tag destruction.
+    madrona::Entity port_entity = madrona::Entity::none();
 };
 
 struct FlowWeight {
@@ -272,6 +276,19 @@ struct PortOutbox {
     DelayedEvent events[MAX_PORT_OUTBOX] {};
 };
 
+// Phase D: per-Port list of tag entities owned by this port (i.e. tags
+// whose FlowTagState.port_id == this port). Replaces the legacy
+// "for (i = 0; i < numTagIndexEntries; i++) if (tagIndex[i].port_id !=
+// port_id) continue;" O(N_tags * N_ports) scan in per-Port workers.
+// The Sim-level tagIndex[] is kept as a read-only mirror for findTag()
+// fallback lookups until phase F.
+constexpr int32_t MAX_TAGS_PER_PORT = 256;
+
+struct PortTagList {
+    int32_t count = 0;
+    madrona::Entity tags[MAX_TAGS_PER_PORT] {};
+};
+
 struct Port : public madrona::Archetype<
     DirtyPort,
     PortState,
@@ -282,7 +299,8 @@ struct Port : public madrona::Archetype<
     PortDrainHint,
     PortCleanup,
     PortTraceLast,
-    PortOutbox
+    PortOutbox,
+    PortTagList
 > {};
 
 struct FlowTag : public madrona::Archetype<
