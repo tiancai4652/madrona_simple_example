@@ -1513,6 +1513,11 @@ void Sim::bwUpdateOnePort(Context &ctx,
                         cleanup.propagate[cleanup.num] = 1;
                         cleanup.num += 1;
                     }
+                    // destroyTag sets DirtyPort.isDirty=1 on the owning
+                    // port. Mirror that here so the per-tag detail log
+                    // line matches the legacy "dirty" field (legacy
+                    // printed this AFTER destroyTag ran).
+                    dirty.isDirty = 1;
                     trace.bwupd_destroyed += 1;
                     if (log_enabled) {
                         printSystemBwUpdateTag(step, now, "destroy",
@@ -1751,9 +1756,14 @@ void Sim::logIngressChain(Context &ctx)
     printSystemBwUpdateSummary(step, now, bw_c, bw_u, bw_bz, bw_d, bw_f, bw_cmp, bw_s);
     printSystemEnd(step, now, scope, "bw_update_ingress");
 
-    printSystemBegin(step, now, scope, "pfc_propagate");
-    printSystemPfcSummary(step, now, pfc_a, pfc_s);
-    printSystemEnd(step, now, scope, "pfc_propagate");
+    // Legacy pfcPropagate emits its BEGIN/SUMMARY/END block only when
+    // enablePfc != 0 (the wrapper guarded the whole system call). Match
+    // that so ingress_chain parity holds when PFC is off.
+    if (enablePfc != 0) {
+        printSystemBegin(step, now, scope, "pfc_propagate");
+        printSystemPfcSummary(step, now, pfc_a, pfc_s);
+        printSystemEnd(step, now, scope, "pfc_propagate");
+    }
 }
 
 }
