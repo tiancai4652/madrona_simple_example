@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>系统流转示意图</title>
+  <style>
+    :root {
+      --bg: #f7fafc;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #475569;
+      --edge: #94a3b8;
+      --a: #0369a1;
+      --b: #0f766e;
+      --c: #a16207;
+      --d: #7c3aed;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(130deg, #e0f2fe 0%, transparent 35%),
+        linear-gradient(320deg, #ecfccb 0%, transparent 30%),
+        var(--bg);
+    }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    p { margin: 0 0 16px; color: var(--muted); }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+      max-width: 1100px;
+    }
+
+    .stage {
+      background: var(--card);
+      border: 2px solid #dbeafe;
+      border-left-width: 8px;
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: 0 8px 18px rgba(2, 6, 23, 0.06);
+      animation: rise 420ms ease both;
+    }
+    .stage:nth-child(1){border-left-color:var(--a)}
+    .stage:nth-child(2){border-left-color:var(--a)}
+    .stage:nth-child(3){border-left-color:var(--b)}
+    .stage:nth-child(4){border-left-color:var(--c)}
+    .stage:nth-child(5){border-left-color:var(--d)}
+    .stage:nth-child(6){border-left-color:var(--d)}
+    .stage:nth-child(7){border-left-color:var(--c)}
+    .stage:nth-child(8){border-left-color:var(--a)}
+
+    .title {
+      font-weight: 700;
+      font-size: 16px;
+      margin-bottom: 6px;
+    }
+    .line {
+      font-size: 14px;
+      color: #334155;
+      margin: 4px 0;
+    }
+    .arrow {
+      color: var(--edge);
+      margin-left: 8px;
+      font-weight: 700;
+    }
+
+    .legend {
+      margin-top: 14px;
+      background: #ffffffd9;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 10px;
+      max-width: 1100px;
+      font-size: 13px;
+      color: #334155;
+    }
+
+    @keyframes rise {
+      from { transform: translateY(6px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <h1>每帧系统流转示意图</h1>
+  <p>按代码任务图顺序展示。可以把它当成“这个仿真器一帧在做什么”的讲稿。</p>
+
+  <div class="timeline">
+    <div class="stage" style="animation-delay:0ms">
+      <div class="title">1) schedule_pending_flows</div>
+      <div class="line">扫描 pendingFlows，把 start_time ≤ now 的流注入首跳 Arrival 事件。</div>
+      <div class="line">输出：新事件进入 delayedEvents。</div>
+    </div>
+
+    <div class="stage" style="animation-delay:60ms">
+      <div class="title">2) deliver_events</div>
+      <div class="line">取 delayedEvents 中 t ≤ now 的事件，分发到每个端口 PortInbox。</div>
+      <div class="line">输出：arrival/bwupd/pfc 三类 inbox 已就位。</div>
+    </div>
+
+    <div class="stage" style="animation-delay:120ms">
+      <div class="title">3) ingress_chain（端口并行）</div>
+      <div class="line">pfcPropagateOnePort <span class="arrow">→</span> flowArrivalOnePort <span class="arrow">→</span> flushTagCreate</div>
+      <div class="line">bwUpdateOnePort <span class="arrow">→</span> flushTagCreate <span class="arrow">→</span> flushTagCleanup <span class="arrow">→</span> flushFlowCompletion <span class="arrow">→</span> flushPortOutbox</div>
+      <div class="line">输出：端口接收侧状态更新完成，必要的新 tag 创建与旧 tag 清理完成。</div>
+    </div>
+
+    <div class="stage" style="animation-delay:180ms">
+      <div class="title">4) alloc（端口并行）+ 归并</div>
+      <div class="line">allocOnePort 计算每个 tag 的 out_bw，产生 drain/finish 提示。</div>
+      <div class="line">reduceHints / flushDrainHints / flushTagCleanup 汇总全局最早事件。</div>
+    </div>
+
+    <div class="stage" style="animation-delay:240ms">
+      <div class="title">5) emit_pfc（检测与下发）</div>
+      <div class="line">pfcDetectOnePort 根据 backlog 与阈值决定 pause/resume，并写入 outbox。</div>
+      <div class="line">flushPfcTimers + flushPortOutbox 后，再 emitOnePort 给下游发 Arrival/BwUpdate。</div>
+    </div>
+
+    <div class="stage" style="animation-delay:300ms">
+      <div class="title">6) clear_dirty + snapshot_dirty</div>
+      <div class="line">清理本帧 dirty 标记，并保留“本帧哪些端口曾脏”的快照供下一阶段。</div>
+    </div>
+
+    <div class="stage" style="animation-delay:360ms">
+      <div class="title">7) chooseDT</div>
+      <div class="line">从事件到达、流启动、源流完成、drain、PFC timer 等候选里取最小 dt。</div>
+      <div class="line">应用 dtMin 与兜底规则（异常时回退到 0.001）。</div>
+    </div>
+
+    <div class="stage" style="animation-delay:420ms">
+      <div class="title">8) buffer + progress</div>
+      <div class="line">advanceOnePortBuffer(dt) 推进 backlog/chunk，必要时延迟清理 tag。</div>
+      <div class="line">flowProgressAndCleanupSystem(dt) 处理完成与计时器，最后 now += dt。</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    一句话总结：先“收事件”，再“算带宽并发事件”，最后“推进时间并清理”。
+  </div>
+</body>
+</html>

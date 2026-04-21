@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>实体定义与系统处理矩阵</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #cbd5e1;
+      --read: #0ea5e9;
+      --write: #16a34a;
+      --create: #9333ea;
+      --destroy: #dc2626;
+      --global: #b45309;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 18px;
+      background: linear-gradient(145deg, #e0f2fe 0%, transparent 32%), var(--bg);
+      color: var(--ink);
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    .desc { margin: 0 0 14px; color: var(--muted); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 6px 18px rgba(2, 6, 23, 0.06);
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .chip {
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .r { color: #0369a1; border-color: #7dd3fc; }
+    .w { color: #166534; border-color: #86efac; }
+    .c { color: #6d28d9; border-color: #d8b4fe; }
+    .d { color: #991b1b; border-color: #fca5a5; }
+    .g { color: #92400e; border-color: #fcd34d; }
+
+    .entity-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+    }
+    .entity {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #f8fbff;
+    }
+    .entity h3 { margin: 0 0 8px; font-size: 16px; }
+    .entity ul { margin: 0; padding-left: 18px; color: #334155; font-size: 13px; }
+    .entity li { margin: 4px 0; }
+
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { border-collapse: collapse; width: 100%; min-width: 1200px; background: #fff; }
+    th, td { border-bottom: 1px solid #e2e8f0; border-right: 1px solid #f1f5f9; padding: 8px; vertical-align: top; }
+    th { background: #f1f5f9; font-size: 13px; text-align: left; position: sticky; top: 0; z-index: 1; }
+    td { font-size: 12px; color: #334155; }
+    .sys { font-weight: 700; color: #0f172a; min-width: 210px; }
+    .phase { min-width: 90px; color: #475569; }
+  </style>
+</head>
+<body>
+  <h1>实体定义与系统处理矩阵</h1>
+  <p class="desc">上半部分是“系统里有哪些实体”；下半部分是“每个系统如何处理这些实体（读/写/创建/销毁）”。</p>
+
+  <div class="card">
+    <strong>图例</strong>
+    <div class="chips">
+      <span class="chip r">R 读取</span>
+      <span class="chip w">W 写入</span>
+      <span class="chip c">C 创建实体</span>
+      <span class="chip d">D 销毁实体</span>
+      <span class="chip g">G 读写全局数组/队列（非ECS实体）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 10px; font-size:18px;">1) 实体定义（Archetype）</h2>
+    <div class="entity-grid">
+      <div class="entity">
+        <h3>Agent（1个）</h3>
+        <ul>
+          <li>组件：Reset, Action, GridPos, Reward, Done, CurStep</li>
+          <li>用途：兼容示例导出字段，不参与流转核心计算</li>
+          <li>创建时机：Sim 构造函数</li>
+        </ul>
+      </div>
+      <div class="entity">
+        <h3>SimDriverArch（1个）</h3>
+        <ul>
+          <li>组件：SimDriver(tick)</li>
+          <li>用途：驱动单例系统（调度、flush、log、chooseDT）</li>
+          <li>创建时机：Sim 构造函数</li>
+        </ul>
+      </div>
+      <div class="entity">
+        <h3>Port（拓扑规模个）</h3>
+        <ul>
+          <li>组件：DirtyPort, PortState, PortBuffer, PortPfcConfig, PortPfcState</li>
+          <li>组件：PortCachedHints, PortDrainHint, PortCleanup, PortTraceLast</li>
+          <li>组件：PortOutbox, PortTagList, PortInbox, PortCreateList, PortCompletionList</li>
+          <li>创建时机：loadTopo → createPort</li>
+        </ul>
+      </div>
+      <div class="entity">
+        <h3>FlowTag（运行时动态）</h3>
+        <ul>
+          <li>组件：FlowTagState</li>
+          <li>用途：表示“某条流在某个端口上的局部状态”</li>
+          <li>创建：flushTagCreate / createTagOnPort</li>
+          <li>销毁：destroyTag（由各阶段 cleanup 触发）</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 10px; font-size:18px;">2) 系统如何处理实体</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>系统</th>
+            <th>阶段</th>
+            <th>Agent</th>
+            <th>SimDriverArch</th>
+            <th>Port</th>
+            <th>FlowTag</th>
+            <th>全局状态（数组/队列）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="sys">scheduleStepSystem / schedulePendingFlows</td>
+            <td class="phase">Ingress前</td>
+            <td>—</td>
+            <td><span class="chip w">W tick++</span></td>
+            <td>R 首跳端口映射</td>
+            <td>—</td>
+            <td><span class="chip g">G pendingFlows→delayedEvents</span></td>
+          </tr>
+          <tr>
+            <td class="sys">deliverStepSystem / deliverEvents</td>
+            <td class="phase">Ingress前</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip w">W PortInbox/PortCreateList/PortCompletionList reset+fill</span></td>
+            <td>—</td>
+            <td><span class="chip g">G delayedEvents 分发与回写</span></td>
+          </tr>
+          <tr>
+            <td class="sys">pfcPropagateOnePort</td>
+            <td class="phase">Ingress</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip r">R PortInbox.pfcs</span> <span class="chip w">W PortPfcState/DirtyPort</span></td>
+            <td>—</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="sys">flowArrivalOnePort + flushTagCreate</td>
+            <td class="phase">Ingress</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip r">R PortInbox/PortTagList</span> <span class="chip w">W PortCreateList/DirtyPort</span></td>
+            <td><span class="chip r">R 已有tag</span> <span class="chip c">C 新建FlowTag</span> <span class="chip w">W FlowTagState</span></td>
+            <td><span class="chip g">G tagIndex/sourceTags/ingressTags</span></td>
+          </tr>
+          <tr>
+            <td class="sys">bwUpdateOnePort</td>
+            <td class="phase">Ingress</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip r">R PortInbox/PortTagList</span> <span class="chip w">W DirtyPort/PortCleanup/PortOutbox/PortCompletionList</span></td>
+            <td><span class="chip r">R tag</span> <span class="chip w">W in_bw/backlog</span></td>
+            <td><span class="chip g">G 可能登记完成与下游cleanup事件</span></td>
+          </tr>
+          <tr>
+            <td class="sys">flushTagCleanup / flushFlowCompletion / flushPortOutbox</td>
+            <td class="phase">Ingress尾</td>
+            <td>—</td>
+            <td>R 单例驱动</td>
+            <td><span class="chip w">W 清空cleanup/completion/outbox</span></td>
+            <td><span class="chip d">D destroyTag</span></td>
+            <td><span class="chip g">G flowCompletions/delayedEvents</span></td>
+          </tr>
+          <tr>
+            <td class="sys">allocOnePort</td>
+            <td class="phase">Alloc</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip r">R PortState/DirtyPort/PortTagList</span> <span class="chip w">W PortBuffer/PortCachedHints/PortDrainHint/PortCleanup</span></td>
+            <td><span class="chip r">R tag</span> <span class="chip w">W out_bw/remaining/backlog</span></td>
+            <td><span class="chip g">G cachedNextDrain/Finish 候选</span></td>
+          </tr>
+          <tr>
+            <td class="sys">reduceHints + flushDrainHints + flushTagCleanup</td>
+            <td class="phase">Alloc尾</td>
+            <td>—</td>
+            <td>R 单例驱动</td>
+            <td><span class="chip r">R PortCachedHints</span> <span class="chip w">W PortDrainHint清空</span></td>
+            <td><span class="chip d">D 可能销毁tag</span></td>
+            <td><span class="chip g">G 更新全局最早drain/finish与定时器</span></td>
+          </tr>
+          <tr>
+            <td class="sys">pfcDetectOnePort</td>
+            <td class="phase">Emit/PFC</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip r">R DirtyPort/PortTagList</span> <span class="chip w">W PortPfcState.want_*/PortOutbox</span></td>
+            <td><span class="chip r">R backlog/in_bw/out_bw/priority</span></td>
+            <td><span class="chip g">G 计算PFC事件与计时器候选</span></td>
+          </tr>
+          <tr>
+            <td class="sys">emitOnePort</td>
+            <td class="phase">Emit/PFC</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip r">R DirtyPort/PortTagList</span> <span class="chip w">W PortOutbox</span></td>
+            <td><span class="chip r">R out_bw/prev_out_bw/downstream_created</span> <span class="chip w">W downstream_created</span></td>
+            <td><span class="chip g">G 生成下游Arrival/BwUpdate事件</span></td>
+          </tr>
+          <tr>
+            <td class="sys">flushPfcTimers + flushPortOutbox</td>
+            <td class="phase">Emit/PFC尾</td>
+            <td>—</td>
+            <td>R 单例驱动</td>
+            <td><span class="chip r">R PortPfcState/PortOutbox</span> <span class="chip w">W 清零want_*/outbox</span></td>
+            <td>—</td>
+            <td><span class="chip g">G pfcPauseTimers/pfcResumeTimers/delayedEvents</span></td>
+          </tr>
+          <tr>
+            <td class="sys">clearDirtyOnePort + snapshotDirtyPorts</td>
+            <td class="phase">DT前</td>
+            <td>—</td>
+            <td>R 单例驱动</td>
+            <td><span class="chip w">W DirtyPort清零/PortTraceLast快照</span></td>
+            <td>—</td>
+            <td><span class="chip g">G lastDirtyPortIDs 重建</span></td>
+          </tr>
+          <tr>
+            <td class="sys">chooseDT</td>
+            <td class="phase">DT前</td>
+            <td>—</td>
+            <td><span class="chip w">W nextDT</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip g">G 从 delayed/pending/finish/drain/PFC timers 取最小dt</span></td>
+          </tr>
+          <tr>
+            <td class="sys">advanceOnePortBuffer + flushBufferTagCleanup</td>
+            <td class="phase">Buffer</td>
+            <td>—</td>
+            <td>R 单例驱动</td>
+            <td><span class="chip r">R PortBuffer/PortTagList</span> <span class="chip w">W PortBuffer/DirtyPort/PortCleanup</span></td>
+            <td><span class="chip r">R tag</span> <span class="chip w">W backlog等</span> <span class="chip d">D 可能销毁</span></td>
+            <td><span class="chip g">G 与路由/定时器联动</span></td>
+          </tr>
+          <tr>
+            <td class="sys">flowProgressAndCleanupSystem</td>
+            <td class="phase">收尾</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="chip w">W 相关端口再置脏</span></td>
+            <td><span class="chip r">R source tag</span> <span class="chip d">D 源tag完成后销毁</span></td>
+            <td><span class="chip g">G 处理完成记录/各类timer并 now += dt</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
