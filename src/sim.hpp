@@ -25,7 +25,8 @@ constexpr int32_t MAX_EVENTS_PER_STEP = 16384;
 constexpr int32_t MAX_TAG_INDEX = 4096;
 constexpr int32_t MAX_SOURCE_TAGS = 512;
 constexpr int32_t MAX_INGRESS_TAGS = 4096;
-constexpr int32_t MAX_FLOW_COMPLETIONS = 512;
+// MAX_FLOW_COMPLETIONS moved to types.hpp so the FlowCompletionBuf export
+// component can size itself without including sim.hpp.
 constexpr int32_t QOS_NONE = 0;
 constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
@@ -148,17 +149,6 @@ struct Sim : public madrona::WorldBase {
     void injectFlow(int32_t src_port_id, const FlowDef &flow);
     void schedulePendingFlows();
     void deliverEvents(madrona::Context &ctx);
-    // Legacy ingress-chain singletons retained for non-task-graph
-    // helpers; the live task graph now uses pfcPropagateOnePort /
-    // flowArrivalOnePort / bwUpdateOnePort (Phase E).
-    void flowArrivalSystem(madrona::Context &ctx);
-    void bwUpdateIngressSystem(madrona::Context &ctx);
-    void pfcPropagateSystem(madrona::Context &ctx);
-    // Legacy singleton-style pfcThresholdDetect. Kept as a non-task-graph
-    // helper for any future debugging path; the active task graph uses
-    // pfcDetectOnePort below. downstreamEmitSystem was fully replaced by
-    // emitOnePort; the legacy declaration has been removed.
-    void pfcThresholdDetectSystem(madrona::Context &ctx);
     Time chooseDT() const;
     void flowProgressAndCleanupSystem(madrona::Context &ctx, Time dt);
 
@@ -232,6 +222,31 @@ struct Sim : public madrona::WorldBase {
                           PortOutbox &outbox,
                           PortTraceLast &trace,
                           PortTagList &tag_list);
+
+    // Helper split of pfcDetectOnePort for the egress and ingress branches.
+    // Kept as two separate non-inlined functions so NVRTC + ptxas optimize
+    // each branch's control-flow graph independently; empirically this
+    // prevents the combinatorial blow-up that hangs `-dlto -dopt=on
+    // --extra-device-vectorization` when both branches live in the same
+    // function body. Behaviour is 1:1 with the original monolithic
+    // pfcDetectOnePort; see sim_systems_pfc.cpp for the full contract.
+    MADRONA_NO_INLINE void pfcDetectOnePortEgress(
+        madrona::Context &ctx,
+        int32_t port_id,
+        DirtyPort &dirty,
+        PortPfcConfig &cfg,
+        PortPfcState &state,
+        PortOutbox &outbox,
+        PortTraceLast &trace,
+        PortTagList &tag_list);
+
+    MADRONA_NO_INLINE void pfcDetectOnePortIngress(
+        madrona::Context &ctx,
+        int32_t port_id,
+        PortPfcConfig &cfg,
+        PortPfcState &state,
+        PortOutbox &outbox,
+        PortTraceLast &trace);
 
     // Phase C: per-Port emit worker. Mirrors legacy downstreamEmitSystem
     // but for a single port. Pushes Arrival/BwUpdate DelayedEvents into

@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -50,18 +51,32 @@ def should_stop(world):
     )
 
 
+def _pstage(msg, t_start):
+    print(f"[parity] {msg}  (+{time.time() - t_start:.2f}s)", flush=True)
+
+
 def main():
     args = parse_args()
+    t_start = time.time()
+    _pstage("main() entered", t_start)
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    _pstage(f"loading inputs: topo={args.topo} flows={args.flows}", t_start)
     network_inputs = load_network_inputs_from_files(Path(args.topo), Path(args.flows))
     walls, rewards, end_cells, start_cell = build_grid_inputs()
+    _pstage("inputs loaded", t_start)
 
     prior_weights = []
     if args.prior_weights:
         prior_weights = [float(x) for x in args.prior_weights.split(',')]
 
+    _pstage(
+        f"constructing GridWorld(gpu={bool(args.gpu)}, pfc={bool(args.pfc)}, "
+        f"num_worlds={args.num_worlds}) ...",
+        t_start,
+    )
     world = GridWorld(
         args.num_worlds,
         start_cell,
@@ -80,14 +95,51 @@ def main():
         qos_mode={"none": 0, "sp": 1, "wrr": 2}.get(args.qos, 0),
         prior_weights=prior_weights if prior_weights else None,
     )
+    _pstage("GridWorld constructed (GPU init + launch graph built)", t_start)
 
     if os.environ.get("init_log_print_enabled") not in (None, "", "0"):
         return
 
+    progress_every = int(os.environ.get("PARITY_PROGRESS_EVERY", "500"))
+
     steps = 0
+    t0 = time.time()
+    t_prev = t0
+    steps_prev = 0
+    print(
+        f"[parity] start loop: max_steps={args.max_steps} "
+        f"gpu={bool(args.gpu)} pfc={bool(args.pfc)} "
+        f"progress_every={progress_every}",
+        flush=True,
+    )
+
     while steps < args.max_steps and not should_stop(world):
         world.step()
         steps += 1
+
+        if progress_every > 0 and steps % progress_every == 0:
+            now = time.time()
+            dt = max(now - t_prev, 1e-6)
+            sps = (steps - steps_prev) / dt
+            elapsed = now - t0
+            print(
+                f"[parity] step={steps}/{args.max_steps} "
+                f"sim_t={world.simulation_time():.3f} "
+                f"pend={world.num_pending_flows()} "
+                f"delayed={world.num_delayed_events()} "
+                f"active={world.num_active_tags()} "
+                f"sps={sps:.1f} elapsed={elapsed:.1f}s",
+                flush=True,
+            )
+            t_prev = now
+            steps_prev = steps
+
+    print(
+        f"[parity] loop done: steps={steps} "
+        f"elapsed={time.time() - t0:.1f}s "
+        f"stopped_cleanly={should_stop(world)}",
+        flush=True,
+    )
 
     completion_path = out_dir / "flow_completion_times.csv"
     world.write_flow_completion_csv(completion_path)

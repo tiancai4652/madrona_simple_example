@@ -1,5 +1,8 @@
 #include "sim.hpp"
 #include <madrona/mw_gpu_entry.hpp>
+#ifdef MADRONA_GPU_MODE
+#include <madrona/mw_gpu/host_print.hpp>
+#endif
 
 using namespace madrona;
 using namespace madrona::math;
@@ -13,7 +16,29 @@ void scheduleStepSystem(Engine &ctx, SimDriver &driver)
     Sim &sim = ctx.data();
     sim.systemLogStep += 1;
     driver.tick += 1;
+    // [step-trace] 用 HostPrint 而不是 printf，因为 megakernel 里 printf
+    // 不可靠；只在前 3 个 tick + thread 0 打，避免刷爆 channel。
+#ifdef MADRONA_GPU_MODE
+    if (driver.tick <= 3 && threadIdx.x == 0) {
+        int32_t t = driver.tick;
+        int32_t pend_before = sim.numPendingFlows;
+        float now_f = (float)sim.now;
+        mwGPU::HostPrint::log(
+            "[step-trace] scheduleStepSystem tick=%d pend_before=%d now=%f\n",
+            t, pend_before, now_f);
+    }
+#endif
     sim.schedulePendingFlows();
+#ifdef MADRONA_GPU_MODE
+    if (driver.tick <= 3 && threadIdx.x == 0) {
+        int32_t t = driver.tick;
+        int32_t pend_after = sim.numPendingFlows;
+        int32_t delayed_after = sim.numDelayedEvents;
+        mwGPU::HostPrint::log(
+            "[step-trace] scheduleStepSystem AFTER tick=%d pend=%d delayed=%d\n",
+            t, pend_after, delayed_after);
+    }
+#endif
 }
 
 void deliverStepSystem(Engine &ctx, SimDriver &)
@@ -217,13 +242,25 @@ void snapshotDirtyStepSystem(Engine &ctx, SimDriver &)
     sim.snapshotDirtyPorts(ctx);
 }
 
-void chooseDTStepSystem(Engine &ctx, SimDriver &)
+void chooseDTStepSystem(Engine &ctx, SimDriver &driver)
 {
     Sim &sim = ctx.data();
     sim.nextDT = sim.chooseDT();
     if (sim.nextDT < 1e-9) {
         sim.nextDT = 0.001;
     }
+#ifdef MADRONA_GPU_MODE
+    if (driver.tick <= 3 && threadIdx.x == 0) {
+        int32_t t = driver.tick;
+        float dt_f = (float)sim.nextDT;
+        float now_f = (float)sim.now;
+        int32_t pend = sim.numPendingFlows;
+        int32_t delayed = sim.numDelayedEvents;
+        mwGPU::HostPrint::log(
+            "[step-trace] chooseDTStepSystem tick=%d nextDT=%f now=%f pend=%d delayed=%d\n",
+            t, dt_f, now_f, pend, delayed);
+    }
+#endif
 }
 
 // Phase B.3: per-Port ParallelForNode that advances a single port's
@@ -258,11 +295,59 @@ void logBufferTracesStepSystem(Engine &ctx, SimDriver &)
     sim.logBufferTraces(ctx);
 }
 
-void flowProgressStepSystem(Engine &ctx, SimDriver &)
+void flowProgressStepSystem(Engine &ctx, SimDriver &driver)
 {
     Sim &sim = ctx.data();
+#ifdef MADRONA_GPU_MODE
+    if (driver.tick <= 3 && threadIdx.x == 0) {
+        int32_t t = driver.tick;
+        float dt_f = (float)sim.nextDT;
+        float now_f = (float)sim.now;
+        mwGPU::HostPrint::log(
+            "[step-trace] flowProgressStepSystem BEFORE tick=%d nextDT=%f now=%f\n",
+            t, dt_f, now_f);
+    }
+#endif
     sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
     sim.now += sim.nextDT;
+#ifdef MADRONA_GPU_MODE
+    if (driver.tick <= 3 && threadIdx.x == 0) {
+        int32_t t = driver.tick;
+        float now_f = (float)sim.now;
+        mwGPU::HostPrint::log(
+            "[step-trace] flowProgressStepSystem AFTER tick=%d now=%f\n",
+            t, now_f);
+    }
+#endif
+}
+
+// Singleton mirror system. Runs once per step as the very last node so
+// the SimStats / FlowCompletionBuf components attached to SimDriverArch
+// hold a consistent snapshot of the Sim struct after flowProgress /
+// cleanup have settled. mgr.cpp's GPUImpl cudaMemcpy's the exported
+// column pointer of these components on every Python-visible getter
+// call so the GPU backend has parity with CPU's direct getWorldData()
+// access.
+void updateSimStatsStepSystem(Engine &ctx,
+                              SimDriver &,
+                              SimStats &stats,
+                              FlowCompletionBuf &buf)
+{
+    Sim &sim = ctx.data();
+    stats.simulationTime = sim.now;
+    stats.numFlowDefs = sim.numFlowDefs;
+    stats.numPendingFlows = sim.numPendingFlows;
+    stats.numDelayedEvents = sim.numDelayedEvents;
+    stats.numActiveTags = sim.numTagIndexEntries;
+    stats.numSourceTags = sim.numSourceTags;
+    stats.numFlowCompletions = sim.numFlowCompletions;
+
+    int32_t n = sim.numFlowCompletions;
+    if (n < 0) n = 0;
+    if (n > MAX_FLOW_COMPLETIONS) n = MAX_FLOW_COMPLETIONS;
+    for (int32_t i = 0; i < n; i++) {
+        buf.records[i] = sim.flowCompletions[i].record;
+    }
 }
 
 }
@@ -295,6 +380,9 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortCreateList>();
     registry.registerComponent<PortCompletionList>();
 
+    registry.registerComponent<SimStats>();
+    registry.registerComponent<FlowCompletionBuf>();
+
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
     registry.registerArchetype<Port>();
@@ -305,11 +393,17 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, GridPos>((uint32_t)ExportID::GridPos);
     registry.exportColumn<Agent, Reward>((uint32_t)ExportID::Reward);
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
+    // GPU-mode introspection mirrors (see types.hpp ExportID comment).
+    registry.exportColumn<SimDriverArch, SimStats>(
+        (uint32_t)ExportID::SimStats);
+    registry.exportColumn<SimDriverArch, FlowCompletionBuf>(
+        (uint32_t)ExportID::FlowCompletionBuf);
 }
 
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                      const Config &)
 {
+    printf("[init-trace] Sim::setupTasks enter\n");
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
 
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
@@ -426,12 +520,22 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     auto n11 = builder.addToGraph<ParallelForNode<Engine,
         flowProgressStepSystem, SimDriver>>({n10});
 
+    // Final mirror pass: snapshot Sim scalar counts + flowCompletions
+    // into the SimStats / FlowCompletionBuf singleton components on
+    // SimDriverArch. mgr.cpp's GPUImpl reads these via exported columns.
+    // Runs unconditionally on both backends; CPU does not need it but
+    // the cost is one archetype iteration over a single entity.
+    auto n12 = builder.addToGraph<ParallelForNode<Engine,
+        updateSimStatsStepSystem,
+        SimDriver, SimStats, FlowCompletionBuf>>({n11});
+
 #ifdef MADRONA_GPU_MODE
-    auto recycle_entities = builder.addToGraph<RecycleEntitiesNode>({n11});
+    auto recycle_entities = builder.addToGraph<RecycleEntitiesNode>({n12});
     (void)recycle_entities;
 #else
-    (void)n11;
+    (void)n12;
 #endif
+    printf("[init-trace] Sim::setupTasks done\n");
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -449,7 +553,22 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
       numPendingFlows(0),
       numFlowRoutes(0)
 {
+    // [init-trace] 定位 GPU initWorlds 是否进入、走到哪一步。
+    // 在 GPU 端 Sim::Sim 会被 256 个线程同时触发（num_worlds=1 下
+    // 只有 thread 0 真正干活），所以 printf 只在 threadIdx.x==0 打，
+    // 否则 256 份同样的日志会瞬间灌满 CUDA 1MB printf buffer，
+    // 导致后续真正有用的 device printf 被丢弃。
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim enter\n");
+#else
+    printf("[init-trace] Sim::Sim enter\n");
+#endif
     resetNetworkState();
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim after resetNetworkState\n");
+#else
+    printf("[init-trace] Sim::Sim after resetNetworkState\n");
+#endif
     enableBuffer = cfg.enable_buffer;
     enablePfc = cfg.enable_pfc;
     pfcEgress = cfg.pfc_egress;
@@ -474,8 +593,48 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     Entity driver = ctx.makeEntity<SimDriverArch>();
     ctx.get<SimDriver>(driver) = SimDriver { .tick = 0 };
 
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim before loadTopo\n");
+#else
+    printf("[init-trace] Sim::Sim before loadTopo\n");
+#endif
     loadTopo(ctx);
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim after loadTopo, before loadFlow\n");
+#else
+    printf("[init-trace] Sim::Sim after loadTopo, before loadFlow\n");
+#endif
     loadFlow(ctx);
+
+    // Seed the SimStats / FlowCompletionBuf mirror on SimDriverArch so
+    // Python-visible getters (num_pending_flows() etc.) work before the
+    // first world.step() has run. Without this, GPUImpl reads all-zero
+    // mirrors and should_stop(world) returns True immediately, so the
+    // main loop skips every step. CPU path reads Sim directly so it
+    // never needed this; we still write here so both backends observe
+    // identical initial state.
+    SimStats &init_stats = ctx.get<SimStats>(driver);
+    init_stats.simulationTime = now;
+    init_stats.numFlowDefs = numFlowDefs;
+    init_stats.numPendingFlows = numPendingFlows;
+    init_stats.numDelayedEvents = numDelayedEvents;
+    init_stats.numActiveTags = numTagIndexEntries;
+    init_stats.numSourceTags = numSourceTags;
+    init_stats.numFlowCompletions = numFlowCompletions;
+
+    FlowCompletionBuf &init_buf = ctx.get<FlowCompletionBuf>(driver);
+    int32_t n_init = numFlowCompletions;
+    if (n_init < 0) n_init = 0;
+    if (n_init > MAX_FLOW_COMPLETIONS) n_init = MAX_FLOW_COMPLETIONS;
+    for (int32_t i = 0; i < n_init; i++) {
+        init_buf.records[i] = flowCompletions[i].record;
+    }
+
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim done\n");
+#else
+    printf("[init-trace] Sim::Sim done\n");
+#endif
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);

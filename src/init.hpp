@@ -33,20 +33,8 @@ struct FlowDef {
     int32_t priority = 0;
 };
 
-struct FlowCompletionRecord {
-    FlowId flow_id = -1;
-    NodeId src_node = -1;
-    NodeId dst_node = -1;
-    Bytes size = 0.0;
-    Time start_time = 0.0;
-    Time end_time = 0.0;
-    int32_t priority = 0;
-
-    inline Time fct() const
-    {
-        return end_time - start_time;
-    }
-};
+// FlowCompletionRecord moved to types.hpp so it can be embedded in the
+// FlowCompletionBuf component that backs the GPU-mode export path.
 
 struct NetworkInit {
     const NodeDef *nodes;

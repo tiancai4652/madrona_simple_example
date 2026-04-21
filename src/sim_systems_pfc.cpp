@@ -119,60 +119,6 @@ void Sim::clearPfcResumeTimer(int32_t ingress_port_id)
     numPfcResumeTimers -= 1;
 }
 
-void Sim::pfcPropagateSystem(Context &ctx)
-{
-    constexpr const char *scope = "ingress_chain";
-    uint64_t step = systemLogStep;
-    bool log_enabled = systemLogEnabled(scope, step);
-    int32_t applied_count = 0;
-    int32_t skipped_count = 0;
-
-    if (log_enabled) {
-        printSystemBegin(step, now, scope, "pfc_propagate");
-    }
-
-    if (enablePfc == 0 || numInboxPfc == 0) {
-        if (log_enabled) {
-            printSystemPfcSummary(step, now, applied_count, skipped_count);
-            printSystemEnd(step, now, scope, "pfc_propagate");
-        }
-        return;
-    }
-
-    for (int32_t i = 0; i < numInboxPfc; i++) {
-        const PfcControlEv &ev = inboxPfc[i];
-        if (ev.target_port_id < 0 || ev.target_port_id >= numPorts) {
-            skipped_count += 1;
-            continue;
-        }
-
-        Entity target_port = portEntities[ev.target_port_id];
-        if (target_port == Entity::none()) {
-            skipped_count += 1;
-            continue;
-        }
-
-        PortPfcState &state = ctx.get<PortPfcState>(target_port);
-        if (ev.priority >= 0 && ev.priority < PFC_MAX_PRIORITY) {
-            state.paused[ev.priority] = ev.paused;
-            ctx.get<DirtyPort>(target_port).isDirty = 1;
-            applied_count += 1;
-            if (log_enabled) {
-                printSystemPfcState(step, now, ev,
-                    state.paused[ev.priority],
-                    ctx.get<DirtyPort>(target_port).isDirty);
-            }
-        } else {
-            skipped_count += 1;
-        }
-    }
-
-    if (log_enabled) {
-        printSystemPfcSummary(step, now, applied_count, skipped_count);
-        printSystemEnd(step, now, scope, "pfc_propagate");
-    }
-}
-
 // Phase C: per-Port PFC threshold detect worker. Only writes this port's
 // own PortPfcState / PortOutbox / PortTraceLast. Reads DirtyPort of other
 // ports as read-only (pfcPropagate earlier is the only writer in-frame
@@ -180,6 +126,13 @@ void Sim::pfcPropagateSystem(Context &ctx)
 // this node). Global timer mutations are collected into pfc_state.want_*
 // and flushed in port_id order by flushPortPfcTimers. Global events are
 // pushed into the outbox for the follow-up flushPortOutbox singleton.
+//
+// The function body is a small dispatcher that forwards the heavy work to
+// pfcDetectOnePortEgress / pfcDetectOnePortIngress. Keeping the two
+// branches in separate MADRONA_NO_INLINE callees is what lets NVRTC +
+// ptxas finish per-TU optimisation under `-dlto -dopt=on
+// --extra-device-vectorization`; the monolithic form used to hang the
+// compiler on this TU.
 void Sim::pfcDetectOnePort(
     Context &ctx,
     int32_t port_id,
@@ -208,120 +161,144 @@ void Sim::pfcDetectOnePort(
     }
 
     if (pfcEgress != 0) {
-        // -------- egress mode: this port is the egress port --------
-        if (dirty.isDirty == 0) {
-            return;
-        }
-        if (cfg.pfc_enabled == 0) {
-            return;
-        }
-        trace.pfc_detect_checked = 1;
+        pfcDetectOnePortEgress(ctx, port_id, dirty, cfg, state,
+            outbox, trace, tag_list);
+    } else {
+        pfcDetectOnePortIngress(ctx, port_id, cfg, state, outbox, trace);
+    }
+}
 
-        double buf_by_pri[PFC_MAX_PRIORITY] {};
-        int32_t upstream_ports[MAX_TOPO_PORTS] {};
-        int32_t num_upstream_ports = 0;
-
-        // Phase D: iterate this port's PortTagList rather than the global
-        // tagIndex. Same semantics since PortTagList is authoritative for
-        // tags whose FlowTagState.port_id == this port.
-        for (int32_t i = 0; i < tag_list.count; i++) {
-            Entity te = tag_list.tags[i];
-            if (te == Entity::none()) {
-                continue;
-            }
-            FlowTagState &tag = ctx.get<FlowTagState>(te);
-            if (tag.is_source != 0) {
-                continue;
-            }
-            materializeBacklog(tag, now);
-            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-            buf_by_pri[pri] += tag.backlog;
-
-            int32_t ip = tag.ingress_port_id;
-            if (ip >= 0 && ip < numPorts) {
-                int32_t up = peerPort[ip];
-                if (up >= 0) {
-                    bool dup = false;
-                    for (int32_t j = 0; j < num_upstream_ports; j++) {
-                        if (upstream_ports[j] == up) {
-                            dup = true;
-                            break;
-                        }
-                    }
-                    if (!dup && num_upstream_ports < MAX_TOPO_PORTS) {
-                        upstream_ports[num_upstream_ports++] = up;
-                    }
-                }
-            }
-        }
-
-        bool state_changed = false;
-        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
-            double buf = buf_by_pri[pri];
-            if (state.pause_active[pri] == 0 && buf >= cfg.xoff[pri] - 0.5) {
-                state.pause_active[pri] = 1;
-                state_changed = true;
-                state.paused_upstream_count[pri] = 0;
-                for (int32_t j = 0; j < num_upstream_ports && j < MAX_PAUSED_UPSTREAMS; j++) {
-                    int32_t up = upstream_ports[j];
-                    state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = up;
-                    int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                    int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                    Time pfc_delay = defaultLinkDelay;
-                    if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                        pfc_delay = linkDelays[detect_slot][upstream_slot];
-                    }
-                    if (outbox.num_events < MAX_PORT_OUTBOX) {
-                        DelayedEvent &ev = outbox.events[outbox.num_events++];
-                        ev = DelayedEvent {};
-                        ev.t = computePropagationTime(pfc_delay);
-                        ev.type = DelayedEvent::Type::PfcControl;
-                        ev.pfcctrl = PfcControlEv {
-                            .target_port_id = up,
-                            .source_port_id = port_id,
-                            .priority = pri,
-                            .paused = 1,
-                        };
-                        trace.pfc_detect_emitted += 1;
-                    }
-                }
-                state.pfc_cnt[pri] += 1;
-            } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
-                state.pause_active[pri] = 0;
-                state_changed = true;
-                for (int32_t j = 0; j < state.paused_upstream_count[pri]; j++) {
-                    int32_t up = state.paused_upstreams[pri][j];
-                    int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                    int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                    Time pfc_delay = defaultLinkDelay;
-                    if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                        pfc_delay = linkDelays[detect_slot][upstream_slot];
-                    }
-                    if (outbox.num_events < MAX_PORT_OUTBOX) {
-                        DelayedEvent &ev = outbox.events[outbox.num_events++];
-                        ev = DelayedEvent {};
-                        ev.t = computePropagationTime(pfc_delay);
-                        ev.type = DelayedEvent::Type::PfcControl;
-                        ev.pfcctrl = PfcControlEv {
-                            .target_port_id = up,
-                            .source_port_id = port_id,
-                            .priority = pri,
-                            .paused = 0,
-                        };
-                        trace.pfc_detect_emitted += 1;
-                    }
-                }
-                state.paused_upstream_count[pri] = 0;
-            }
-        }
-
-        if (state_changed) {
-            state.want_clear_pause = 1;
-            state.want_clear_resume = 1;
-        }
+MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
+    Context &ctx,
+    int32_t port_id,
+    DirtyPort &dirty,
+    PortPfcConfig &cfg,
+    PortPfcState &state,
+    PortOutbox &outbox,
+    PortTraceLast &trace,
+    PortTagList &tag_list)
+{
+    // -------- egress mode: this port is the egress port --------
+    if (dirty.isDirty == 0) {
         return;
     }
+    if (cfg.pfc_enabled == 0) {
+        return;
+    }
+    trace.pfc_detect_checked = 1;
 
+    double buf_by_pri[PFC_MAX_PRIORITY] {};
+    int32_t upstream_ports[MAX_TOPO_PORTS] {};
+    int32_t num_upstream_ports = 0;
+
+    // Phase D: iterate this port's PortTagList rather than the global
+    // tagIndex. Same semantics since PortTagList is authoritative for
+    // tags whose FlowTagState.port_id == this port.
+    for (int32_t i = 0; i < tag_list.count; i++) {
+        Entity te = tag_list.tags[i];
+        if (te == Entity::none()) {
+            continue;
+        }
+        FlowTagState &tag = ctx.get<FlowTagState>(te);
+        if (tag.is_source != 0) {
+            continue;
+        }
+        materializeBacklog(tag, now);
+        int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+        buf_by_pri[pri] += tag.backlog;
+
+        int32_t ip = tag.ingress_port_id;
+        if (ip >= 0 && ip < numPorts) {
+            int32_t up = peerPort[ip];
+            if (up >= 0) {
+                bool dup = false;
+                for (int32_t j = 0; j < num_upstream_ports; j++) {
+                    if (upstream_ports[j] == up) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup && num_upstream_ports < MAX_TOPO_PORTS) {
+                    upstream_ports[num_upstream_ports++] = up;
+                }
+            }
+        }
+    }
+
+    bool state_changed = false;
+    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+        double buf = buf_by_pri[pri];
+        if (state.pause_active[pri] == 0 && buf >= cfg.xoff[pri] - 0.5) {
+            state.pause_active[pri] = 1;
+            state_changed = true;
+            state.paused_upstream_count[pri] = 0;
+            for (int32_t j = 0; j < num_upstream_ports && j < MAX_PAUSED_UPSTREAMS; j++) {
+                int32_t up = upstream_ports[j];
+                state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = up;
+                int32_t detect_slot = findNodeSlot(portToNode[port_id]);
+                int32_t upstream_slot = findNodeSlot(portToNode[up]);
+                Time pfc_delay = defaultLinkDelay;
+                if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
+                    pfc_delay = linkDelays[detect_slot][upstream_slot];
+                }
+                if (outbox.num_events < MAX_PORT_OUTBOX) {
+                    DelayedEvent &ev = outbox.events[outbox.num_events++];
+                    ev = DelayedEvent {};
+                    ev.t = computePropagationTime(pfc_delay);
+                    ev.type = DelayedEvent::Type::PfcControl;
+                    ev.pfcctrl = PfcControlEv {
+                        .target_port_id = up,
+                        .source_port_id = port_id,
+                        .priority = pri,
+                        .paused = 1,
+                    };
+                    trace.pfc_detect_emitted += 1;
+                }
+            }
+            state.pfc_cnt[pri] += 1;
+        } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
+            state.pause_active[pri] = 0;
+            state_changed = true;
+            for (int32_t j = 0; j < state.paused_upstream_count[pri]; j++) {
+                int32_t up = state.paused_upstreams[pri][j];
+                int32_t detect_slot = findNodeSlot(portToNode[port_id]);
+                int32_t upstream_slot = findNodeSlot(portToNode[up]);
+                Time pfc_delay = defaultLinkDelay;
+                if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
+                    pfc_delay = linkDelays[detect_slot][upstream_slot];
+                }
+                if (outbox.num_events < MAX_PORT_OUTBOX) {
+                    DelayedEvent &ev = outbox.events[outbox.num_events++];
+                    ev = DelayedEvent {};
+                    ev.t = computePropagationTime(pfc_delay);
+                    ev.type = DelayedEvent::Type::PfcControl;
+                    ev.pfcctrl = PfcControlEv {
+                        .target_port_id = up,
+                        .source_port_id = port_id,
+                        .priority = pri,
+                        .paused = 0,
+                    };
+                    trace.pfc_detect_emitted += 1;
+                }
+            }
+            state.paused_upstream_count[pri] = 0;
+        }
+    }
+
+    if (state_changed) {
+        state.want_clear_pause = 1;
+        state.want_clear_resume = 1;
+    }
+}
+
+MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
+    Context &ctx,
+    int32_t port_id,
+    PortPfcConfig &cfg,
+    PortPfcState &state,
+    PortOutbox &outbox,
+    PortTraceLast &trace)
+{
     // -------- ingress mode: this port is the ingress port --------
     // Decide if this port is the ingress for any tag whose egress port is
     // dirty this frame. This mirrors the legacy "ingress_check" set built
@@ -492,320 +469,6 @@ void Sim::pfcDetectOnePort(
                 }
             }
         }
-    }
-}
-
-void Sim::pfcThresholdDetectSystem(Context &ctx)
-{
-    constexpr const char *scope = "emit_pfc";
-    uint64_t step = systemLogStep;
-    bool log_enabled = systemLogEnabled(scope, step);
-    int32_t checked_port_count = 0;
-    int32_t emitted_pfc_count = 0;
-
-    if (enablePfc == 0) {
-        if (log_enabled) {
-            printSystemPfcDetectSummary(step, now, 0, 0,
-                numPfcPauseTimers, numPfcResumeTimers);
-        }
-        return;
-    }
-
-    if (pfcEgress != 0) {
-        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            Entity egress_e = portEntities[port_id];
-            if (egress_e == Entity::none() || ctx.get<DirtyPort>(egress_e).isDirty == 0) {
-                continue;
-            }
-
-            PortPfcConfig &cfg = ctx.get<PortPfcConfig>(egress_e);
-            if (cfg.pfc_enabled == 0) {
-                continue;
-            }
-            checked_port_count += 1;
-            PortPfcState &state = ctx.get<PortPfcState>(egress_e);
-
-            double buf_by_pri[PFC_MAX_PRIORITY] {};
-            int32_t upstream_ports[MAX_TOPO_PORTS] {};
-            int32_t num_upstream_ports = 0;
-
-            for (int32_t i = 0; i < numTagIndexEntries; i++) {
-                if (tagIndex[i].port_id != port_id) {
-                    continue;
-                }
-                Entity te = tagIndex[i].entity;
-                if (te == Entity::none()) {
-                    continue;
-                }
-                FlowTagState &tag = ctx.get<FlowTagState>(te);
-                if (tag.is_source != 0) {
-                    continue;
-                }
-                materializeBacklog(tag, now);
-                int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-                buf_by_pri[pri] += tag.backlog;
-
-                int32_t ip = tag.ingress_port_id;
-                if (ip >= 0 && ip < numPorts) {
-                    int32_t up = peerPort[ip];
-                    if (up >= 0) {
-                        bool dup = false;
-                        for (int32_t j = 0; j < num_upstream_ports; j++) {
-                            if (upstream_ports[j] == up) {
-                                dup = true;
-                                break;
-                            }
-                        }
-                        if (!dup && num_upstream_ports < MAX_TOPO_PORTS) {
-                            upstream_ports[num_upstream_ports++] = up;
-                        }
-                    }
-                }
-            }
-
-            bool state_changed = false;
-            for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
-                double buf = buf_by_pri[pri];
-                if (state.pause_active[pri] == 0 && buf >= cfg.xoff[pri] - 0.5) {
-                    state.pause_active[pri] = 1;
-                    state_changed = true;
-                    state.paused_upstream_count[pri] = 0;
-                    for (int32_t j = 0; j < num_upstream_ports && j < MAX_PAUSED_UPSTREAMS; j++) {
-                        int32_t up = upstream_ports[j];
-                        state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = up;
-                        int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                        int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                        Time pfc_delay = defaultLinkDelay;
-                        if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                            pfc_delay = linkDelays[detect_slot][upstream_slot];
-                        }
-                        DelayedEvent ev {};
-                        ev.t = computePropagationTime(pfc_delay);
-                        ev.type = DelayedEvent::Type::PfcControl;
-                        ev.pfcctrl = PfcControlEv {
-                            .target_port_id = up,
-                            .source_port_id = port_id,
-                            .priority = pri,
-                            .paused = 1,
-                        };
-                        pushDelayedEvent(ev);
-                        emitted_pfc_count += 1;
-                    }
-                    state.pfc_cnt[pri] += 1;
-                } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
-                    state.pause_active[pri] = 0;
-                    state_changed = true;
-                    for (int32_t j = 0; j < state.paused_upstream_count[pri]; j++) {
-                        int32_t up = state.paused_upstreams[pri][j];
-                        int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                        int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                        Time pfc_delay = defaultLinkDelay;
-                        if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                            pfc_delay = linkDelays[detect_slot][upstream_slot];
-                        }
-                        DelayedEvent ev {};
-                        ev.t = computePropagationTime(pfc_delay);
-                        ev.type = DelayedEvent::Type::PfcControl;
-                        ev.pfcctrl = PfcControlEv {
-                            .target_port_id = up,
-                            .source_port_id = port_id,
-                            .priority = pri,
-                            .paused = 0,
-                        };
-                        pushDelayedEvent(ev);
-                        emitted_pfc_count += 1;
-                    }
-                    state.paused_upstream_count[pri] = 0;
-                }
-            }
-
-            if (state_changed) {
-                clearPfcPauseTimer(port_id);
-                clearPfcResumeTimer(port_id);
-            }
-        }
-        return;
-    }
-
-    int32_t ingress_check[MAX_TOPO_PORTS] {};
-    int32_t num_ingress_check = 0;
-    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none() || ctx.get<DirtyPort>(port_e).isDirty == 0) {
-            continue;
-        }
-        for (int32_t i = 0; i < numTagIndexEntries; i++) {
-            if (tagIndex[i].port_id != port_id) {
-                continue;
-            }
-            FlowTagState &tag = ctx.get<FlowTagState>(tagIndex[i].entity);
-            int32_t ip = tag.ingress_port_id;
-            if (ip >= 0) {
-                bool dup = false;
-                for (int32_t j = 0; j < num_ingress_check; j++) {
-                    if (ingress_check[j] == ip) {
-                        dup = true;
-                        break;
-                    }
-                }
-                if (!dup && num_ingress_check < MAX_TOPO_PORTS) {
-                    ingress_check[num_ingress_check++] = ip;
-                }
-            }
-        }
-    }
-
-    for (int32_t i = 0; i < num_ingress_check; i++) {
-        int32_t ingress_port = ingress_check[i];
-        if (ingress_port < 0 || ingress_port >= numPorts) {
-            continue;
-        }
-        Entity ingress_e = portEntities[ingress_port];
-        if (ingress_e == Entity::none()) {
-            continue;
-        }
-
-        PortPfcConfig &cfg = ctx.get<PortPfcConfig>(ingress_e);
-        if (cfg.pfc_enabled == 0) {
-            continue;
-        }
-        checked_port_count += 1;
-        PortPfcState &state = ctx.get<PortPfcState>(ingress_e);
-
-        double buf_by_pri[PFC_MAX_PRIORITY] {};
-        double net_rate_by_pri[PFC_MAX_PRIORITY] {};
-        for (int32_t j = 0; j < numIngressTags; j++) {
-            if (ingressTags[j].ingress_port_id != ingress_port) {
-                continue;
-            }
-            Entity te = ingressTags[j].entity;
-            if (te == Entity::none()) {
-                continue;
-            }
-            FlowTagState &tag = ctx.get<FlowTagState>(te);
-            if (tag.is_source != 0) {
-                continue;
-            }
-            materializeBacklog(tag, now);
-            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-            buf_by_pri[pri] += tag.backlog;
-            net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
-        }
-
-        int32_t upstream_port = -1;
-        if (ingress_port >= 0 && ingress_port < numPorts) {
-            upstream_port = peerPort[ingress_port];
-        }
-
-        bool state_changed = false;
-        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
-            double buf = buf_by_pri[pri];
-            if (state.pause_active[pri] == 0 && buf >= cfg.xoff[pri] - 0.5) {
-                state.pause_active[pri] = 1;
-                state_changed = true;
-                state.paused_upstream_count[pri] = 0;
-                if (upstream_port >= 0) {
-                    state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = upstream_port;
-                    int32_t detect_slot = findNodeSlot(portToNode[ingress_port]);
-                    int32_t upstream_slot = findNodeSlot(portToNode[upstream_port]);
-                    Time pfc_delay = defaultLinkDelay;
-                    if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                        pfc_delay = linkDelays[detect_slot][upstream_slot];
-                    }
-                    DelayedEvent ev {};
-                    ev.t = computePropagationTime(pfc_delay);
-                    ev.type = DelayedEvent::Type::PfcControl;
-                    ev.pfcctrl = PfcControlEv {
-                        .target_port_id = upstream_port,
-                        .source_port_id = ingress_port,
-                        .priority = pri,
-                        .paused = 1,
-                    };
-                    pushDelayedEvent(ev);
-                    emitted_pfc_count += 1;
-                }
-                state.pfc_cnt[pri] += 1;
-            } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
-                state.pause_active[pri] = 0;
-                state_changed = true;
-                for (int32_t k = 0; k < state.paused_upstream_count[pri]; k++) {
-                    int32_t up = state.paused_upstreams[pri][k];
-                    int32_t detect_slot = findNodeSlot(portToNode[ingress_port]);
-                    int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                    Time pfc_delay = defaultLinkDelay;
-                    if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                        pfc_delay = linkDelays[detect_slot][upstream_slot];
-                    }
-                    DelayedEvent ev {};
-                    ev.t = computePropagationTime(pfc_delay);
-                    ev.type = DelayedEvent::Type::PfcControl;
-                    ev.pfcctrl = PfcControlEv {
-                        .target_port_id = up,
-                        .source_port_id = ingress_port,
-                        .priority = pri,
-                        .paused = 0,
-                    };
-                    pushDelayedEvent(ev);
-                    emitted_pfc_count += 1;
-                }
-                state.paused_upstream_count[pri] = 0;
-            }
-        }
-
-        if (state_changed) {
-            clearPfcPauseTimer(ingress_port);
-            clearPfcResumeTimer(ingress_port);
-        }
-
-        // Rebuild timers from the post-transition state so a newly entered
-        // pause period can immediately schedule its matching resume timer.
-        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
-            double buf = buf_by_pri[pri];
-            double net_rate = net_rate_by_pri[pri];
-            if (state.pause_active[pri] == 0 && net_rate > 1.0) {
-                double gap = cfg.xoff[pri] - buf;
-                if (gap > 1e-9) {
-                    double t_xoff = gap / net_rate;
-                    if (t_xoff > 1e-9 && t_xoff < 1e6) {
-                        setPfcPauseTimer(ingress_port, t_xoff);
-                    }
-                }
-            } else if (state.pause_active[pri] != 0) {
-                double effective_net = net_rate;
-                if (effective_net >= -1e-15) {
-                    double out_total = 0.0;
-                    for (int32_t j = 0; j < numIngressTags; j++) {
-                        if (ingressTags[j].ingress_port_id != ingress_port) {
-                            continue;
-                        }
-                        Entity te = ingressTags[j].entity;
-                        if (te != Entity::none()) {
-                            FlowTagState &t = ctx.get<FlowTagState>(te);
-                            if (t.priority == pri) {
-                                out_total += t.out_bw;
-                            }
-                        }
-                    }
-                    if (out_total > 1e-15) {
-                        effective_net = -out_total;
-                    }
-                }
-                if (effective_net < -1.0) {
-                    double gap = buf - cfg.xon[pri];
-                    if (gap > 1e-9) {
-                        double t_xon = gap / (-effective_net);
-                        if (t_xon > 1e-9 && t_xon < 1e6) {
-                            setPfcResumeTimer(ingress_port, t_xon);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (log_enabled) {
-        printSystemPfcDetectSummary(step, now, checked_port_count,
-            emitted_pfc_count, numPfcPauseTimers, numPfcResumeTimers);
     }
 }
 

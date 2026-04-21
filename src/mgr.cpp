@@ -226,44 +226,70 @@ struct Manager::GPUImpl final : Manager::Impl {
         return Tensor(dev_ptr, type, dims, cfg.gpuID);
     }
 
+    // Host-side snapshot of the per-step SimStats mirror that
+    // updateSimStatsStepSystem writes into the SimDriverArch singleton
+    // at the end of every task graph. Refreshed on every getter call via
+    // a synchronous cudaMemcpy of sizeof(SimStats) (~32 bytes) from the
+    // GPU exported column. This latency is only paid on Python-visible
+    // inspection calls, never inside the hot step loop on GPU.
+    inline SimStats fetchSimStats()
+    {
+        auto *dev_ptr = (SimStats *)gpuExec.getExported(
+            (uint32_t)ExportID::SimStats);
+        SimStats host_stats {};
+        REQ_CUDA(cudaMemcpy(&host_stats, dev_ptr, sizeof(SimStats),
+                            cudaMemcpyDeviceToHost));
+        return host_stats;
+    }
+
     inline virtual double simulationTime() final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        return fetchSimStats().simulationTime;
     }
 
     inline virtual int32_t numFlowDefs() final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        return fetchSimStats().numFlowDefs;
     }
 
     inline virtual int32_t numPendingFlows() final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        return fetchSimStats().numPendingFlows;
     }
 
     inline virtual int32_t numDelayedEvents() final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        return fetchSimStats().numDelayedEvents;
     }
 
     inline virtual int32_t numActiveTags() final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        return fetchSimStats().numActiveTags;
     }
 
     inline virtual int32_t numSourceTags() final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        return fetchSimStats().numSourceTags;
     }
 
     inline virtual int32_t numFlowCompletions() final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        return fetchSimStats().numFlowCompletions;
     }
 
-    inline virtual FlowCompletionRecord flowCompletion(int32_t) final
+    inline virtual FlowCompletionRecord flowCompletion(int32_t idx) final
     {
-        FATAL("Simulation inspection is not implemented for CUDA mode");
+        int32_t n = fetchSimStats().numFlowCompletions;
+        if (idx < 0 || idx >= n) {
+            return FlowCompletionRecord {};
+        }
+        auto *dev_buf = (FlowCompletionBuf *)gpuExec.getExported(
+            (uint32_t)ExportID::FlowCompletionBuf);
+        FlowCompletionRecord rec {};
+        REQ_CUDA(cudaMemcpy(&rec, &dev_buf->records[idx],
+                            sizeof(FlowCompletionRecord),
+                            cudaMemcpyDeviceToHost));
+        return rec;
     }
 };
 #endif

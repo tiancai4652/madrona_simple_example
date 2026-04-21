@@ -12,6 +12,15 @@ enum class ExportID : uint32_t {
     GridPos,
     Reward,
     Done,
+    // GPU-mode introspection mirrors: a final per-step system copies the
+    // scalar counts / simulation time and the flowCompletions[] array
+    // out of the Sim struct into these singleton components on
+    // SimDriverArch so mgr.cpp's GPUImpl can cudaMemcpy them back to
+    // host. On CPU these are unused (CPUImpl reads Sim fields directly
+    // via TaskGraphExecutor::getWorldData), but we still populate them
+    // so the export layout stays identical between backends.
+    SimStats,
+    FlowCompletionBuf,
     NumExports,
 };
 
@@ -61,15 +70,64 @@ struct SimDriver {
     int32_t tick = 0;
 };
 
-struct SimDriverArch : public madrona::Archetype<
-    SimDriver
-> {};
-
 using Time = double;
 using Bw = double;
 using Bytes = double;
 using FlowId = int64_t;
 using NodeId = int32_t;
+
+// Size of the flow-completion record history we export to the host.
+// Matches Sim::flowCompletions[] capacity in sim.hpp.
+constexpr int32_t MAX_FLOW_COMPLETIONS = 512;
+
+// Matches the layout of the completion record snapshotted by
+// Sim::recordFlowCompletion(). Kept POD so it can be copied into the
+// FlowCompletionBuf component that GPUImpl DMAs back to host every
+// step.
+struct FlowCompletionRecord {
+    FlowId flow_id = -1;
+    NodeId src_node = -1;
+    NodeId dst_node = -1;
+    Bytes size = 0.0;
+    Time start_time = 0.0;
+    Time end_time = 0.0;
+    int32_t priority = 0;
+    int32_t _pad = 0;
+
+    inline Time fct() const
+    {
+        return end_time - start_time;
+    }
+};
+
+// Singleton snapshot of Sim scalar counts + simulationTime. Attached to
+// SimDriverArch and refreshed at the end of every step by
+// updateSimStatsStepSystem. mgr.cpp's GPUImpl reads it via the exported
+// column pointer + cudaMemcpy so Python-visible getters work on GPU
+// without needing a public Sim pointer out of MWCudaExecutor.
+struct SimStats {
+    double simulationTime = 0.0;
+    int32_t numFlowDefs = 0;
+    int32_t numPendingFlows = 0;
+    int32_t numDelayedEvents = 0;
+    int32_t numActiveTags = 0;
+    int32_t numSourceTags = 0;
+    int32_t numFlowCompletions = 0;
+    int32_t _pad = 0;
+};
+
+// Mirror of Sim::flowCompletions[].record for GPU export. Same fixed
+// capacity as MAX_FLOW_COMPLETIONS; entries past numFlowCompletions are
+// zero-initialised and should not be read.
+struct FlowCompletionBuf {
+    FlowCompletionRecord records[MAX_FLOW_COMPLETIONS] {};
+};
+
+struct SimDriverArch : public madrona::Archetype<
+    SimDriver,
+    SimStats,
+    FlowCompletionBuf
+> {};
 
 // Event structs (moved from sim.hpp so PortOutbox can embed them in the
 // Port archetype). Kept POD so the Port component array stays fixed-size
