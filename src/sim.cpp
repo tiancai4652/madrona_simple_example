@@ -9,17 +9,31 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-namespace {
+// IMPORTANT: must NOT be an anonymous namespace.
+//
+// All step systems below are passed by-pointer as non-type template arguments
+// to ParallelForNode<Engine, &fn, ...>. Per [basic.link], a template
+// instantiation that uses an internal-linkage entity becomes itself
+// internal-linkage. The Madrona megakernel pipeline (cuda_exec.cpp) parses
+// per-TU PTX for `.weak .func _ZN7madrona5mwGPU9userEntry...` symbols and
+// stitches them into a single dispatch table. Internal-linkage instantiations
+// get mangled into a `_INTERNAL_<hash>_<file>` namespace prefix, so the
+// scanner never sees them and our user systems silently disappear from the
+// megakernel. Use a NAMED `inline namespace` so the symbols keep external
+// linkage (correct mangling) while remaining unqualified-lookup visible in
+// `madsimple` for the rest of this TU.
+inline namespace systems {
 
 void scheduleStepSystem(Engine &ctx, SimDriver &driver)
 {
     Sim &sim = ctx.data();
     sim.systemLogStep += 1;
     driver.tick += 1;
-    // [step-trace] 用 HostPrint 而不是 printf，因为 megakernel 里 printf
-    // 不可靠；只在前 3 个 tick + thread 0 打，避免刷爆 channel。
+    // [step-trace] SimDriver 只有 1 entity, ParallelForNode 在 megakernel
+    // 里只会派 1 个 thread 跑这个 system，但 thread index 不固定，所以
+    // 不能用 threadIdx.x == 0 过滤。只用 tick<=3 限频。
 #ifdef MADRONA_GPU_MODE
-    if (driver.tick <= 3 && threadIdx.x == 0) {
+    if (driver.tick <= 3) {
         int32_t t = driver.tick;
         int32_t pend_before = sim.numPendingFlows;
         float now_f = (float)sim.now;
@@ -30,7 +44,7 @@ void scheduleStepSystem(Engine &ctx, SimDriver &driver)
 #endif
     sim.schedulePendingFlows();
 #ifdef MADRONA_GPU_MODE
-    if (driver.tick <= 3 && threadIdx.x == 0) {
+    if (driver.tick <= 3) {
         int32_t t = driver.tick;
         int32_t pend_after = sim.numPendingFlows;
         int32_t delayed_after = sim.numDelayedEvents;
@@ -250,7 +264,7 @@ void chooseDTStepSystem(Engine &ctx, SimDriver &driver)
         sim.nextDT = 0.001;
     }
 #ifdef MADRONA_GPU_MODE
-    if (driver.tick <= 3 && threadIdx.x == 0) {
+    if (driver.tick <= 3) {
         int32_t t = driver.tick;
         float dt_f = (float)sim.nextDT;
         float now_f = (float)sim.now;
@@ -299,7 +313,7 @@ void flowProgressStepSystem(Engine &ctx, SimDriver &driver)
 {
     Sim &sim = ctx.data();
 #ifdef MADRONA_GPU_MODE
-    if (driver.tick <= 3 && threadIdx.x == 0) {
+    if (driver.tick <= 3) {
         int32_t t = driver.tick;
         float dt_f = (float)sim.nextDT;
         float now_f = (float)sim.now;
@@ -311,7 +325,7 @@ void flowProgressStepSystem(Engine &ctx, SimDriver &driver)
     sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
     sim.now += sim.nextDT;
 #ifdef MADRONA_GPU_MODE
-    if (driver.tick <= 3 && threadIdx.x == 0) {
+    if (driver.tick <= 3) {
         int32_t t = driver.tick;
         float now_f = (float)sim.now;
         mwGPU::HostPrint::log(
@@ -329,7 +343,7 @@ void flowProgressStepSystem(Engine &ctx, SimDriver &driver)
 // call so the GPU backend has parity with CPU's direct getWorldData()
 // access.
 void updateSimStatsStepSystem(Engine &ctx,
-                              SimDriver &,
+                              SimDriver &driver,
                               SimStats &stats,
                               FlowCompletionBuf &buf)
 {
@@ -341,6 +355,12 @@ void updateSimStatsStepSystem(Engine &ctx,
     stats.numActiveTags = sim.numTagIndexEntries;
     stats.numSourceTags = sim.numSourceTags;
     stats.numFlowCompletions = sim.numFlowCompletions;
+    // [step-trace] If host sees lastTick stuck at 0 across many world.step()
+    // calls, then this final task graph node never ran. If lastTick climbs
+    // but simulationTime stays at 0, the task graph runs but Sim mutations
+    // by user systems are not persisted (or sim systems read a different
+    // Sim instance than ctx.data() returns).
+    stats.lastTick = driver.tick;
 
     int32_t n = sim.numFlowCompletions;
     if (n < 0) n = 0;
@@ -350,7 +370,7 @@ void updateSimStatsStepSystem(Engine &ctx,
     }
 }
 
-}
+}  // inline namespace systems
 
 void Sim::registerTypes(ECSRegistry &registry, const Config &)
 {

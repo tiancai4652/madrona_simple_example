@@ -217,7 +217,22 @@ struct Manager::GPUImpl final : Manager::Impl {
         REQ_CUDA(cudaFree(networkData));
     }
 
-    inline virtual void run() final { gpuExec.run(stepGraph); }
+    inline virtual void run() final {
+        gpuExec.run(stepGraph);
+        // [step-trace] Read lastTick + sim.now snapshot for the first
+        // few steps so we can tell whether the megakernel actually ran
+        // user task graph nodes. Each fetchSimStats does a small
+        // sync D2H copy, so we cap to 5 prints to avoid hot-loop overhead.
+        static int dbgCount = 0;
+        if (dbgCount < 5) {
+            SimStats s = fetchSimStats();
+            printf("[step-trace host] step=%d lastTick=%d simT=%f pend=%d delayed=%d completions=%d\n",
+                dbgCount, s.lastTick, s.simulationTime,
+                s.numPendingFlows, s.numDelayedEvents, s.numFlowCompletions);
+            fflush(stdout);
+            dbgCount += 1;
+        }
+    }
 
     virtual inline Tensor exportTensor(ExportID slot, TensorElementType type,
                                        Span<const int64_t> dims) final

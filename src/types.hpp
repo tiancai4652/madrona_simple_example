@@ -113,7 +113,12 @@ struct SimStats {
     int32_t numActiveTags = 0;
     int32_t numSourceTags = 0;
     int32_t numFlowCompletions = 0;
-    int32_t _pad = 0;
+    // [step-trace] driver.tick at the time this mirror was written. If
+    // host sees this stuck at 0 across many steps, the task graph never
+    // ran scheduleStepSystem (driver.tick++) AND/OR never ran
+    // updateSimStatsStepSystem. Used to distinguish "task graph silent"
+    // from "HostPrint output lost".
+    int32_t lastTick = 0;
 };
 
 // Mirror of Sim::flowCompletions[].record for GPU export. Same fixed
