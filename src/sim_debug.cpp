@@ -75,6 +75,7 @@ void printSystemPfcSummary(uint64_t, Time, int32_t, int32_t) {}
 void printSystemAllocPort(uint64_t, Time, int32_t, double, int32_t, int32_t, double, double, int32_t, int32_t, int32_t) {}
 void printSystemAllocSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
 void printSystemEmitSummary(uint64_t, Time, int32_t, int32_t, int32_t) {}
+void printSystemEmitBwUpdateTag(uint64_t, Time, int32_t, FlowId, double, double) {}
 void printSystemPfcDetectSummary(uint64_t, Time, int32_t, int32_t, int32_t, int32_t) {}
 void printSystemClearSummary(uint64_t, Time, int32_t) {}
 void printSystemDTSummary(uint64_t, Time, double, double, double, double, double, double, double, double) {}
@@ -117,6 +118,21 @@ bool systemLogEnabled(const char *scope, uint64_t step)
         unsigned long want = std::strtoul(step_env, &end, 10);
         if (end != step_env && *end == '\0' && step != want) {
             return false;
+        }
+    }
+
+    // Optional periodic sampling gate:
+    //   system_log_every=N
+    // means logs are emitted only on steps divisible by N.
+    // If system_log_step is set, that exact-step filter still applies first.
+    const char *every_env = std::getenv("system_log_every");
+    if (every_env != nullptr && every_env[0] != '\0') {
+        char *end = nullptr;
+        unsigned long every = std::strtoul(every_env, &end, 10);
+        if (end != every_env && *end == '\0' && every > 0) {
+            if (step % every != 0) {
+                return false;
+            }
         }
     }
 
@@ -237,6 +253,15 @@ void printInitTopoLog(const Sim &sim, Engine &ctx)
             std::cout << "\n";
         }
     }
+
+    // Flush before returning so that the [INIT] lines are guaranteed to be
+    // fully written to fd=1 before any Python-side `print(..., flush=True)`
+    // call in the same process can interleave with our buffered output.
+    // Without this, when stdout is a pipe (capture_output=True), C++ stdout is
+    // fully-buffered and a buffer-fill in the middle of a line can produce
+    // half-line interleaving like `... ecmp=[105[parity] start loop ...`,
+    // which breaks parity log parsers.
+    std::cout.flush();
 }
 
 void printInitFlowLog(const Sim &sim)
@@ -288,6 +313,10 @@ void printInitFlowLog(const Sim &sim)
               << " flow_routes_state="
               << (sim.numFlowRoutes == 0 ? "empty" : "pre_generated")
               << " flow_tag_entities_count=0\n";
+
+    // See note in printInitTopoLog: flush so the [INIT][FLOW] lines are not
+    // interleaved with subsequent Python-side prints in the same process.
+    std::cout.flush();
 }
 
 void printSystemBegin(uint64_t step, Time now, const char *scope, const char *phase)
@@ -580,6 +609,22 @@ void printSystemEmitSummary(uint64_t step, Time now,
               << " dirty_port_count=" << dirty_port_count
               << " arrival_emit_count=" << arrival_emit_count
               << " bwupdate_emit_count=" << bwupdate_emit_count
+              << "\n";
+}
+
+void printSystemEmitBwUpdateTag(uint64_t step, Time now,
+                                int32_t port_id,
+                                FlowId flow_id,
+                                double out_bw,
+                                double prev_out_bw)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][EMIT][BWUPDATE_TAG] step=" << step
+              << " now=" << now
+              << " port_id=" << port_id
+              << " flow_id=" << flow_id
+              << " out_bw=" << out_bw
+              << " prev_out_bw=" << prev_out_bw
               << "\n";
 }
 

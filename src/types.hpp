@@ -78,7 +78,7 @@ using NodeId = int32_t;
 
 // Size of the flow-completion record history we export to the host.
 // Matches Sim::flowCompletions[] capacity in sim.hpp.
-constexpr int32_t MAX_FLOW_COMPLETIONS = 512;
+constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 // Matches the layout of the completion record snapshotted by
 // Sim::recordFlowCompletion(). Kept POD so it can be copied into the
@@ -178,7 +178,12 @@ enum class NodeType : int32_t {
 };
 
 constexpr int32_t PFC_MAX_PRIORITY = 8;
-constexpr int32_t MAX_CHUNK_WEIGHTS = 16;
+// Must be >= the maximum number of flows per port so that buffer chunks can
+// record all active flows. leafspine1024 with d=64 has 64 flows per inter-
+// switch port; use 64 to cover this topology without silently capping chunk
+// weights.  If future topologies have more flows per port, raise this value
+// to avoid incorrect buffer bandwidth allocation.
+constexpr int32_t MAX_CHUNK_WEIGHTS = 64;
 constexpr int32_t MAX_BUFFER_CHUNKS = 16;
 constexpr int32_t MAX_PAUSED_UPSTREAMS = 16;
 
@@ -285,7 +290,10 @@ struct PortDrainHint {
     double set_t = 0.0;
 };
 
-constexpr int32_t MAX_PORT_CLEANUP = 32;
+// leafspine1024 d64 all-to-all drives 63 flows into each destination host
+// port, so a single frame can queue >32 deferred destroyTag requests on one
+// port. Keep headroom above that to avoid silently stranding tags.
+constexpr int32_t MAX_PORT_CLEANUP = 64;
 
 struct PortCleanup {
     int32_t num = 0;
@@ -418,7 +426,9 @@ struct PortCreateList {
 // terminal port must not mutate Sim::flowCompletions / flowDefs /
 // flowRoutes directly; it pushes the flow_id here and
 // flushFlowCompletionSystem applies them in port_id ascending order.
-constexpr int32_t MAX_PORT_COMPLETE = 32;
+// Completion notifications can also fan in at destination host ports at the
+// same 63-flow scale; a 32-entry queue silently drops completions.
+constexpr int32_t MAX_PORT_COMPLETE = 64;
 
 struct PortCompletionList {
     int32_t num = 0;

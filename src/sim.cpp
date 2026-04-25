@@ -1,4 +1,5 @@
 #include "sim.hpp"
+#include "sim_debug.hpp"
 #include <madrona/mw_gpu_entry.hpp>
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/host_print.hpp>
@@ -8,6 +9,24 @@ using namespace madrona;
 using namespace madrona::math;
 
 namespace madsimple {
+
+// Emit a one-shot init trace. Suppressed when init_log_print_enabled is on,
+// so the [INIT] log dump consumed by check/run_parity.py stays free of any
+// extra `[init-trace]` lines that would shift line numbers and break diffs.
+// On GPU, only thread 0 prints to avoid flooding the 1 MB CUDA printf buffer
+// with 256 duplicates.
+static inline void initTrace(const char *msg)
+{
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x == 0) {
+        printf("[init-trace] %s\n", msg);
+    }
+#else
+    if (!init_log_print_enabled) {
+        printf("[init-trace] %s\n", msg);
+    }
+#endif
+}
 
 // IMPORTANT: must NOT be an anonymous namespace.
 //
@@ -423,7 +442,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
                      const Config &)
 {
-    printf("[init-trace] Sim::setupTasks enter\n");
+    initTrace("Sim::setupTasks enter");
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
 
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
@@ -555,7 +574,7 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
 #else
     (void)n12;
 #endif
-    printf("[init-trace] Sim::setupTasks done\n");
+    initTrace("Sim::setupTasks done");
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -573,22 +592,11 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
       numPendingFlows(0),
       numFlowRoutes(0)
 {
-    // [init-trace] 定位 GPU initWorlds 是否进入、走到哪一步。
-    // 在 GPU 端 Sim::Sim 会被 256 个线程同时触发（num_worlds=1 下
-    // 只有 thread 0 真正干活），所以 printf 只在 threadIdx.x==0 打，
-    // 否则 256 份同样的日志会瞬间灌满 CUDA 1MB printf buffer，
-    // 导致后续真正有用的 device printf 被丢弃。
-#ifdef MADRONA_GPU_MODE
-    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim enter\n");
-#else
-    printf("[init-trace] Sim::Sim enter\n");
-#endif
+    // [init-trace] 用于定位 GPU initWorlds 是否进入、走到哪一步。
+    // 噪音抑制 + GPU 单线程打印的细节都封装在 initTrace() 里。
+    initTrace("Sim::Sim enter");
     resetNetworkState();
-#ifdef MADRONA_GPU_MODE
-    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim after resetNetworkState\n");
-#else
-    printf("[init-trace] Sim::Sim after resetNetworkState\n");
-#endif
+    initTrace("Sim::Sim after resetNetworkState");
     enableBuffer = cfg.enable_buffer;
     enablePfc = cfg.enable_pfc;
     pfcEgress = cfg.pfc_egress;
@@ -613,17 +621,9 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     Entity driver = ctx.makeEntity<SimDriverArch>();
     ctx.get<SimDriver>(driver) = SimDriver { .tick = 0 };
 
-#ifdef MADRONA_GPU_MODE
-    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim before loadTopo\n");
-#else
-    printf("[init-trace] Sim::Sim before loadTopo\n");
-#endif
+    initTrace("Sim::Sim before loadTopo");
     loadTopo(ctx);
-#ifdef MADRONA_GPU_MODE
-    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim after loadTopo, before loadFlow\n");
-#else
-    printf("[init-trace] Sim::Sim after loadTopo, before loadFlow\n");
-#endif
+    initTrace("Sim::Sim after loadTopo, before loadFlow");
     loadFlow(ctx);
 
     // Seed the SimStats / FlowCompletionBuf mirror on SimDriverArch so
@@ -650,11 +650,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
         init_buf.records[i] = flowCompletions[i].record;
     }
 
-#ifdef MADRONA_GPU_MODE
-    if (threadIdx.x == 0) printf("[init-trace] Sim::Sim done\n");
-#else
-    printf("[init-trace] Sim::Sim done\n");
-#endif
+    initTrace("Sim::Sim done");
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);

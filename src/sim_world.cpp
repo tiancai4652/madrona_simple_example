@@ -53,8 +53,15 @@ int32_t Sim::findNeighborSlot(int32_t node_slot, NodeId neighbor_id) const
 
 void Sim::computeRoutes()
 {
-    int32_t adj_count[MAX_TOPO_NODES] {};
-    NodeId adj[MAX_TOPO_NODES][MAX_TOPO_NODES] {};
+    // BFS scratch buffers (bfsAdjCount/bfsAdj/bfsDist/bfsQueue) live on the Sim
+    // instance to avoid the ~10 MB stack footprint that NxN local arrays would
+    // produce at MAX_TOPO_NODES = 1152.
+    for (int32_t i = 0; i < MAX_TOPO_NODES; i++) {
+        bfsAdjCount[i] = 0;
+        for (int32_t j = 0; j < MAX_TOPO_NODES; j++) {
+            bfsAdj[i][j] = -1;
+        }
+    }
 
     for (int32_t i = 0; i < numTopoLinks; i++) {
         int32_t src_slot = findNodeSlot(topoLinks[i].src);
@@ -62,14 +69,13 @@ void Sim::computeRoutes()
             continue;
         }
 
-        int32_t idx = adj_count[src_slot]++;
-        adj[src_slot][idx] = topoLinks[i].dst;
+        int32_t idx = bfsAdjCount[src_slot]++;
+        bfsAdj[src_slot][idx] = topoLinks[i].dst;
     }
 
-    int32_t dist[MAX_TOPO_NODES][MAX_TOPO_NODES];
     for (int32_t i = 0; i < MAX_TOPO_NODES; i++) {
         for (int32_t j = 0; j < MAX_TOPO_NODES; j++) {
-            dist[i][j] = -1;
+            bfsDist[i][j] = -1;
             routeTable[i][j] = -1;
             ecmpCount[i][j] = 0;
             for (int32_t k = 0; k < MAX_ECMP_NEXT_HOPS; k++) {
@@ -79,23 +85,22 @@ void Sim::computeRoutes()
     }
 
     for (int32_t src_slot = 0; src_slot < numTopoNodes; src_slot++) {
-        int32_t queue[MAX_TOPO_NODES];
         int32_t qhead = 0;
         int32_t qtail = 0;
-        queue[qtail++] = src_slot;
-        dist[src_slot][src_slot] = 0;
+        bfsQueue[qtail++] = src_slot;
+        bfsDist[src_slot][src_slot] = 0;
 
         while (qhead < qtail) {
-            int32_t u_slot = queue[qhead++];
-            for (int32_t i = 0; i < adj_count[u_slot]; i++) {
-                NodeId v_id = adj[u_slot][i];
+            int32_t u_slot = bfsQueue[qhead++];
+            for (int32_t i = 0; i < bfsAdjCount[u_slot]; i++) {
+                NodeId v_id = bfsAdj[u_slot][i];
                 int32_t v_slot = findNodeSlot(v_id);
                 if (v_slot < 0) {
                     continue;
                 }
-                if (dist[src_slot][v_slot] == -1) {
-                    dist[src_slot][v_slot] = dist[src_slot][u_slot] + 1;
-                    queue[qtail++] = v_slot;
+                if (bfsDist[src_slot][v_slot] == -1) {
+                    bfsDist[src_slot][v_slot] = bfsDist[src_slot][u_slot] + 1;
+                    bfsQueue[qtail++] = v_slot;
                 }
             }
         }
@@ -111,21 +116,21 @@ void Sim::computeRoutes()
                 continue;
             }
 
-            int32_t shortest_dist = dist[src_slot][dst_slot];
+            int32_t shortest_dist = bfsDist[src_slot][dst_slot];
             if (shortest_dist < 0) {
                 continue;
             }
 
             int32_t count = 0;
-            for (int32_t i = 0; i < adj_count[src_slot]; i++) {
-                NodeId neighbor_id = adj[src_slot][i];
+            for (int32_t i = 0; i < bfsAdjCount[src_slot]; i++) {
+                NodeId neighbor_id = bfsAdj[src_slot][i];
                 int32_t neighbor_slot = findNodeSlot(neighbor_id);
                 if (neighbor_slot < 0) {
                     continue;
                 }
 
-                if (dist[neighbor_slot][dst_slot] >= 0 &&
-                    1 + dist[neighbor_slot][dst_slot] == shortest_dist) {
+                if (bfsDist[neighbor_slot][dst_slot] >= 0 &&
+                    1 + bfsDist[neighbor_slot][dst_slot] == shortest_dist) {
                     if (count < MAX_ECMP_NEXT_HOPS) {
                         ecmpNextHops[src_slot][dst_slot][count] = neighbor_id;
                         count += 1;

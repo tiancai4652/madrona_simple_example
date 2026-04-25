@@ -78,6 +78,11 @@ void printSystemEmitSummary(uint64_t step, Time now,
                             int32_t dirty_port_count,
                             int32_t arrival_emit_count,
                             int32_t bwupdate_emit_count);
+void printSystemEmitBwUpdateTag(uint64_t step, Time now,
+                                int32_t port_id,
+                                FlowId flow_id,
+                                double out_bw,
+                                double prev_out_bw);
 void printSystemPfcDetectSummary(uint64_t step, Time now,
                                  int32_t checked_port_count,
                                  int32_t emitted_pfc_count,

@@ -51,7 +51,21 @@ def should_stop(world):
     )
 
 
+def _is_log_capture_mode():
+    """Return True when the run is generating raw [INIT]/[SYS] logs that will
+    be parsed by check/run_parity.py. In that mode any [parity] trace from the
+    Python side risks interleaving with C++ stdout (which is fully-buffered
+    when stdout is a pipe) and breaking the parser."""
+    for var in ("init_log_print_enabled", "system_log_print_enabled"):
+        val = os.environ.get(var)
+        if val not in (None, "", "0"):
+            return True
+    return False
+
+
 def _pstage(msg, t_start):
+    if _is_log_capture_mode():
+        return
     print(f"[parity] {msg}  (+{time.time() - t_start:.2f}s)", flush=True)
 
 
@@ -100,24 +114,30 @@ def main():
     if os.environ.get("init_log_print_enabled") not in (None, "", "0"):
         return
 
+    log_capture_mode = _is_log_capture_mode()
     progress_every = int(os.environ.get("PARITY_PROGRESS_EVERY", "500"))
 
     steps = 0
     t0 = time.time()
     t_prev = t0
     steps_prev = 0
-    print(
-        f"[parity] start loop: max_steps={args.max_steps} "
-        f"gpu={bool(args.gpu)} pfc={bool(args.pfc)} "
-        f"progress_every={progress_every}",
-        flush=True,
-    )
+    if not log_capture_mode:
+        print(
+            f"[parity] start loop: max_steps={args.max_steps} "
+            f"gpu={bool(args.gpu)} pfc={bool(args.pfc)} "
+            f"progress_every={progress_every}",
+            flush=True,
+        )
 
     while steps < args.max_steps and not should_stop(world):
         world.step()
         steps += 1
 
-        if progress_every > 0 and steps % progress_every == 0:
+        if (
+            not log_capture_mode
+            and progress_every > 0
+            and steps % progress_every == 0
+        ):
             now = time.time()
             dt = max(now - t_prev, 1e-6)
             sps = (steps - steps_prev) / dt
@@ -134,12 +154,13 @@ def main():
             t_prev = now
             steps_prev = steps
 
-    print(
-        f"[parity] loop done: steps={steps} "
-        f"elapsed={time.time() - t0:.1f}s "
-        f"stopped_cleanly={should_stop(world)}",
-        flush=True,
-    )
+    if not log_capture_mode:
+        print(
+            f"[parity] loop done: steps={steps} "
+            f"elapsed={time.time() - t0:.1f}s "
+            f"stopped_cleanly={should_stop(world)}",
+            flush=True,
+        )
 
     completion_path = out_dir / "flow_completion_times.csv"
     world.write_flow_completion_csv(completion_path)

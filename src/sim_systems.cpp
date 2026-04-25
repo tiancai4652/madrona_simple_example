@@ -1156,6 +1156,7 @@ static Entity findTagInPortList(Context &ctx, const PortTagList &tag_list, FlowI
     return Entity::none();
 }
 
+
 void Sim::pfcPropagateOnePort(Context &ctx,
                               int32_t port_id,
                               PortState &,

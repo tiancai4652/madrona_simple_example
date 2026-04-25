@@ -109,6 +109,14 @@ void Sim::allocOnePort(
         // Phase D: collect tags via PortTagList instead of scanning the
         // entire Sim::tagIndex. MAX_TAGS_PER_PORT caps the copy so we no
         // longer need MAX_TAG_INDEX worth of stack.
+        //
+        // Note: no slot-clearing is needed here.  The task graph runs
+        // flushTagCleanupStepSystem (n5d) AFTER allocOnePortStepSystem (n5a)
+        // but BEFORE emitOnePortStepSystem (n7a), so destroyTag's swap-last
+        // properly removes cleanup tags from tag_list before emitOnePort
+        // iterates it.  Clearing the slot early (Entity::none()) would
+        // prevent destroyTag from doing the swap-last, inflating ptl.count
+        // and eventually causing out-of-bounds access.
         Entity tags[MAX_TAGS_PER_PORT] {};
         int32_t num_tags = 0;
         for (int32_t i = 0; i < tag_list.count; i++) {
@@ -148,7 +156,12 @@ void Sim::allocOnePort(
             }
         }
 
-        Entity live_tags[MAX_TAG_INDEX] {};
+        // Phase D: live_tags is bounded by num_tags <= MAX_TAGS_PER_PORT, so
+        // the scratch buffer only needs MAX_TAGS_PER_PORT entries (matches
+        // sim_systems_buffer.cpp). Using MAX_TAG_INDEX (~258048) here would
+        // put a ~2 MB array on the stack per call and quickly blow past the
+        // 8 MB pthread stack limit at large topologies.
+        Entity live_tags[MAX_TAGS_PER_PORT] {};
         int32_t num_live = 0;
         double live_sum_in = 0.0;
         for (int32_t i = 0; i < num_tags; i++) {
@@ -183,7 +196,12 @@ void Sim::allocOnePort(
 
         double out_total = 0.0;
         if ((qosMode == QOS_SP || qosMode == QOS_WRR) && !is_dest_only) {
-            Entity pri_tags[PFC_MAX_PRIORITY][MAX_TAG_INDEX] {};
+            // Phase D: pri_tags total fill is bounded by num_live <=
+            // MAX_TAGS_PER_PORT; using MAX_TAG_INDEX would allocate
+            // PFC_MAX_PRIORITY * MAX_TAG_INDEX * sizeof(Entity) ~= 16 MB on
+            // the stack per call and segfault immediately under default 8 MB
+            // pthread stacks. Matches sim_systems_buffer.cpp.
+            Entity pri_tags[PFC_MAX_PRIORITY][MAX_TAGS_PER_PORT] {};
             int32_t pri_counts[PFC_MAX_PRIORITY] {};
             double pri_in_sum[PFC_MAX_PRIORITY] {};
             for (int32_t i = 0; i < num_live; i++) {
@@ -587,7 +605,7 @@ void Sim::allocOnePort(
 // deliverEvents order matches the legacy sequential implementation.
 void Sim::emitOnePort(
     Context &ctx,
-    int32_t /*port_id*/,
+    int32_t port_id,
     PortState & /*port_state*/,
     DirtyPort &dirty,
     PortOutbox &outbox,
@@ -603,6 +621,8 @@ void Sim::emitOnePort(
         return;
     }
     trace.emit_is_dirty = 1;
+
+    const bool log_enabled = systemLogEnabled("emit_tag", systemLogStep);
 
     // Phase D: iterate PortTagList instead of scanning the global tagIndex.
     for (int32_t i = 0; i < tag_list.count; i++) {
@@ -649,6 +669,11 @@ void Sim::emitOnePort(
                 .in_bw = tag.out_bw,
             };
             trace.emit_bwupdate_count += 1;
+            if (log_enabled) {
+                printSystemEmitBwUpdateTag(
+                    systemLogStep, now, port_id,
+                    tag.flow_id, tag.out_bw, tag.prev_out_bw);
+            }
         }
     }
 }

@@ -12,19 +12,19 @@ namespace madsimple {
 
 class Engine;
 
-constexpr int32_t MAX_TOPO_NODES = 67;
-constexpr int32_t MAX_TOPO_LINKS = 132;
-constexpr int32_t MAX_TOPO_PORTS = 132;
-constexpr int32_t MAX_NODE_NEIGHBORS = 33;
-constexpr int32_t MAX_FLOWS = 448;
-constexpr int32_t MAX_PATH_NODES = 16;
-constexpr int32_t MAX_ECMP_NEXT_HOPS = 8;
-constexpr int32_t MAX_FLOW_ROUTE_STEPS = 16;
-constexpr int32_t MAX_DELAYED_EVENTS = 16384;
-constexpr int32_t MAX_EVENTS_PER_STEP = 16384;
-constexpr int32_t MAX_TAG_INDEX = 4096;
-constexpr int32_t MAX_SOURCE_TAGS = 512;
-constexpr int32_t MAX_INGRESS_TAGS = 4096;
+// constexpr int32_t MAX_TOPO_NODES = 67;
+// constexpr int32_t MAX_TOPO_LINKS = 132;
+// constexpr int32_t MAX_TOPO_PORTS = 132;
+// constexpr int32_t MAX_NODE_NEIGHBORS = 33;
+// constexpr int32_t MAX_FLOWS = 448;
+// constexpr int32_t MAX_PATH_NODES = 16;
+// constexpr int32_t MAX_ECMP_NEXT_HOPS = 8;
+// constexpr int32_t MAX_FLOW_ROUTE_STEPS = 16;
+// constexpr int32_t MAX_DELAYED_EVENTS = 16384;
+// constexpr int32_t MAX_EVENTS_PER_STEP = 16384;
+// constexpr int32_t MAX_TAG_INDEX = 4096;
+// constexpr int32_t MAX_SOURCE_TAGS = 512;
+// constexpr int32_t MAX_INGRESS_TAGS = 4096;
 // MAX_FLOW_COMPLETIONS moved to types.hpp so the FlowCompletionBuf export
 // component can size itself without including sim.hpp.
 constexpr int32_t QOS_NONE = 0;
@@ -32,20 +32,20 @@ constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
 
 
-// constexpr int32_t MAX_TOPO_NODES = 1152;
-// constexpr int32_t MAX_TOPO_LINKS = 3200;
-// constexpr int32_t MAX_TOPO_PORTS = 3200;
-// constexpr int32_t MAX_NODE_NEIGHBORS = 56;
-// constexpr int32_t MAX_FLOWS = 287744;
-// constexpr int32_t MAX_PATH_NODES = 6;
-// constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
-// constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
-// constexpr int32_t MAX_DELAYED_EVENTS = 2088960;
-// constexpr int32_t MAX_EVENTS_PER_STEP = 261120;
-// constexpr int32_t MAX_TAG_INDEX = 1148928;
-// constexpr int32_t MAX_SOURCE_TAGS = 287744;
-// constexpr int32_t MAX_INGRESS_TAGS = 1148928;
-// constexpr int32_t MAX_FLOW_COMPLETIONS = 287744;
+constexpr int32_t MAX_TOPO_NODES = 1152;
+constexpr int32_t MAX_TOPO_LINKS = 3200;
+constexpr int32_t MAX_TOPO_PORTS = 3200;
+constexpr int32_t MAX_NODE_NEIGHBORS = 56;
+constexpr int32_t MAX_FLOWS = 68608;
+constexpr int32_t MAX_PATH_NODES = 6;
+constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
+constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
+constexpr int32_t MAX_DELAYED_EVENTS = 131072;
+constexpr int32_t MAX_EVENTS_PER_STEP = 1024;
+constexpr int32_t MAX_TAG_INDEX = 258048;
+constexpr int32_t MAX_SOURCE_TAGS = 64512;
+constexpr int32_t MAX_INGRESS_TAGS = 258048;
+// constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {
     NodeId neighbor_id = -1;
@@ -367,6 +367,15 @@ struct Sim : public madrona::WorldBase {
     NodeId routeTable[MAX_TOPO_NODES][MAX_TOPO_NODES];
     int32_t ecmpCount[MAX_TOPO_NODES][MAX_TOPO_NODES];
     NodeId ecmpNextHops[MAX_TOPO_NODES][MAX_TOPO_NODES][MAX_ECMP_NEXT_HOPS];
+    // computeRoutes() BFS scratch buffers. Declared as Sim members instead of
+    // local stack arrays to avoid blowing past the default 8 MB pthread stack
+    // when MAX_TOPO_NODES is large (1152 -> ~10 MB combined). Follows the
+    // Madrona business-code convention of using fixed-size arrays kept on the
+    // Sim/World instance rather than dynamic allocation.
+    int32_t bfsAdjCount[MAX_TOPO_NODES];
+    NodeId bfsAdj[MAX_TOPO_NODES][MAX_TOPO_NODES];
+    int32_t bfsDist[MAX_TOPO_NODES][MAX_TOPO_NODES];
+    int32_t bfsQueue[MAX_TOPO_NODES];
     int32_t numFlowDefs;
     FlowDef flowDefs[MAX_FLOWS];
     int32_t numPendingFlows;
