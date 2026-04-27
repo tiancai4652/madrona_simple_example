@@ -10,6 +10,7 @@
 #include <madrona/cuda_utils.hpp>
 #endif
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <cstring>
@@ -63,6 +64,45 @@ inline NetworkLayout getNetworkLayout(const NetworkInit &src_network)
         .flowsOffset = flows_offset,
     };
 }
+
+inline void sortFlowsByStartTime(FlowDef *flows, int32_t num_flows)
+{
+    if (num_flows <= 1) {
+        return;
+    }
+
+    std::stable_sort(flows, flows + num_flows,
+        [](const FlowDef &a, const FlowDef &b) {
+            return a.start_time < b.start_time;
+        });
+}
+
+#ifdef MADRONA_CUDA_SUPPORT
+inline CompileConfig::OptMode getGPUOptMode()
+{
+    const char *env = std::getenv("MADRONA_MWGPU_OPT_MODE");
+    if (env == nullptr || env[0] == '\0') {
+        return CompileConfig::OptMode::LTO;
+    }
+
+    if (std::strcmp(env, "optimize") == 0 ||
+        std::strcmp(env, "opt") == 0) {
+        return CompileConfig::OptMode::Optimize;
+    }
+
+    if (std::strcmp(env, "debug") == 0) {
+        return CompileConfig::OptMode::Debug;
+    }
+
+    if (std::strcmp(env, "lto") == 0) {
+        return CompileConfig::OptMode::LTO;
+    }
+
+    std::cerr << "[madrona] unknown MADRONA_MWGPU_OPT_MODE='" << env
+              << "', falling back to LTO\n";
+    return CompileConfig::OptMode::LTO;
+}
+#endif
 
 } // namespace
 
@@ -205,7 +245,7 @@ struct Manager::GPUImpl final : Manager::Impl {
               }, {
                   { SIMPLE_SRC_LIST },
                   { SIMPLE_COMPILE_FLAGS },
-                  CompileConfig::OptMode::LTO,
+                  getGPUOptMode(),
               }, cu_ctx),
           stepGraph(gpuExec.buildLaunchGraph(0))
 
@@ -219,19 +259,6 @@ struct Manager::GPUImpl final : Manager::Impl {
 
     inline virtual void run() final {
         gpuExec.run(stepGraph);
-        // [step-trace] Read lastTick + sim.now snapshot for the first
-        // few steps so we can tell whether the megakernel actually ran
-        // user task graph nodes. Each fetchSimStats does a small
-        // sync D2H copy, so we cap to 5 prints to avoid hot-loop overhead.
-        static int dbgCount = 0;
-        if (dbgCount < 5) {
-            SimStats s = fetchSimStats();
-            printf("[step-trace host] step=%d lastTick=%d simT=%f pend=%d delayed=%d completions=%d\n",
-                dbgCount, s.lastTick, s.simulationTime,
-                s.numPendingFlows, s.numDelayedEvents, s.numFlowCompletions);
-            fflush(stdout);
-            dbgCount += 1;
-        }
     }
 
     virtual inline Tensor exportTensor(ExportID slot, TensorElementType type,
@@ -400,6 +427,7 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
         if (src_network.numFlows > 0) {
             memcpy(cpu_flows, src_network.flows,
                    sizeof(FlowDef) * (uint64_t)src_network.numFlows);
+            sortFlowsByStartTime(cpu_flows, src_network.numFlows);
         }
 
         HeapArray<WorldInit> world_inits = setupWorldInitData(cfg.numWorlds,
@@ -470,9 +498,13 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
                                 cudaMemcpyHostToDevice));
         }
         if (src_network.numFlows > 0) {
-            REQ_CUDA(cudaMemcpy(gpu_flows, src_network.flows,
-                                sizeof(FlowDef) * (uint64_t)src_network.numFlows,
-                                cudaMemcpyHostToDevice));
+            uint64_t num_flow_bytes =
+                sizeof(FlowDef) * (uint64_t)src_network.numFlows;
+            HeapArray<FlowDef> sorted_flows(src_network.numFlows);
+            memcpy(sorted_flows.data(), src_network.flows, num_flow_bytes);
+            sortFlowsByStartTime(sorted_flows.data(), src_network.numFlows);
+            REQ_CUDA(cudaMemcpy(gpu_flows, sorted_flows.data(),
+                                num_flow_bytes, cudaMemcpyHostToDevice));
         }
 
         NetworkInit *gpu_network = (NetworkInit *)network_data;

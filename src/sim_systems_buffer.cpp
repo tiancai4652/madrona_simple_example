@@ -523,7 +523,7 @@ void Sim::flushBufferTagCleanup(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        PortCleanup &cleanup = ctx.get<PortCleanup>(port_e);
+        PortCleanup &cleanup = portCleanups[port_id];
         for (int32_t i = 0; i < cleanup.num; i++) {
             if (cleanup.tags[i] == Entity::none()) {
                 continue;
@@ -542,7 +542,7 @@ void Sim::logBufferTraces(Context &ctx)
 {
     constexpr const char *scope = "buffer";
     uint64_t step = systemLogStep;
-    bool log_enabled = systemLogEnabled(scope, step);
+    bool log_enabled = compiledSystemLogEnabled(scope, step);
     if (!log_enabled) {
         return;
     }
@@ -555,7 +555,7 @@ void Sim::logBufferTraces(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        PortTraceLast &trace = portTraceLasts[port_id];
         processed += trace.buffer_processed;
         destroy_count += trace.buffer_destroy_count;
         total_buf_cnt += trace.buffer_total_buf_cnt;

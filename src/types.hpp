@@ -121,17 +121,15 @@ struct SimStats {
     int32_t lastTick = 0;
 };
 
-// Mirror of Sim::flowCompletions[].record for GPU export. Same fixed
-// capacity as MAX_FLOW_COMPLETIONS; entries past numFlowCompletions are
-// zero-initialised and should not be read.
+// Singleton mirror of Sim::flowCompletions[].record for GPU export. Same
+// fixed capacity as MAX_FLOW_COMPLETIONS; entries past numFlowCompletions
+// are zero-initialised and should not be read.
 struct FlowCompletionBuf {
     FlowCompletionRecord records[MAX_FLOW_COMPLETIONS] {};
 };
 
 struct SimDriverArch : public madrona::Archetype<
-    SimDriver,
-    SimStats,
-    FlowCompletionBuf
+    SimDriver
 > {};
 
 // Event structs (moved from sim.hpp so PortOutbox can embed them in the
@@ -271,9 +269,9 @@ struct PortPfcState {
     double set_resume_t = 0.0;
 };
 
-// --- Per-port scratch / hint components introduced in phase B. ---
-// All are plain-old-data so they are safe to live on a Port archetype that
-// a ParallelForNode can iterate. Cross-port reductions, deferred entity
+// --- Per-port scratch / hint state introduced in phase B. ---
+// These remain POD so they can live either on the Port archetype or in
+// Sim-owned port_id indexed arrays. Cross-port reductions, deferred entity
 // destruction, and deferred log emission consume these fields in a
 // deterministic singleton pass driven by SimDriverArch.
 
@@ -436,20 +434,8 @@ struct PortCompletionList {
 };
 
 struct Port : public madrona::Archetype<
-    DirtyPort,
     PortState,
-    PortBuffer,
-    PortPfcConfig,
-    PortPfcState,
-    PortCachedHints,
-    PortDrainHint,
-    PortCleanup,
-    PortTraceLast,
-    PortOutbox,
-    PortTagList,
-    PortInbox,
-    PortCreateList,
-    PortCompletionList
+    PortBuffer
 > {};
 
 struct FlowTag : public madrona::Archetype<

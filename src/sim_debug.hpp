@@ -6,10 +6,33 @@
 
 namespace madsimple {
 
+#if defined(__CUDA_ARCH__)
+inline constexpr bool init_log_compiled_in = false;
+inline constexpr bool init_trace_compiled_in = false;
+inline constexpr bool system_log_compiled_in = false;
+inline constexpr bool step_trace_compiled_in = false;
+#else
+inline constexpr bool init_log_compiled_in = true;
+inline constexpr bool init_trace_compiled_in = true;
+inline constexpr bool system_log_compiled_in = true;
+inline constexpr bool step_trace_compiled_in = true;
+#endif
+
 extern const bool init_log_print_enabled;
 extern const bool system_log_print_enabled;
 
 bool systemLogEnabled(const char *scope, uint64_t step);
+
+inline bool compiledSystemLogEnabled(const char *scope, uint64_t step)
+{
+    if constexpr (system_log_compiled_in) {
+        return systemLogEnabled(scope, step);
+    } else {
+        (void)scope;
+        (void)step;
+        return false;
+    }
+}
 
 void printInitTopoLog(const Sim &sim, Engine &ctx);
 void printInitFlowLog(const Sim &sim);

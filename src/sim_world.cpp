@@ -26,6 +26,13 @@ inline int32_t hashFlowIndex(FlowId flow_id, int32_t count)
 
 int32_t Sim::findNodeSlot(NodeId node_id) const
 {
+    if (nodeLookupSpan > 0) {
+        int64_t lookup_idx = (int64_t)node_id - (int64_t)nodeLookupBase;
+        if (lookup_idx >= 0 && lookup_idx < nodeLookupSpan) {
+            return nodeSlotLookup[(int32_t)lookup_idx];
+        }
+    }
+
     for (int32_t i = 0; i < numTopoNodes; i++) {
         if (topoNodes[i].id == node_id) {
             return i;
@@ -53,86 +60,70 @@ int32_t Sim::findNeighborSlot(int32_t node_slot, NodeId neighbor_id) const
 
 void Sim::computeRoutes()
 {
-    // BFS scratch buffers (bfsAdjCount/bfsAdj/bfsDist/bfsQueue) live on the Sim
-    // instance to avoid the ~10 MB stack footprint that NxN local arrays would
-    // produce at MAX_TOPO_NODES = 1152.
-    for (int32_t i = 0; i < MAX_TOPO_NODES; i++) {
-        bfsAdjCount[i] = 0;
-        for (int32_t j = 0; j < MAX_TOPO_NODES; j++) {
-            bfsAdj[i][j] = -1;
-        }
-    }
-
-    for (int32_t i = 0; i < numTopoLinks; i++) {
-        int32_t src_slot = findNodeSlot(topoLinks[i].src);
-        if (src_slot < 0) {
-            continue;
-        }
-
-        int32_t idx = bfsAdjCount[src_slot]++;
-        bfsAdj[src_slot][idx] = topoLinks[i].dst;
-    }
-
-    for (int32_t i = 0; i < MAX_TOPO_NODES; i++) {
-        for (int32_t j = 0; j < MAX_TOPO_NODES; j++) {
-            bfsDist[i][j] = -1;
+    for (int32_t i = 0; i < numTopoNodes; i++) {
+        for (int32_t j = 0; j < numTopoNodes; j++) {
             routeTable[i][j] = -1;
             ecmpCount[i][j] = 0;
-            for (int32_t k = 0; k < MAX_ECMP_NEXT_HOPS; k++) {
-                ecmpNextHops[i][j][k] = -1;
-            }
         }
     }
 
-    for (int32_t src_slot = 0; src_slot < numTopoNodes; src_slot++) {
+    // loadTopo() expands each physical link into two directed links, so a BFS
+    // rooted at the destination can walk the same neighbor lists and recover
+    // the shortest-path distance from every source slot to that destination.
+    for (int32_t dst_slot = 0; dst_slot < numTopoNodes; dst_slot++) {
+        for (int32_t i = 0; i < numTopoNodes; i++) {
+            bfsDist[i] = -1;
+        }
+
         int32_t qhead = 0;
         int32_t qtail = 0;
-        bfsQueue[qtail++] = src_slot;
-        bfsDist[src_slot][src_slot] = 0;
+        bfsQueue[qtail++] = dst_slot;
+        bfsDist[dst_slot] = 0;
 
         while (qhead < qtail) {
-            int32_t u_slot = bfsQueue[qhead++];
-            for (int32_t i = 0; i < bfsAdjCount[u_slot]; i++) {
-                NodeId v_id = bfsAdj[u_slot][i];
-                int32_t v_slot = findNodeSlot(v_id);
-                if (v_slot < 0) {
+            int32_t cur_slot = bfsQueue[qhead++];
+            const TopoNodeState &cur_node = topoNodes[cur_slot];
+            for (int32_t i = 0; i < cur_node.num_neighbors; i++) {
+                int32_t neighbor_slot = cur_node.neighbors[i].neighbor_slot;
+                if (neighbor_slot < 0 || neighbor_slot >= numTopoNodes) {
                     continue;
                 }
-                if (bfsDist[src_slot][v_slot] == -1) {
-                    bfsDist[src_slot][v_slot] = bfsDist[src_slot][u_slot] + 1;
-                    bfsQueue[qtail++] = v_slot;
+
+                if (bfsDist[neighbor_slot] == -1) {
+                    bfsDist[neighbor_slot] = bfsDist[cur_slot] + 1;
+                    bfsQueue[qtail++] = neighbor_slot;
                 }
             }
         }
-    }
 
-    for (int32_t src_slot = 0; src_slot < numTopoNodes; src_slot++) {
-        if (topoNodes[src_slot].type != NodeType::Switch) {
-            continue;
-        }
-
-        for (int32_t dst_slot = 0; dst_slot < numTopoNodes; dst_slot++) {
+        for (int32_t src_slot = 0; src_slot < numTopoNodes; src_slot++) {
             if (src_slot == dst_slot) {
                 continue;
             }
 
-            int32_t shortest_dist = bfsDist[src_slot][dst_slot];
+            if (topoNodes[src_slot].type != NodeType::Switch) {
+                continue;
+            }
+
+            int32_t shortest_dist = bfsDist[src_slot];
             if (shortest_dist < 0) {
                 continue;
             }
 
+            const TopoNodeState &src_node = topoNodes[src_slot];
             int32_t count = 0;
-            for (int32_t i = 0; i < bfsAdjCount[src_slot]; i++) {
-                NodeId neighbor_id = bfsAdj[src_slot][i];
-                int32_t neighbor_slot = findNodeSlot(neighbor_id);
-                if (neighbor_slot < 0) {
+            for (int32_t i = 0; i < src_node.num_neighbors; i++) {
+                const TopoNeighbor &neighbor = src_node.neighbors[i];
+                int32_t neighbor_slot = neighbor.neighbor_slot;
+                if (neighbor_slot < 0 || neighbor_slot >= numTopoNodes) {
                     continue;
                 }
 
-                if (bfsDist[neighbor_slot][dst_slot] >= 0 &&
-                    1 + bfsDist[neighbor_slot][dst_slot] == shortest_dist) {
+                if (bfsDist[neighbor_slot] >= 0 &&
+                    bfsDist[neighbor_slot] + 1 == shortest_dist) {
                     if (count < MAX_ECMP_NEXT_HOPS) {
-                        ecmpNextHops[src_slot][dst_slot][count] = neighbor_id;
+                        ecmpNextHops[src_slot][dst_slot][count] =
+                            neighbor.neighbor_id;
                         count += 1;
                     }
                 }
@@ -140,7 +131,8 @@ void Sim::computeRoutes()
 
             ecmpCount[src_slot][dst_slot] = count;
             if (count > 0) {
-                routeTable[src_slot][dst_slot] = ecmpNextHops[src_slot][dst_slot][0];
+                routeTable[src_slot][dst_slot] =
+                    ecmpNextHops[src_slot][dst_slot][0];
             }
         }
     }
@@ -213,7 +205,8 @@ int32_t Sim::getPath(NodeId src,
     return count;
 }
 
-int32_t Sim::lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const
+MADRONA_NO_INLINE int32_t Sim::lookupFlowRouteNext(
+    FlowId flow_id, int32_t port_id) const
 {
     for (int32_t i = 0; i < numFlowRoutes; i++) {
         if (flowRoutes[i].flow_id != flow_id) {
@@ -230,7 +223,7 @@ int32_t Sim::lookupFlowRouteNext(FlowId flow_id, int32_t port_id) const
     return -1;
 }
 
-void Sim::pushDelayedEvent(const DelayedEvent &ev)
+MADRONA_NO_INLINE void Sim::pushDelayedEvent(const DelayedEvent &ev)
 {
     if (numDelayedEvents >= MAX_DELAYED_EVENTS) {
         return;
@@ -285,7 +278,7 @@ Time Sim::chooseDT() const
 {
     constexpr const char *scope = "dt";
     uint64_t step = systemLogStep;
-    bool log_enabled = systemLogEnabled(scope, step);
+    bool log_enabled = compiledSystemLogEnabled(scope, step);
 
     Time dt_event = std::numeric_limits<Time>::max();
     double delayed_gap = std::numeric_limits<double>::max();

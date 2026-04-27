@@ -1,10 +1,19 @@
 set(SIMULATOR_SRCS
     types.hpp sim.hpp
     sim.cpp
+    sim_tasks.cpp
     sim_init.cpp
+    sim_init_state.cpp
+    sim_init_port.cpp
+    sim_init_topo.cpp
     sim_world.cpp
     sim_debug.cpp
     sim_systems.cpp
+    sim_systems_lifecycle.cpp
+    sim_systems_schedule.cpp
+    sim_systems_dispatch.cpp
+    sim_systems_progress.cpp
+    sim_systems_ingress.cpp
     sim_systems_bandwidth.cpp
     sim_systems_buffer.cpp
     sim_systems_pfc.cpp
