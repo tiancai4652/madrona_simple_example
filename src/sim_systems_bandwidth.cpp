@@ -272,7 +272,7 @@ MADRONA_NO_INLINE double activeChunkWeightSum(
 {
     double active_weight_sum = 0.0;
     for (int32_t wi = 0; wi < chunk.num_weights; wi++) {
-        Entity tag_e = sim.findTag(port_id, chunk.weights[wi].flow_id);
+        Entity tag_e = sim.findTag(ctx, port_id, chunk.weights[wi].flow_id);
         if (tag_e == Entity::none()) {
             continue;
         }
@@ -300,7 +300,7 @@ MADRONA_NO_INLINE bool assignChunkWeightedOutBW(
     }
 
     for (int32_t wi = 0; wi < chunk.num_weights; wi++) {
-        Entity tag_e = sim.findTag(port_id, chunk.weights[wi].flow_id);
+        Entity tag_e = sim.findTag(ctx, port_id, chunk.weights[wi].flow_id);
         if (tag_e == Entity::none()) {
             continue;
         }

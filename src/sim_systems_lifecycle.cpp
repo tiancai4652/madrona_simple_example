@@ -145,20 +145,7 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
     tag.ingress_port_id = -1;
 
     if (!is_source) {
-        for (int32_t i = 0; i < numFlowRoutes; i++) {
-            if (flowRoutes[i].flow_id != flow_id) {
-                continue;
-            }
-            for (int32_t j = 0; j < flowRoutes[i].num_steps; j++) {
-                if (flowRoutes[i].steps[j].next_port_id == port_id) {
-                    int32_t upstream_port = flowRoutes[i].steps[j].port_id;
-                    if (upstream_port >= 0 && upstream_port < numPorts) {
-                        tag.ingress_port_id = peerPort[upstream_port];
-                    }
-                    break;
-                }
-            }
-        }
+        tag.ingress_port_id = lookupFlowIngressPort(flow_id, port_id);
     }
 
     tag.port_entity = port_entity;

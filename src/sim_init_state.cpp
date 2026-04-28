@@ -17,6 +17,8 @@ void Sim::resetNetworkState()
     numTopoLinks = 0;
     numPorts = 0;
     numFlowDefs = 0;
+    flowLookupBase = 0;
+    flowLookupSpan = 0;
     numPendingFlows = 0;
     numFlowRoutes = 0;
     numDelayedEvents = 0;
@@ -54,6 +56,11 @@ void Sim::resetNetworkState()
 
     for (int32_t i = 0; i < MAX_TOPO_LINKS; i++) {
         topoLinks[i] = TopoLinkState {};
+    }
+
+    for (int32_t i = 0; i < MAX_FLOWS; i++) {
+        flowDefSlotLookup[i] = -1;
+        flowRouteSlotLookup[i] = -1;
     }
 
     for (int32_t i = 0; i < MAX_TOPO_PORTS; i++) {

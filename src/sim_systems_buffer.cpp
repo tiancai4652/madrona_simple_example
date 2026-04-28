@@ -452,18 +452,19 @@ void Sim::advanceOnePortBuffer(
                 }
                 bool upstream_alive = false;
                 if (tag.is_source == 0) {
-                    for (int32_t r = 0; r < numFlowRoutes; r++) {
-                        if (flowRoutes[r].flow_id != tag.flow_id) {
-                            continue;
-                        }
-                        for (int32_t s = 0; s < flowRoutes[r].num_steps; s++) {
-                            if (flowRoutes[r].steps[s].next_port_id == tag.port_id) {
-                                Entity up = findTag(flowRoutes[r].steps[s].port_id, tag.flow_id);
-                                if (up != Entity::none()) {
-                                    upstream_alive = true;
-                                }
-                                break;
+                    int32_t route_slot = findFlowRouteSlot(tag.flow_id);
+                    if (route_slot >= 0 && route_slot < numFlowRoutes) {
+                        const FlowRouteState &route = flowRoutes[route_slot];
+                        for (int32_t s = 0; s < route.num_steps; s++) {
+                            if (route.steps[s].next_port_id != tag.port_id) {
+                                continue;
                             }
+                            Entity up = findTag(
+                                ctx, route.steps[s].port_id, tag.flow_id);
+                            if (up != Entity::none()) {
+                                upstream_alive = true;
+                            }
+                            break;
                         }
                     }
                 }

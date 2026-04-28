@@ -208,16 +208,40 @@ int32_t Sim::getPath(NodeId src,
 MADRONA_NO_INLINE int32_t Sim::lookupFlowRouteNext(
     FlowId flow_id, int32_t port_id) const
 {
-    for (int32_t i = 0; i < numFlowRoutes; i++) {
-        if (flowRoutes[i].flow_id != flow_id) {
+    int32_t route_slot = findFlowRouteSlot(flow_id);
+    if (route_slot < 0 || route_slot >= numFlowRoutes) {
+        return -1;
+    }
+
+    const FlowRouteState &route = flowRoutes[route_slot];
+    for (int32_t j = 0; j < route.num_steps; j++) {
+        if (route.steps[j].port_id == port_id) {
+            return route.steps[j].next_port_id;
+        }
+    }
+
+    return -1;
+}
+
+MADRONA_NO_INLINE int32_t Sim::lookupFlowIngressPort(
+    FlowId flow_id, int32_t port_id) const
+{
+    int32_t route_slot = findFlowRouteSlot(flow_id);
+    if (route_slot < 0 || route_slot >= numFlowRoutes) {
+        return -1;
+    }
+
+    const FlowRouteState &route = flowRoutes[route_slot];
+    for (int32_t step_idx = 0; step_idx < route.num_steps; step_idx++) {
+        if (route.steps[step_idx].next_port_id != port_id) {
             continue;
         }
 
-        for (int32_t j = 0; j < flowRoutes[i].num_steps; j++) {
-            if (flowRoutes[i].steps[j].port_id == port_id) {
-                return flowRoutes[i].steps[j].next_port_id;
-            }
+        int32_t upstream_port = route.steps[step_idx].port_id;
+        if (upstream_port >= 0 && upstream_port < numPorts) {
+            return peerPort[upstream_port];
         }
+        return -1;
     }
 
     return -1;

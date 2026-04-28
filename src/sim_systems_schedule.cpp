@@ -88,6 +88,9 @@ MADRONA_NO_INLINE void Sim::injectFlowDef(const FlowDef &flow)
             route.steps[i].port_id = port_path[i];
             route.steps[i].next_port_id = port_path[i + 1];
         }
+        if (flowLookupSpan > 0) {
+            flowRouteSlotLookup[flow.id - flowLookupBase] = numFlowRoutes - 1;
+        }
     }
 
     int32_t src_port_id =

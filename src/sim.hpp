@@ -149,6 +149,9 @@ struct Sim : public madrona::WorldBase {
                                          Bw port_bw);
     int32_t findNodeSlot(NodeId node_id) const;
     int32_t findNeighborSlot(int32_t node_slot, NodeId neighbor_id) const;
+    int32_t findFlowDefSlot(FlowId flow_id) const;
+    int32_t findFlowRouteSlot(FlowId flow_id) const;
+    const FlowDef *getFlowDef(FlowId flow_id) const;
     int32_t getPath(NodeId src,
                     NodeId dst,
                     FlowId flow_id,
@@ -364,8 +367,10 @@ struct Sim : public madrona::WorldBase {
 
     MADRONA_NO_INLINE int32_t lookupFlowRouteNext(
         FlowId flow_id, int32_t port_id) const;
+    MADRONA_NO_INLINE int32_t lookupFlowIngressPort(
+        FlowId flow_id, int32_t port_id) const;
     MADRONA_NO_INLINE madrona::Entity findTag(
-        int32_t port_id, FlowId flow_id) const;
+        madrona::Context &ctx, int32_t port_id, FlowId flow_id) const;
     MADRONA_NO_INLINE madrona::Entity createTagOnPort(
         madrona::Context &ctx,
         int32_t port_id,
@@ -446,6 +451,10 @@ struct Sim : public madrona::WorldBase {
     int32_t bfsDist[MAX_TOPO_NODES];
     int32_t bfsQueue[MAX_TOPO_NODES];
     int32_t numFlowDefs;
+    FlowId flowLookupBase = 0;
+    int32_t flowLookupSpan = 0;
+    int32_t flowDefSlotLookup[MAX_FLOWS];
+    int32_t flowRouteSlotLookup[MAX_FLOWS];
     FlowDef flowDefs[MAX_FLOWS];
     int32_t numPendingFlows;
     FlowDef pendingFlows[MAX_FLOWS];

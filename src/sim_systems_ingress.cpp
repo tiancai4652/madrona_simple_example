@@ -272,11 +272,9 @@ void Sim::bwUpdateOnePort(Context &ctx,
 
             if (create_list.num < MAX_PORT_CREATE) {
                 int32_t pri = 0;
-                for (int32_t j = 0; j < numFlowDefs; j++) {
-                    if (flowDefs[j].id == ev.flow_id) {
-                        pri = flowDefs[j].priority;
-                        break;
-                    }
+                const FlowDef *flow_def = getFlowDef(ev.flow_id);
+                if (flow_def != nullptr) {
+                    pri = flow_def->priority;
                 }
 
                 PortCreateReq &req = create_list.reqs[create_list.num++];
