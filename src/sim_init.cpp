@@ -38,6 +38,8 @@ void Sim::loadFlow(Engine &ctx)
             for (int32_t i = 0; i < flowLookupSpan; i++) {
                 flowDefSlotLookup[i] = -1;
                 flowRouteSlotLookup[i] = -1;
+                flowCompletionSlotLookup[i] = -1;
+                sourceTagSlotLookup[i] = -1;
             }
         } else {
             flowLookupBase = 0;

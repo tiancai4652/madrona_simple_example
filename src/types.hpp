@@ -379,6 +379,19 @@ struct PortTagList {
     madrona::Entity tags[MAX_TAGS_PER_PORT] {};
 };
 
+// Per-ingress-port mirror of the non-source ingressTags[] subset. Most
+// ingress-scoped systems only care about one ingress port at a time; this
+// list lets them avoid rescanning the full global ingressTags[] array on the
+// common path. If a port ever exceeds the fixed local capacity, overflow is
+// latched and callers fall back to the authoritative global ingressTags[].
+constexpr int32_t MAX_TAGS_PER_INGRESS = 256;
+
+struct IngressTagList {
+    int32_t count = 0;
+    int32_t overflow = 0;
+    madrona::Entity tags[MAX_TAGS_PER_INGRESS] {};
+};
+
 // Phase E: per-Port inbox. The deliverEvents singleton dispatches each
 // delayedEvent whose t <= now to the target port's inbox (arrival/bwupd
 // target ev.port_id, pfc target ev.target_port_id). Per-Port workers

@@ -45,6 +45,7 @@ constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
 constexpr int32_t MAX_DELAYED_EVENTS = 131072;
 constexpr int32_t MAX_EVENTS_PER_STEP = 1024;
 constexpr int32_t MAX_TAG_INDEX = 258048;
+constexpr int32_t TAG_LOOKUP_CAPACITY = 1 << 19;
 constexpr int32_t MAX_SOURCE_TAGS = 64512;
 constexpr int32_t MAX_INGRESS_TAGS = 258048;
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
@@ -86,6 +87,12 @@ struct FlowRouteState {
 // types.hpp (phase C) so PortOutbox can embed them in the Port archetype.
 
 struct TagIndexEntry {
+    int32_t port_id = -1;
+    FlowId flow_id = -1;
+    madrona::Entity entity = madrona::Entity::none();
+};
+
+struct TagLookupEntry {
     int32_t port_id = -1;
     FlowId flow_id = -1;
     madrona::Entity entity = madrona::Entity::none();
@@ -149,8 +156,15 @@ struct Sim : public madrona::WorldBase {
                                          Bw port_bw);
     int32_t findNodeSlot(NodeId node_id) const;
     int32_t findNeighborSlot(int32_t node_slot, NodeId neighbor_id) const;
+    int32_t flowLookupIndex(FlowId flow_id) const;
     int32_t findFlowDefSlot(FlowId flow_id) const;
     int32_t findFlowRouteSlot(FlowId flow_id) const;
+    int32_t findFlowCompletionSlot(FlowId flow_id) const;
+    int32_t findTagLookupSlot(int32_t port_id, FlowId flow_id) const;
+    void insertTagLookup(int32_t port_id,
+                         FlowId flow_id,
+                         madrona::Entity entity);
+    void removeTagLookup(int32_t port_id, FlowId flow_id);
     const FlowDef *getFlowDef(FlowId flow_id) const;
     int32_t getPath(NodeId src,
                     NodeId dst,
@@ -466,6 +480,8 @@ struct Sim : public madrona::WorldBase {
     int32_t flowLookupSpan = 0;
     int32_t flowDefSlotLookup[MAX_FLOWS];
     int32_t flowRouteSlotLookup[MAX_FLOWS];
+    int32_t flowCompletionSlotLookup[MAX_FLOWS];
+    int32_t sourceTagSlotLookup[MAX_FLOWS];
     FlowDef flowDefs[MAX_FLOWS];
     int32_t numPendingFlows;
     FlowDef pendingFlows[MAX_FLOWS];
@@ -483,6 +499,7 @@ struct Sim : public madrona::WorldBase {
     PfcControlEv inboxPfc[MAX_EVENTS_PER_STEP];
     int32_t numTagIndexEntries;
     TagIndexEntry tagIndex[MAX_TAG_INDEX];
+    TagLookupEntry tagLookup[TAG_LOOKUP_CAPACITY];
     int32_t numSourceTags;
     SourceTagEntry sourceTags[MAX_SOURCE_TAGS];
     // GPU megakernel stack must stay small; progressFinishedSources reuses this
@@ -491,6 +508,7 @@ struct Sim : public madrona::WorldBase {
     madrona::Entity finishedSourceScratch[MAX_SOURCE_TAGS];
     int32_t numIngressTags;
     IngressTagEntry ingressTags[MAX_INGRESS_TAGS];
+    IngressTagList ingressTagLists[MAX_TOPO_PORTS];
     int32_t numFlowCompletions;
     FlowCompletionEntry flowCompletions[MAX_FLOW_COMPLETIONS];
     // Large per-port scratch queues live on Sim instead of the Port

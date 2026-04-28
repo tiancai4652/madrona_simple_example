@@ -71,6 +71,7 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
     if (tag.port_entity != Entity::none()) {
         int32_t port_id = tag.port_id;
         if (port_id >= 0 && port_id < numPorts) {
+            removeTagLookup(port_id, tag.flow_id);
             PortTagList &ptl = portTagLists[port_id];
             for (int32_t i = 0; i < ptl.count; i++) {
                 if (ptl.tags[i] == tag_entity) {
@@ -83,24 +84,63 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
         }
     }
 
-    for (int32_t i = 0; i < numIngressTags; i++) {
-        if (ingressTags[i].entity == tag_entity) {
-            for (int32_t j = i + 1; j < numIngressTags; j++) {
-                ingressTags[j - 1] = ingressTags[j];
+    if (tag.ingress_port_id >= 0 && tag.ingress_port_id < numPorts) {
+        IngressTagList &itl = ingressTagLists[tag.ingress_port_id];
+        for (int32_t i = 0; i < itl.count; i++) {
+            if (itl.tags[i] != tag_entity) {
+                continue;
             }
-            numIngressTags -= 1;
-            i -= 1;
+            itl.tags[i] = itl.tags[itl.count - 1];
+            itl.tags[itl.count - 1] = Entity::none();
+            itl.count -= 1;
+            break;
         }
     }
 
-    for (int32_t i = 0; i < numSourceTags; i++) {
-        if (sourceTags[i].entity == tag_entity) {
-            for (int32_t j = i + 1; j < numSourceTags; j++) {
-                sourceTags[j - 1] = sourceTags[j];
-            }
-            numSourceTags -= 1;
-            break;
+    for (int32_t i = 0; i < numIngressTags; i++) {
+        if (ingressTags[i].entity != tag_entity) {
+            continue;
         }
+        int32_t last_slot = numIngressTags - 1;
+        if (i != last_slot) {
+            ingressTags[i] = ingressTags[last_slot];
+        }
+        ingressTags[last_slot] = IngressTagEntry {};
+        numIngressTags = last_slot;
+        break;
+    }
+
+    int32_t source_slot = findSourceTagIndex(tag.flow_id);
+    if (source_slot >= 0 && source_slot < numSourceTags &&
+        sourceTags[source_slot].entity != tag_entity) {
+        source_slot = -1;
+    }
+    if (source_slot < 0) {
+        for (int32_t i = 0; i < numSourceTags; i++) {
+            if (sourceTags[i].entity == tag_entity) {
+                source_slot = i;
+                break;
+            }
+        }
+    }
+
+    if (source_slot >= 0 && source_slot < numSourceTags) {
+        int32_t lookup_idx = flowLookupIndex(tag.flow_id);
+        if (lookup_idx >= 0) {
+            sourceTagSlotLookup[lookup_idx] = -1;
+        }
+
+        int32_t last_slot = numSourceTags - 1;
+        if (source_slot != last_slot) {
+            sourceTags[source_slot] = sourceTags[last_slot];
+            int32_t moved_lookup_idx =
+                flowLookupIndex(sourceTags[source_slot].flow_id);
+            if (moved_lookup_idx >= 0) {
+                sourceTagSlotLookup[moved_lookup_idx] = source_slot;
+            }
+        }
+        sourceTags[last_slot] = SourceTagEntry {};
+        numSourceTags = last_slot;
     }
 
     if (tag.port_id >= 0 && tag.port_id < numPorts) {
@@ -166,6 +206,7 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
 
     tag.port_entity = port_entity;
     ctx.get<FlowTagState>(tag_entity) = tag;
+    insertTagLookup(port_id, flow_id, tag_entity);
 
     if (numTagIndexEntries < MAX_TAG_INDEX) {
         tagIndex[numTagIndexEntries++] = TagIndexEntry {
@@ -188,13 +229,25 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
             .flow_id = flow_id,
             .entity = tag_entity,
         };
+
+        IngressTagList &itl = ingressTagLists[tag.ingress_port_id];
+        if (itl.count < MAX_TAGS_PER_INGRESS) {
+            itl.tags[itl.count++] = tag_entity;
+        } else {
+            itl.overflow = 1;
+        }
     }
 
     if (is_source && numSourceTags < MAX_SOURCE_TAGS) {
-        sourceTags[numSourceTags++] = SourceTagEntry {
+        int32_t slot = numSourceTags++;
+        sourceTags[slot] = SourceTagEntry {
             .flow_id = flow_id,
             .entity = tag_entity,
         };
+        int32_t lookup_idx = flowLookupIndex(flow_id);
+        if (lookup_idx >= 0) {
+            sourceTagSlotLookup[lookup_idx] = slot;
+        }
     }
 
     portDirtyStates[port_id].isDirty = 1;

@@ -367,26 +367,54 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     // Decide if this port is the ingress for any tag whose egress port is
     // dirty this frame. This mirrors the legacy "ingress_check" set built
     // by scanning all dirty egress ports' tags.
+    bool use_ingress_list =
+        port_id >= 0 && port_id < numPorts &&
+        ingressTagLists[port_id].overflow == 0;
     bool is_ingress_check_target = false;
-    for (int32_t j = 0; j < numTagIndexEntries; j++) {
-        if (tagIndex[j].entity == Entity::none()) {
-            continue;
+    if (use_ingress_list) {
+        const IngressTagList &itl = ingressTagLists[port_id];
+        for (int32_t i = 0; i < itl.count; i++) {
+            Entity te = itl.tags[i];
+            if (te == Entity::none()) {
+                continue;
+            }
+
+            FlowTagState &tag = ctx.get<FlowTagState>(te);
+            int32_t egress_port = tag.port_id;
+            if (egress_port < 0 || egress_port >= numPorts) {
+                continue;
+            }
+            Entity eg_e = portEntities[egress_port];
+            if (eg_e == Entity::none()) {
+                continue;
+            }
+            if (portDirtyStates[egress_port].isDirty != 0) {
+                is_ingress_check_target = true;
+                break;
+            }
         }
-        FlowTagState &tag = ctx.get<FlowTagState>(tagIndex[j].entity);
-        if (tag.ingress_port_id != port_id) {
-            continue;
-        }
-        int32_t egress_port = tag.port_id;
-        if (egress_port < 0 || egress_port >= numPorts) {
-            continue;
-        }
-        Entity eg_e = portEntities[egress_port];
-        if (eg_e == Entity::none()) {
-            continue;
-        }
-        if (portDirtyStates[egress_port].isDirty != 0) {
-            is_ingress_check_target = true;
-            break;
+    } else {
+        for (int32_t j = 0; j < numIngressTags; j++) {
+            if (ingressTags[j].ingress_port_id != port_id) {
+                continue;
+            }
+            Entity te = ingressTags[j].entity;
+            if (te == Entity::none()) {
+                continue;
+            }
+            FlowTagState &tag = ctx.get<FlowTagState>(te);
+            int32_t egress_port = tag.port_id;
+            if (egress_port < 0 || egress_port >= numPorts) {
+                continue;
+            }
+            Entity eg_e = portEntities[egress_port];
+            if (eg_e == Entity::none()) {
+                continue;
+            }
+            if (portDirtyStates[egress_port].isDirty != 0) {
+                is_ingress_check_target = true;
+                break;
+            }
         }
     }
     if (!is_ingress_check_target) {
@@ -401,22 +429,40 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
 
     double buf_by_pri[PFC_MAX_PRIORITY] {};
     double net_rate_by_pri[PFC_MAX_PRIORITY] {};
-    for (int32_t j = 0; j < numIngressTags; j++) {
-        if (ingressTags[j].ingress_port_id != port_id) {
-            continue;
+    if (use_ingress_list) {
+        const IngressTagList &itl = ingressTagLists[port_id];
+        for (int32_t i = 0; i < itl.count; i++) {
+            Entity te = itl.tags[i];
+            if (te == Entity::none()) {
+                continue;
+            }
+            FlowTagState &tag = ctx.get<FlowTagState>(te);
+            if (tag.is_source != 0) {
+                continue;
+            }
+            materializeBacklog(tag, now);
+            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+            buf_by_pri[pri] += tag.backlog;
+            net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
         }
-        Entity te = ingressTags[j].entity;
-        if (te == Entity::none()) {
-            continue;
+    } else {
+        for (int32_t j = 0; j < numIngressTags; j++) {
+            if (ingressTags[j].ingress_port_id != port_id) {
+                continue;
+            }
+            Entity te = ingressTags[j].entity;
+            if (te == Entity::none()) {
+                continue;
+            }
+            FlowTagState &tag = ctx.get<FlowTagState>(te);
+            if (tag.is_source != 0) {
+                continue;
+            }
+            materializeBacklog(tag, now);
+            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+            buf_by_pri[pri] += tag.backlog;
+            net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
         }
-        FlowTagState &tag = ctx.get<FlowTagState>(te);
-        if (tag.is_source != 0) {
-            continue;
-        }
-        materializeBacklog(tag, now);
-        int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-        buf_by_pri[pri] += tag.backlog;
-        net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
     }
 
     int32_t upstream_port = -1;
@@ -512,15 +558,29 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             double effective_net = net_rate;
             if (effective_net >= -1e-15) {
                 double out_total = 0.0;
-                for (int32_t j = 0; j < numIngressTags; j++) {
-                    if (ingressTags[j].ingress_port_id != port_id) {
-                        continue;
-                    }
-                    Entity te = ingressTags[j].entity;
-                    if (te != Entity::none()) {
+                if (use_ingress_list) {
+                    const IngressTagList &itl = ingressTagLists[port_id];
+                    for (int32_t i = 0; i < itl.count; i++) {
+                        Entity te = itl.tags[i];
+                        if (te == Entity::none()) {
+                            continue;
+                        }
                         FlowTagState &t = ctx.get<FlowTagState>(te);
                         if (t.priority == pri) {
                             out_total += t.out_bw;
+                        }
+                    }
+                } else {
+                    for (int32_t j = 0; j < numIngressTags; j++) {
+                        if (ingressTags[j].ingress_port_id != port_id) {
+                            continue;
+                        }
+                        Entity te = ingressTags[j].entity;
+                        if (te != Entity::none()) {
+                            FlowTagState &t = ctx.get<FlowTagState>(te);
+                            if (t.priority == pri) {
+                                out_total += t.out_bw;
+                            }
                         }
                     }
                 }

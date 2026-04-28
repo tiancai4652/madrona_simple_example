@@ -61,9 +61,16 @@ void Sim::resetNetworkState()
     for (int32_t i = 0; i < MAX_FLOWS; i++) {
         flowDefSlotLookup[i] = -1;
         flowRouteSlotLookup[i] = -1;
+        flowCompletionSlotLookup[i] = -1;
+        sourceTagSlotLookup[i] = -1;
+    }
+
+    for (int32_t i = 0; i < TAG_LOOKUP_CAPACITY; i++) {
+        tagLookup[i] = TagLookupEntry {};
     }
 
     for (int32_t i = 0; i < MAX_TOPO_PORTS; i++) {
+        ingressTagLists[i] = IngressTagList {};
         backlogDrainTimers[i] = timerInactiveSentinel();
         pfcPauseTimers[i] = timerInactiveSentinel();
         pfcResumeTimers[i] = timerInactiveSentinel();

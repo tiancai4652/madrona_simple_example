@@ -134,6 +134,31 @@ void Sim::progressBacklogDrainTimers(Context &ctx, Time dt)
 
 void Sim::markIngressTagsDirty(Context &ctx, int32_t ingress_port)
 {
+    bool use_ingress_list =
+        ingress_port >= 0 && ingress_port < numPorts &&
+        ingressTagLists[ingress_port].overflow == 0;
+
+    if (use_ingress_list) {
+        const IngressTagList &itl = ingressTagLists[ingress_port];
+        for (int32_t i = 0; i < itl.count; i++) {
+            Entity tag_e = itl.tags[i];
+            if (tag_e == Entity::none()) {
+                continue;
+            }
+
+            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+            if (tag.port_id < 0 || tag.port_id >= numPorts) {
+                continue;
+            }
+
+            Entity port_e = portEntities[tag.port_id];
+            if (port_e != Entity::none()) {
+                portDirtyStates[tag.port_id].isDirty = 1;
+            }
+        }
+        return;
+    }
+
     for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
         if (ingressTags[tag_idx].ingress_port_id != ingress_port) {
             continue;
@@ -215,12 +240,24 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
             continue;
         }
 
+        bool use_ingress_list =
+            ingressTagLists[ingress_port].overflow == 0;
         bool no_tags = true;
-        for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
-            if (ingressTags[tag_idx].ingress_port_id == ingress_port &&
-                ingressTags[tag_idx].entity != Entity::none()) {
-                no_tags = false;
-                break;
+        if (use_ingress_list) {
+            const IngressTagList &itl = ingressTagLists[ingress_port];
+            for (int32_t i = 0; i < itl.count; i++) {
+                if (itl.tags[i] != Entity::none()) {
+                    no_tags = false;
+                    break;
+                }
+            }
+        } else {
+            for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
+                if (ingressTags[tag_idx].ingress_port_id == ingress_port &&
+                    ingressTags[tag_idx].entity != Entity::none()) {
+                    no_tags = false;
+                    break;
+                }
             }
         }
 
@@ -270,40 +307,76 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
         }
 
         bool any_capped = false;
-        for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
-            if (ingressTags[tag_idx].ingress_port_id != ingress_port) {
-                continue;
+        if (use_ingress_list) {
+            const IngressTagList &itl = ingressTagLists[ingress_port];
+            for (int32_t i = 0; i < itl.count; i++) {
+                Entity tag_e = itl.tags[i];
+                if (tag_e == Entity::none()) {
+                    continue;
+                }
+
+                FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+                if (tag.is_source != 0) {
+                    continue;
+                }
+                if (tag.port_id < 0 || tag.port_id >= numPorts) {
+                    continue;
+                }
+
+                Entity port_e = portEntities[tag.port_id];
+                if (port_e == Entity::none()) {
+                    continue;
+                }
+
+                PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
+                materializeBufCnt(port_buf, now);
+                materializeBacklog(tag, now);
+
+                int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+                double actual = port_buf.prior_bufs[pri].buf_cnt;
+
+                if (actual < 1.0 && tag.backlog > 1.0) {
+                    tag.backlog = actual;
+                    tag.last_backlog_time = now;
+                    any_capped = true;
+                }
             }
+        } else {
+            for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
+                if (ingressTags[tag_idx].ingress_port_id != ingress_port) {
+                    continue;
+                }
 
-            Entity tag_e = ingressTags[tag_idx].entity;
-            if (tag_e == Entity::none()) {
-                continue;
-            }
+                Entity tag_e = ingressTags[tag_idx].entity;
+                if (tag_e == Entity::none()) {
+                    continue;
+                }
 
-            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
-            if (tag.is_source != 0) {
-                continue;
-            }
-            if (tag.port_id < 0 || tag.port_id >= numPorts) {
-                continue;
-            }
+                FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+                if (tag.is_source != 0) {
+                    continue;
+                }
+                if (tag.port_id < 0 || tag.port_id >= numPorts) {
+                    continue;
+                }
 
-            Entity port_e = portEntities[tag.port_id];
-            if (port_e == Entity::none()) {
-                continue;
-            }
+                Entity port_e = portEntities[tag.port_id];
+                if (port_e == Entity::none()) {
+                    continue;
+                }
 
-            PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
-            materializeBufCnt(port_buf, now);
-            materializeBacklog(tag, now);
+                PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
+                materializeBufCnt(port_buf, now);
+                materializeBacklog(tag, now);
 
-            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-            double actual = port_buf.prior_bufs[pri].buf_cnt;
+                int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+                double actual = port_buf.prior_bufs[pri].buf_cnt;
 
-            if (actual < 1.0 && tag.backlog > 1.0) {
-                tag.backlog = actual;
-                tag.last_backlog_time = now;
-                any_capped = true;
+                if (actual < 1.0 && tag.backlog > 1.0) {
+                    tag.backlog = actual;
+                    tag.last_backlog_time = now;
+                    any_capped = true;
+                }
             }
         }
 
