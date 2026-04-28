@@ -42,8 +42,11 @@ void Sim::pfcPropagateOnePort(Context &ctx,
     (void)ctx;
     (void)port_id;
 
-    trace.pfc_applied = 0;
-    trace.pfc_skipped = 0;
+    bool keep_trace = traceModeEnabled();
+    if (keep_trace) {
+        trace.pfc_applied = 0;
+        trace.pfc_skipped = 0;
+    }
 
     if (enablePfc == 0 || inbox.num_pfc == 0) {
         inbox.num_pfc = 0;
@@ -52,20 +55,24 @@ void Sim::pfcPropagateOnePort(Context &ctx,
 
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
-    bool log_enabled = compiledSystemLogEnabled(scope, step);
+    bool log_enabled = keep_trace && compiledSystemLogEnabled(scope, step);
 
     for (int32_t i = 0; i < inbox.num_pfc; i++) {
         const PfcControlEv &ev = inbox.pfcs[i];
         if (ev.priority >= 0 && ev.priority < PFC_MAX_PRIORITY) {
             pfc_state.paused[ev.priority] = ev.paused;
             dirty.isDirty = 1;
-            trace.pfc_applied += 1;
+            if (keep_trace) {
+                trace.pfc_applied += 1;
+            }
             if (log_enabled) {
                 printSystemPfcState(step, now, ev,
                     pfc_state.paused[ev.priority], dirty.isDirty);
             }
         } else {
-            trace.pfc_skipped += 1;
+            if (keep_trace) {
+                trace.pfc_skipped += 1;
+            }
         }
     }
 
@@ -81,18 +88,23 @@ void Sim::flowArrivalOnePort(Context &ctx,
                              PortCreateList &create_list,
                              PortTraceLast &trace)
 {
-    trace.arrival_created = 0;
-    trace.arrival_updated = 0;
-    trace.arrival_skipped = 0;
+    bool keep_trace = traceModeEnabled();
+    if (keep_trace) {
+        trace.arrival_created = 0;
+        trace.arrival_updated = 0;
+        trace.arrival_skipped = 0;
+    }
 
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
-    bool log_enabled = compiledSystemLogEnabled(scope, step);
+    bool log_enabled = keep_trace && compiledSystemLogEnabled(scope, step);
 
     for (int32_t i = 0; i < inbox.num_arrival; i++) {
         const FlowArrivalEv &ev = inbox.arrivals[i];
         if (ev.port_id != port_id) {
-            trace.arrival_skipped += 1;
+            if (keep_trace) {
+                trace.arrival_skipped += 1;
+            }
             continue;
         }
 
@@ -105,7 +117,9 @@ void Sim::flowArrivalOnePort(Context &ctx,
                 tag.remaining = ev.size;
             }
             dirty.isDirty = 1;
-            trace.arrival_updated += 1;
+            if (keep_trace) {
+                trace.arrival_updated += 1;
+            }
             if (log_enabled) {
                 printSystemArrivalTag(step, now, "update", tag, dirty.isDirty);
             }
@@ -123,7 +137,9 @@ void Sim::flowArrivalOnePort(Context &ctx,
             req.log_enabled = log_enabled ? 1 : 0;
             req.log_label = "create";
         } else {
-            trace.arrival_skipped += 1;
+            if (keep_trace) {
+                trace.arrival_skipped += 1;
+            }
         }
     }
 
@@ -143,22 +159,27 @@ void Sim::bwUpdateOnePort(Context &ctx,
                           PortCompletionList &completions,
                           PortTraceLast &trace)
 {
-    trace.bwupd_created = 0;
-    trace.bwupd_updated = 0;
-    trace.bwupd_buffered_zero = 0;
-    trace.bwupd_destroyed = 0;
-    trace.bwupd_forwarded = 0;
-    trace.bwupd_completed = 0;
-    trace.bwupd_skipped = 0;
+    bool keep_trace = traceModeEnabled();
+    if (keep_trace) {
+        trace.bwupd_created = 0;
+        trace.bwupd_updated = 0;
+        trace.bwupd_buffered_zero = 0;
+        trace.bwupd_destroyed = 0;
+        trace.bwupd_forwarded = 0;
+        trace.bwupd_completed = 0;
+        trace.bwupd_skipped = 0;
+    }
 
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
-    bool log_enabled = compiledSystemLogEnabled(scope, step);
+    bool log_enabled = keep_trace && compiledSystemLogEnabled(scope, step);
 
     for (int32_t i = 0; i < inbox.num_bwupd; i++) {
         const BwUpdateEv &ev = inbox.bwupds[i];
         if (ev.port_id != port_id) {
-            trace.bwupd_skipped += 1;
+            if (keep_trace) {
+                trace.bwupd_skipped += 1;
+            }
             continue;
         }
 
@@ -171,7 +192,9 @@ void Sim::bwUpdateOnePort(Context &ctx,
                 if (enableBuffer != 0 && tag.backlog > 1e-15) {
                     tag.in_bw = 0.0;
                     dirty.isDirty = 1;
-                    trace.bwupd_buffered_zero += 1;
+                    if (keep_trace) {
+                        trace.bwupd_buffered_zero += 1;
+                    }
                     if (log_enabled) {
                         printSystemBwUpdateTag(step, now, "buffered_zero",
                             tag, dirty.isDirty);
@@ -184,14 +207,18 @@ void Sim::bwUpdateOnePort(Context &ctx,
                         cleanup.num += 1;
                     }
                     dirty.isDirty = 1;
-                    trace.bwupd_destroyed += 1;
+                    if (keep_trace) {
+                        trace.bwupd_destroyed += 1;
+                    }
                     if (log_enabled) {
                         printSystemBwUpdateTag(step, now, "destroy",
                             tag_copy, dirty.isDirty);
                     }
                 }
             } else {
-                trace.bwupd_skipped += 1;
+                if (keep_trace) {
+                    trace.bwupd_skipped += 1;
+                }
             }
             continue;
         }
@@ -222,7 +249,9 @@ void Sim::bwUpdateOnePort(Context &ctx,
                     if (outbox.num_events < MAX_PORT_OUTBOX) {
                         outbox.events[outbox.num_events++] = cleanup_ev;
                     }
-                    trace.bwupd_forwarded += 1;
+                    if (keep_trace) {
+                        trace.bwupd_forwarded += 1;
+                    }
                     if (log_enabled) {
                         printSystemBwUpdateForward(step, now, ev.flow_id,
                             ev.port_id, next_port);
@@ -231,7 +260,9 @@ void Sim::bwUpdateOnePort(Context &ctx,
                     if (completions.num < MAX_PORT_COMPLETE) {
                         completions.flow_ids[completions.num++] = ev.flow_id;
                     }
-                    trace.bwupd_completed += 1;
+                    if (keep_trace) {
+                        trace.bwupd_completed += 1;
+                    }
                     if (log_enabled) {
                         printSystemBwUpdateComplete(step, now, ev.flow_id);
                     }
@@ -258,7 +289,9 @@ void Sim::bwUpdateOnePort(Context &ctx,
                 req.log_enabled = log_enabled ? 1 : 0;
                 req.log_label = "create";
             } else {
-                trace.bwupd_skipped += 1;
+                if (keep_trace) {
+                    trace.bwupd_skipped += 1;
+                }
             }
         } else {
             FlowTagState &tag = ctx.get<FlowTagState>(existing);
@@ -267,7 +300,9 @@ void Sim::bwUpdateOnePort(Context &ctx,
                 tag.in_bw = ev.in_bw;
             }
             dirty.isDirty = 1;
-            trace.bwupd_updated += 1;
+            if (keep_trace) {
+                trace.bwupd_updated += 1;
+            }
             if (log_enabled) {
                 printSystemBwUpdateTag(step, now, "update", tag, dirty.isDirty);
             }
@@ -279,9 +314,10 @@ void Sim::bwUpdateOnePort(Context &ctx,
 
 void Sim::flushTagCreate(Context &ctx)
 {
+    bool keep_trace = traceModeEnabled();
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
-    bool log_enabled = compiledSystemLogEnabled(scope, step);
+    bool log_enabled = keep_trace && compiledSystemLogEnabled(scope, step);
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
@@ -300,18 +336,22 @@ void Sim::flushTagCreate(Context &ctx)
             Entity created = createTagOnPort(ctx, port_id, req.flow_id,
                 req.in_bw, req.size, req.is_source != 0, req.priority);
             if (created == Entity::none()) {
-                if (req.from_arrival != 0) {
-                    trace.arrival_skipped += 1;
-                } else {
-                    trace.bwupd_skipped += 1;
+                if (keep_trace) {
+                    if (req.from_arrival != 0) {
+                        trace.arrival_skipped += 1;
+                    } else {
+                        trace.bwupd_skipped += 1;
+                    }
                 }
                 continue;
             }
 
-            if (req.from_arrival != 0) {
-                trace.arrival_created += 1;
-            } else {
-                trace.bwupd_created += 1;
+            if (keep_trace) {
+                if (req.from_arrival != 0) {
+                    trace.arrival_created += 1;
+                } else {
+                    trace.bwupd_created += 1;
+                }
             }
 
             if (log_enabled && req.log_enabled != 0) {
@@ -349,6 +389,10 @@ void Sim::flushFlowCompletion(Context &ctx)
 
 void Sim::logIngressChain(Context &ctx)
 {
+    if (!traceModeEnabled()) {
+        return;
+    }
+
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
     bool log_enabled = compiledSystemLogEnabled(scope, step);

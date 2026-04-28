@@ -104,68 +104,71 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
     }
 
     if constexpr (system_log_compiled_in) {
-        int32_t pending_before = numPendingFlows;
-        int32_t delayed_before = numDelayedEvents;
-        int32_t flow_routes_before = numFlowRoutes;
-        constexpr const char *scope = "ingress_chain";
-        uint64_t step = systemLogStep;
-        bool log_enabled = compiledSystemLogEnabled(scope, step);
-        FlowDef logged_flows[MAX_FLOWS] {};
-        int32_t num_logged_flows = 0;
+        if (traceModeEnabled()) {
+            int32_t pending_before = numPendingFlows;
+            int32_t delayed_before = numDelayedEvents;
+            int32_t flow_routes_before = numFlowRoutes;
+            constexpr const char *scope = "ingress_chain";
+            uint64_t step = systemLogStep;
+            bool log_enabled = compiledSystemLogEnabled(scope, step);
+            FlowDef logged_flows[MAX_FLOWS] {};
+            int32_t num_logged_flows = 0;
 
-        if (log_enabled) {
-            printSystemBegin(step, now, scope, "schedule_pending_flows");
-        }
-
-        for (int32_t i = 0; i < ready_count; i++) {
-            FlowDef flow = pendingFlows[i];
-            if (log_enabled && num_logged_flows < MAX_FLOWS) {
-                logged_flows[num_logged_flows++] = flow;
+            if (log_enabled) {
+                printSystemBegin(step, now, scope, "schedule_pending_flows");
             }
-            injectFlowDef(flow);
-        }
 
-        if (ready_count > 0) {
-            for (int32_t i = ready_count; i < numPendingFlows; i++) {
-                pendingFlows[i - ready_count] = pendingFlows[i];
+            for (int32_t i = 0; i < ready_count; i++) {
+                FlowDef flow = pendingFlows[i];
+                if (log_enabled && num_logged_flows < MAX_FLOWS) {
+                    logged_flows[num_logged_flows++] = flow;
+                }
+                injectFlowDef(flow);
             }
-            numPendingFlows -= ready_count;
-        }
 
-        if (log_enabled) {
-            for (int32_t i = 0; i < num_logged_flows; i++) {
-                for (int32_t j = i + 1; j < num_logged_flows; j++) {
-                    if (logged_flows[j].id < logged_flows[i].id) {
-                        FlowDef tmp = logged_flows[i];
-                        logged_flows[i] = logged_flows[j];
-                        logged_flows[j] = tmp;
+            if (ready_count > 0) {
+                for (int32_t i = ready_count; i < numPendingFlows; i++) {
+                    pendingFlows[i - ready_count] = pendingFlows[i];
+                }
+                numPendingFlows -= ready_count;
+            }
+
+            if (log_enabled) {
+                for (int32_t i = 0; i < num_logged_flows; i++) {
+                    for (int32_t j = i + 1; j < num_logged_flows; j++) {
+                        if (logged_flows[j].id < logged_flows[i].id) {
+                            FlowDef tmp = logged_flows[i];
+                            logged_flows[i] = logged_flows[j];
+                            logged_flows[j] = tmp;
+                        }
                     }
                 }
+                for (int32_t i = 0; i < num_logged_flows; i++) {
+                    printSystemScheduleFlow(step, now, logged_flows[i]);
+                }
+                printSystemScheduleSummary(step, now,
+                    ready_count,
+                    pending_before,
+                    numPendingFlows,
+                    delayed_before,
+                    numDelayedEvents,
+                    flow_routes_before,
+                    numFlowRoutes);
+                printSystemEnd(step, now, scope, "schedule_pending_flows");
             }
-            for (int32_t i = 0; i < num_logged_flows; i++) {
-                printSystemScheduleFlow(step, now, logged_flows[i]);
-            }
-            printSystemScheduleSummary(step, now,
-                ready_count,
-                pending_before,
-                numPendingFlows,
-                delayed_before,
-                numDelayedEvents,
-                flow_routes_before,
-                numFlowRoutes);
-            printSystemEnd(step, now, scope, "schedule_pending_flows");
+            return;
         }
-    } else {
-        for (int32_t i = 0; i < ready_count; i++) {
-            injectFlowDef(pendingFlows[i]);
-        }
+    }
 
-        if (ready_count > 0) {
-            for (int32_t i = ready_count; i < numPendingFlows; i++) {
-                pendingFlows[i - ready_count] = pendingFlows[i];
-            }
-            numPendingFlows -= ready_count;
+    for (int32_t i = 0; i < ready_count; i++) {
+        injectFlowDef(pendingFlows[i]);
+    }
+
+    if (ready_count > 0) {
+        for (int32_t i = ready_count; i < numPendingFlows; i++) {
+            pendingFlows[i - ready_count] = pendingFlows[i];
         }
+        numPendingFlows -= ready_count;
     }
 }
 

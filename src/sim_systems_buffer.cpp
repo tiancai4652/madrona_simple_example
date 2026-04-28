@@ -148,9 +148,12 @@ void Sim::advanceOnePortBuffer(
     PortTagList &tag_list)
 {
     cleanup.num = 0;
-    trace.buffer_processed = 0;
-    trace.buffer_destroy_count = 0;
-    trace.buffer_total_buf_cnt = 0.0;
+    bool keep_trace = traceModeEnabled();
+    if (keep_trace) {
+        trace.buffer_processed = 0;
+        trace.buffer_destroy_count = 0;
+        trace.buffer_total_buf_cnt = 0.0;
+    }
 
     if (enableBuffer == 0 || dt < 1e-15) {
         return;
@@ -221,7 +224,9 @@ void Sim::advanceOnePortBuffer(
     if (num_tags == 0) {
         return;
     }
-    trace.buffer_processed = 1;
+    if (keep_trace) {
+        trace.buffer_processed = 1;
+    }
 
     {
         (void)port_state;
@@ -503,10 +508,14 @@ void Sim::advanceOnePortBuffer(
         for (int32_t pri = pri_begin; pri < pri_end; pri++) {
             port_total += port_buf.prior_bufs[pri].buf_cnt;
         }
-        trace.buffer_total_buf_cnt = port_total;
+        if (keep_trace) {
+            trace.buffer_total_buf_cnt = port_total;
+        }
     }
 
-    trace.buffer_destroy_count = cleanup.num;
+    if (keep_trace) {
+        trace.buffer_destroy_count = cleanup.num;
+    }
 }
 
 // Phase B.3 singleton: replay the destroyTag calls that advanceOnePortBuffer
@@ -540,6 +549,10 @@ void Sim::flushBufferTagCleanup(Context &ctx)
 // ports' summaries.
 void Sim::logBufferTraces(Context &ctx)
 {
+    if (!traceModeEnabled()) {
+        return;
+    }
+
     constexpr const char *scope = "buffer";
     uint64_t step = systemLogStep;
     bool log_enabled = compiledSystemLogEnabled(scope, step);

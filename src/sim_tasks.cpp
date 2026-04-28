@@ -9,12 +9,17 @@ using namespace madrona::math;
 
 namespace madsimple {
 // Emit a one-shot init trace. Suppressed when init_log_print_enabled is on,
-// so the [INIT] log dump consumed by check/run_parity.py stays free of any
-// extra `[init-trace]` lines that would shift line numbers and break diffs.
-// On GPU, only thread 0 prints to avoid flooding the CUDA printf buffer while
-// initTasks builds the task graph on device.
-static inline void initTrace(const char *msg)
+// or when FCT-only perf mode is enabled, so the [INIT] log dump consumed by
+// check/run_parity.py stays free of any extra `[init-trace]` lines that would
+// shift line numbers and break diffs. On GPU, only thread 0 prints to avoid
+// flooding the CUDA printf buffer while initTasks builds the task graph on
+// device.
+static inline void initTrace(const char *msg, bool trace_mode_enabled)
 {
+    if (!trace_mode_enabled) {
+        return;
+    }
+
 #ifdef MADRONA_GPU_MODE
     if constexpr (init_trace_compiled_in) {
         if (threadIdx.x == 0) {
@@ -56,14 +61,16 @@ constexpr int kTaskgraphStageLimit = 12;
 MADRONA_NO_INLINE void scheduleStepSystem(Engine &ctx, SimDriver &driver)
 {
     Sim &sim = ctx.data();
-    sim.systemLogStep += 1;
+    if (sim.traceModeEnabled()) {
+        sim.systemLogStep += 1;
+    }
     driver.tick += 1;
     // [step-trace] SimDriver 只有 1 entity, ParallelForNode 在 megakernel
     // 里只会派 1 个 thread 跑这个 system，但 thread index 不固定，所以
     // 不能用 threadIdx.x == 0 过滤。只用 tick<=3 限频。
 #ifdef MADRONA_GPU_MODE
     if constexpr (step_trace_compiled_in) {
-        if (driver.tick <= 3) {
+        if (sim.traceModeEnabled() && driver.tick <= 3) {
             int32_t t = driver.tick;
             int32_t pend_before = sim.numPendingFlows;
             float now_f = (float)sim.now;
@@ -76,7 +83,7 @@ MADRONA_NO_INLINE void scheduleStepSystem(Engine &ctx, SimDriver &driver)
     sim.schedulePendingFlows();
 #ifdef MADRONA_GPU_MODE
     if constexpr (step_trace_compiled_in) {
-        if (driver.tick <= 3) {
+        if (sim.traceModeEnabled() && driver.tick <= 3) {
             int32_t t = driver.tick;
             int32_t pend_after = sim.numPendingFlows;
             int32_t delayed_after = sim.numDelayedEvents;
@@ -155,7 +162,9 @@ MADRONA_NO_INLINE void postIngressStepSystem(Engine &ctx, SimDriver &)
     Sim &sim = ctx.data();
     sim.flushFlowCompletion(ctx);
     sim.flushPortOutbox(ctx);
-    sim.logIngressChain(ctx);
+    if (sim.traceModeEnabled()) {
+        sim.logIngressChain(ctx);
+    }
 }
 
 // Phase B.2: per-Port ParallelForNode that runs the bandwidth alloc phase
@@ -194,7 +203,9 @@ MADRONA_NO_INLINE void postAllocStepSystem(Engine &ctx, SimDriver &)
     sim.reducePortCachedHints(ctx);
     sim.flushPortDrainHints(ctx);
     sim.flushPortTagCleanup(ctx);
-    sim.logAllocTraces(ctx);
+    if (sim.traceModeEnabled()) {
+        sim.logAllocTraces(ctx);
+    }
 }
 
 // Phase C: per-Port PFC threshold detect. Writes to this port's own
@@ -239,14 +250,18 @@ MADRONA_NO_INLINE void postPfcStepSystem(Engine &ctx, SimDriver &)
     Sim &sim = ctx.data();
     sim.flushPortPfcTimers(ctx);
     sim.flushPortOutbox(ctx);
-    sim.logPfcDetectTraces(ctx);
+    if (sim.traceModeEnabled()) {
+        sim.logPfcDetectTraces(ctx);
+    }
 }
 
 MADRONA_NO_INLINE void postEmitStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.flushPortOutbox(ctx);
-    sim.logEmitTraces(ctx);
+    if (sim.traceModeEnabled()) {
+        sim.logEmitTraces(ctx);
+    }
 }
 
 // Phase B.1: per-Port ParallelForNode that snapshots and resets DirtyPort.
@@ -277,7 +292,7 @@ MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
     }
 #ifdef MADRONA_GPU_MODE
     if constexpr (step_trace_compiled_in) {
-        if (driver.tick <= 3) {
+        if (sim.traceModeEnabled() && driver.tick <= 3) {
             int32_t t = driver.tick;
             float dt_f = (float)sim.nextDT;
             float now_f = (float)sim.now;
@@ -315,10 +330,12 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
 {
     Sim &sim = ctx.data();
     sim.flushBufferTagCleanup(ctx);
-    sim.logBufferTraces(ctx);
+    if (sim.traceModeEnabled()) {
+        sim.logBufferTraces(ctx);
+    }
 #ifdef MADRONA_GPU_MODE
     if constexpr (step_trace_compiled_in) {
-        if (driver.tick <= 3) {
+        if (sim.traceModeEnabled() && driver.tick <= 3) {
             int32_t t = driver.tick;
             float dt_f = (float)sim.nextDT;
             float now_f = (float)sim.now;
@@ -332,7 +349,7 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     sim.now += sim.nextDT;
 #ifdef MADRONA_GPU_MODE
     if constexpr (step_trace_compiled_in) {
-        if (driver.tick <= 3) {
+        if (sim.traceModeEnabled() && driver.tick <= 3) {
             int32_t t = driver.tick;
             float now_f = (float)sim.now;
             mwGPU::HostPrint::log(
@@ -372,9 +389,10 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
 // cuda_exec.cpp. Stubbing this out under __CUDA_ARCH__ silently removes every
 // user system from the megakernel and leaves the GPU with no task graph.
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
-                     const Config &)
+                     const Config &cfg)
 {
-    initTrace("Sim::setupTasks enter");
+    bool trace_mode_enabled = cfg.perf_fct_only == 0;
+    initTrace("Sim::setupTasks enter", trace_mode_enabled);
     TaskGraphBuilder &builder = taskgraph_mgr.init(0);
 
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
@@ -479,7 +497,7 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
 #else
     (void)final_node;
 #endif
-    initTrace("Sim::setupTasks done");
+    initTrace("Sim::setupTasks done", trace_mode_enabled);
 }
 
 }

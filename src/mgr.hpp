@@ -30,6 +30,7 @@ public:
         double dt_min = 0.0;
         int32_t qos_mode = 0;
         double prior_weights[8] = {};
+        int32_t perf_fct_only = 1;
     };
 
     MGR_EXPORT Manager(const Config &cfg,

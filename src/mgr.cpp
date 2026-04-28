@@ -74,7 +74,37 @@ inline void sortFlowsByStartTime(FlowDef *flows, int32_t num_flows)
     std::stable_sort(flows, flows + num_flows,
         [](const FlowDef &a, const FlowDef &b) {
             return a.start_time < b.start_time;
-        });
+    });
+}
+
+inline bool envFlagValue(const char *env)
+{
+    return !(env[0] == '0' && env[1] == '\0');
+}
+
+inline bool envFlagEnabled(const char *name)
+{
+    const char *env = std::getenv(name);
+    if (env == nullptr || env[0] == '\0') {
+        return false;
+    }
+
+    return envFlagValue(env);
+}
+
+inline int32_t resolvePerfFCTOnly(const Manager::Config &cfg)
+{
+    const char *override_env = std::getenv("MADSIMPLE_PERF_FCT_ONLY");
+    if (override_env != nullptr && override_env[0] != '\0') {
+        return envFlagValue(override_env) ? 1 : 0;
+    }
+
+    if (envFlagEnabled("init_log_print_enabled") ||
+        envFlagEnabled("system_log_print_enabled")) {
+        return 0;
+    }
+
+    return cfg.perf_fct_only != 0 ? 1 : 0;
 }
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -360,6 +390,8 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
 {
     static_assert(sizeof(GridState) % alignof(Cell) == 0);
 
+    int32_t perf_fct_only = resolvePerfFCTOnly(cfg);
+
     Sim::Config sim_cfg {
         .maxEpisodeLength = cfg.maxEpisodeLength,
         .enableViewer = false,
@@ -373,6 +405,7 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
         .dt_min = cfg.dt_min,
         .qos_mode = cfg.qos_mode,
         .prior_weights = {},
+        .perf_fct_only = perf_fct_only,
     };
     for (int i = 0; i < 8; i++) {
         sim_cfg.prior_weights[i] = cfg.prior_weights[i];

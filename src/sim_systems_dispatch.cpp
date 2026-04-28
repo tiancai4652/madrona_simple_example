@@ -12,7 +12,8 @@ void Sim::deliverEvents(Context &ctx)
 {
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
-    bool log_enabled = compiledSystemLogEnabled(scope, step);
+    bool log_enabled =
+        traceModeEnabled() && compiledSystemLogEnabled(scope, step);
     int32_t delayed_before = numDelayedEvents;
 
     if (log_enabled) {
@@ -112,7 +113,8 @@ void Sim::snapshotDirtyPorts(Context &ctx)
 {
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;
-    bool log_enabled = compiledSystemLogEnabled(scope, step);
+    bool log_enabled =
+        traceModeEnabled() && compiledSystemLogEnabled(scope, step);
     numLastDirtyPortIDs = 0;
     int32_t cleared_port_count = 0;
 
@@ -219,9 +221,16 @@ void Sim::flushPortTagCleanup(Context &ctx)
 
 void Sim::logAllocTraces(Context &ctx)
 {
+    if (!traceModeEnabled()) {
+        return;
+    }
+
     constexpr const char *scope = "alloc";
     uint64_t step = systemLogStep;
     bool log_enabled = compiledSystemLogEnabled(scope, step);
+    if (!log_enabled) {
+        return;
+    }
 
     int32_t num_dirty = 0;
     int32_t processed = 0;
@@ -253,11 +262,7 @@ void Sim::logAllocTraces(Context &ctx)
                 trace.alloc_has_buffer);
         }
     }
-
-    if (log_enabled) {
-        printSystemAllocSummary(step, now, num_dirty, processed,
-            dirty_tag_count);
-    }
+    printSystemAllocSummary(step, now, num_dirty, processed, dirty_tag_count);
 }
 
 void Sim::flushPortOutbox(Context &ctx)
@@ -306,6 +311,10 @@ void Sim::flushPortPfcTimers(Context &ctx)
 
 void Sim::logPfcDetectTraces(Context &ctx)
 {
+    if (!traceModeEnabled()) {
+        return;
+    }
+
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;
     if (!compiledSystemLogEnabled(scope, step)) {
@@ -332,6 +341,10 @@ void Sim::logPfcDetectTraces(Context &ctx)
 
 void Sim::logEmitTraces(Context &ctx)
 {
+    if (!traceModeEnabled()) {
+        return;
+    }
+
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;
     if (!compiledSystemLogEnabled(scope, step)) {

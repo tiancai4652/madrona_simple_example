@@ -7,12 +7,16 @@ using namespace madrona::math;
 
 namespace madsimple {
 // Emit a one-shot init trace. Suppressed when init_log_print_enabled is on,
-// so the [INIT] log dump consumed by check/run_parity.py stays free of any
-// extra `[init-trace]` lines that would shift line numbers and break diffs.
-// On GPU, only thread 0 prints to avoid flooding the 1 MB CUDA printf buffer
-// with 256 duplicates.
-static inline void initTrace(const char *msg)
+// or when FCT-only perf mode is enabled, so the [INIT] log dump consumed by
+// check/run_parity.py stays free of any extra `[init-trace]` lines that would
+// shift line numbers and break diffs. On GPU, only thread 0 prints to avoid
+// flooding the 1 MB CUDA printf buffer with 256 duplicates.
+static inline void initTrace(const char *msg, bool trace_mode_enabled)
 {
+    if (!trace_mode_enabled) {
+        return;
+    }
+
 #ifdef MADRONA_GPU_MODE
     if constexpr (init_trace_compiled_in) {
         if (threadIdx.x == 0) {
@@ -81,12 +85,14 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
 {
     // [init-trace] 用于定位 GPU initWorlds 是否进入、走到哪一步。
     // 噪音抑制 + GPU 单线程打印的细节都封装在 initTrace() 里。
-    initTrace("Sim::Sim enter");
+    bool trace_mode_enabled = cfg.perf_fct_only == 0;
+    initTrace("Sim::Sim enter", trace_mode_enabled);
     resetNetworkState();
-    initTrace("Sim::Sim after resetNetworkState");
+    initTrace("Sim::Sim after resetNetworkState", trace_mode_enabled);
     enableBuffer = cfg.enable_buffer;
     enablePfc = cfg.enable_pfc;
     pfcEgress = cfg.pfc_egress;
+    perfFCTOnly = cfg.perf_fct_only;
     defaultLinkDelay = cfg.default_link_delay;
     propagationInterval = cfg.propagation_interval;
     pfcXoffThreshold = cfg.pfc_xoff_threshold;
@@ -108,9 +114,9 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     Entity driver = ctx.makeEntity<SimDriverArch>();
     ctx.get<SimDriver>(driver) = SimDriver { .tick = 0 };
 
-    initTrace("Sim::Sim before loadTopo");
+    initTrace("Sim::Sim before loadTopo", trace_mode_enabled);
     loadTopo(ctx);
-    initTrace("Sim::Sim after loadTopo, before loadFlow");
+    initTrace("Sim::Sim after loadTopo, before loadFlow", trace_mode_enabled);
     loadFlow(ctx);
 
     // Seed the SimStats / FlowCompletionBuf singleton mirrors so
@@ -137,7 +143,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
         init_buf.records[i] = flowCompletions[i].record;
     }
 
-    initTrace("Sim::Sim done");
+    initTrace("Sim::Sim done", trace_mode_enabled);
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, Sim::Config, WorldInit);

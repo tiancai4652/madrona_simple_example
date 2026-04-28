@@ -119,6 +119,7 @@ struct Sim : public madrona::WorldBase {
         double dt_min = 0.0;
         int32_t qos_mode = QOS_NONE;
         double prior_weights[PFC_MAX_PRIORITY] {};
+        int32_t perf_fct_only = 1;
     };
 
     static void registerTypes(madrona::ECSRegistry &registry,
@@ -179,6 +180,16 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE void progressExhaustedPfcState(
         madrona::Context &ctx,
         Time dt);
+
+    inline bool perfFCTOnlyEnabled() const
+    {
+        return perfFCTOnly != 0;
+    }
+
+    inline bool traceModeEnabled() const
+    {
+        return perfFCTOnly == 0;
+    }
 
     // Phase B.1 singleton: consumes PortTraceLast.was_dirty_at_clear written
     // by the per-Port clearDirtyOnePortSystem to rebuild lastDirtyPortIDs in
@@ -461,6 +472,7 @@ struct Sim : public madrona::WorldBase {
     int32_t enableBuffer;
     int32_t enablePfc;
     int32_t pfcEgress;
+    int32_t perfFCTOnly;
     Time defaultLinkDelay;
     Time propagationInterval;
     double pfcXoffThreshold;

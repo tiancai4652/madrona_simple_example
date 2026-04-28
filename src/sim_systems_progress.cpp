@@ -310,7 +310,8 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
 {
     constexpr const char *scope = "progress";
     uint64_t step = systemLogStep;
-    bool log_enabled = compiledSystemLogEnabled(scope, step);
+    bool log_enabled =
+        traceModeEnabled() && compiledSystemLogEnabled(scope, step);
     Time next_now = now + dt;
     int32_t finished_source_count = 0;
     int32_t emitted_cleanup_count = 0;

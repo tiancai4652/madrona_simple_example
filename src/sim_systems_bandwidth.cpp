@@ -29,7 +29,8 @@ MADRONA_NO_INLINE void resetAllocPhaseScratch(
     PortCachedHints &hints,
     PortDrainHint &drain_hint,
     PortCleanup &cleanup,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    bool keep_trace)
 {
     hints.has_drain_hint = 0;
     hints.has_finish_hint = 0;
@@ -39,15 +40,17 @@ MADRONA_NO_INLINE void resetAllocPhaseScratch(
     drain_hint.want_set = 0;
     drain_hint.set_t = 0.0;
     cleanup.num = 0;
-    trace.has_alloc_trace = 0;
-    trace.alloc_port_bw = 0.0;
-    trace.alloc_num_tags = 0;
-    trace.alloc_num_live = 0;
-    trace.alloc_sum_in = 0.0;
-    trace.alloc_sum_out = 0.0;
-    trace.alloc_is_dest_only = 0;
-    trace.alloc_has_buffer = 0;
     trace.was_dirty_at_alloc = 0;
+    if (keep_trace) {
+        trace.has_alloc_trace = 0;
+        trace.alloc_port_bw = 0.0;
+        trace.alloc_num_tags = 0;
+        trace.alloc_num_live = 0;
+        trace.alloc_sum_in = 0.0;
+        trace.alloc_sum_out = 0.0;
+        trace.alloc_is_dest_only = 0;
+        trace.alloc_has_buffer = 0;
+    }
 }
 
 MADRONA_NO_INLINE void materializeAllocPortBuffer(
@@ -201,6 +204,7 @@ MADRONA_NO_INLINE void finalizeAllocPortState(
     PortCachedHints &hints,
     PortDrainHint &drain_hint,
     PortTraceLast &trace,
+    bool keep_trace,
     Entity *live_tags,
     int32_t num_live,
     double port_bw,
@@ -208,12 +212,14 @@ MADRONA_NO_INLINE void finalizeAllocPortState(
     double out_total,
     bool is_dest_only)
 {
-    trace.has_alloc_trace = 1;
-    trace.alloc_port_bw = port_bw;
-    trace.alloc_sum_in = sum_in;
-    trace.alloc_sum_out = out_total;
-    trace.alloc_is_dest_only = is_dest_only ? 1 : 0;
-    trace.alloc_has_buffer = allocTraceHasBuffer(sim, port_buf) ? 1 : 0;
+    if (keep_trace) {
+        trace.has_alloc_trace = 1;
+        trace.alloc_port_bw = port_bw;
+        trace.alloc_sum_in = sum_in;
+        trace.alloc_sum_out = out_total;
+        trace.alloc_is_dest_only = is_dest_only ? 1 : 0;
+        trace.alloc_has_buffer = allocTraceHasBuffer(sim, port_buf) ? 1 : 0;
+    }
 
     for (int32_t i = 0; i < num_live; i++) {
         FlowTagState &tag = ctx.get<FlowTagState>(live_tags[i]);
@@ -682,7 +688,8 @@ void Sim::allocOnePort(
     PortTraceLast &trace,
     PortTagList &tag_list)
 {
-    resetAllocPhaseScratch(hints, drain_hint, cleanup, trace);
+    bool keep_trace = traceModeEnabled();
+    resetAllocPhaseScratch(hints, drain_hint, cleanup, trace, keep_trace);
 
     if (dirty.isDirty == 0) {
         return;
@@ -704,12 +711,16 @@ void Sim::allocOnePort(
     if (scratch.num_tags == 0) {
         return;
     }
-    trace.alloc_num_tags = scratch.num_tags;
+    if (keep_trace) {
+        trace.alloc_num_tags = scratch.num_tags;
+    }
 
     if (scratch.num_live == 0) {
         return;
     }
-    trace.alloc_num_live = scratch.num_live;
+    if (keep_trace) {
+        trace.alloc_num_live = scratch.num_live;
+    }
 
     bool is_dest_only = detectDestOnlyAllocPort(
         *this, ctx, port_id, scratch.live_tags, scratch.num_live);
@@ -740,8 +751,8 @@ void Sim::allocOnePort(
     }
 
     finalizeAllocPortState(*this, ctx, *port_buf, hints, drain_hint, trace,
-        scratch.live_tags, scratch.num_live, port_bw, scratch.live_sum_in,
-        out_total, is_dest_only);
+        keep_trace, scratch.live_tags, scratch.num_live, port_bw,
+        scratch.live_sum_in, out_total, is_dest_only);
 }
 
 // Phase C: per-Port downstream emit worker. Each port only sees its own
@@ -760,17 +771,22 @@ void Sim::emitOnePort(
     PortTagList &tag_list)
 {
     outbox.num_events = 0;
-    trace.emit_is_dirty = 0;
-    trace.emit_arrival_count = 0;
-    trace.emit_bwupdate_count = 0;
+    bool keep_trace = traceModeEnabled();
+    if (keep_trace) {
+        trace.emit_is_dirty = 0;
+        trace.emit_arrival_count = 0;
+        trace.emit_bwupdate_count = 0;
+    }
 
     if (dirty.isDirty == 0) {
         return;
     }
-    trace.emit_is_dirty = 1;
+    if (keep_trace) {
+        trace.emit_is_dirty = 1;
+    }
 
     const bool log_enabled =
-        compiledSystemLogEnabled("emit_tag", systemLogStep);
+        keep_trace && compiledSystemLogEnabled("emit_tag", systemLogStep);
 
     // Phase D: iterate PortTagList instead of scanning the global tagIndex.
     for (int32_t i = 0; i < tag_list.count; i++) {
@@ -799,7 +815,9 @@ void Sim::emitOnePort(
                         .priority = tag.priority,
                     };
                     tag.downstream_created = 1;
-                    trace.emit_arrival_count += 1;
+                    if (keep_trace) {
+                        trace.emit_arrival_count += 1;
+                    }
                 }
             }
             continue;
@@ -818,7 +836,9 @@ void Sim::emitOnePort(
                 .flow_id = tag.flow_id,
                 .in_bw = tag.out_bw,
             };
-            trace.emit_bwupdate_count += 1;
+            if (keep_trace) {
+                trace.emit_bwupdate_count += 1;
+            }
             if (log_enabled) {
                 printSystemEmitBwUpdateTag(
                     systemLogStep, now, port_id,

@@ -152,8 +152,11 @@ void Sim::pfcDetectOnePort(
 {
     // Reset per-frame scratch for this port.
     outbox.num_events = 0;
-    trace.pfc_detect_checked = 0;
-    trace.pfc_detect_emitted = 0;
+    bool keep_trace = traceModeEnabled();
+    if (keep_trace) {
+        trace.pfc_detect_checked = 0;
+        trace.pfc_detect_emitted = 0;
+    }
     state.want_clear_pause = 0;
     state.want_clear_resume = 0;
     state.want_set_pause = 0;
@@ -190,7 +193,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
     if (cfg.pfc_enabled == 0) {
         return;
     }
-    trace.pfc_detect_checked = 1;
+    if (traceModeEnabled()) {
+        trace.pfc_detect_checked = 1;
+    }
 
     double buf_by_pri[PFC_MAX_PRIORITY] {};
     int32_t upstream_ports[MAX_TOPO_PORTS] {};
@@ -257,7 +262,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
                         .priority = pri,
                         .paused = 1,
                     };
-                    trace.pfc_detect_emitted += 1;
+                    if (traceModeEnabled()) {
+                        trace.pfc_detect_emitted += 1;
+                    }
                 }
             }
             state.pfc_cnt[pri] += 1;
@@ -283,7 +290,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
                         .priority = pri,
                         .paused = 0,
                     };
-                    trace.pfc_detect_emitted += 1;
+                    if (traceModeEnabled()) {
+                        trace.pfc_detect_emitted += 1;
+                    }
                 }
             }
             state.paused_upstream_count[pri] = 0;
@@ -336,7 +345,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     if (cfg.pfc_enabled == 0) {
         return;
     }
-    trace.pfc_detect_checked = 1;
+    if (traceModeEnabled()) {
+        trace.pfc_detect_checked = 1;
+    }
 
     double buf_by_pri[PFC_MAX_PRIORITY] {};
     double net_rate_by_pri[PFC_MAX_PRIORITY] {};
@@ -389,7 +400,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
                         .priority = pri,
                         .paused = 1,
                     };
-                    trace.pfc_detect_emitted += 1;
+                    if (traceModeEnabled()) {
+                        trace.pfc_detect_emitted += 1;
+                    }
                 }
             }
             state.pfc_cnt[pri] += 1;
@@ -415,7 +428,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
                         .priority = pri,
                         .paused = 0,
                     };
-                    trace.pfc_detect_emitted += 1;
+                    if (traceModeEnabled()) {
+                        trace.pfc_detect_emitted += 1;
+                    }
                 }
             }
             state.paused_upstream_count[pri] = 0;
