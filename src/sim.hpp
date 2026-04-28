@@ -400,6 +400,9 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE Time computePropagationTimeForPort(
         int32_t src_port_id, int32_t dst_port_id) const;
     MADRONA_NO_INLINE void pushDelayedEvent(const DelayedEvent &ev);
+    MADRONA_NO_INLINE void pushDelayedEventsBatch(
+        const DelayedEvent *events,
+        int32_t count);
     MADRONA_NO_INLINE int32_t findSourceTagIndex(FlowId flow_id) const;
     MADRONA_NO_INLINE int32_t findIngressTagIndex(
         int32_t ingress_port_id, FlowId flow_id) const;
@@ -463,6 +466,7 @@ struct Sim : public madrona::WorldBase {
 
     int32_t numDelayedEvents;
     DelayedEvent delayedEvents[MAX_DELAYED_EVENTS];
+    DelayedEvent delayedEventScratch[MAX_DELAYED_EVENTS];
     int32_t numInboxArrival;
     FlowArrivalEv inboxArrival[MAX_EVENTS_PER_STEP];
     int32_t numInboxBwUpdate;

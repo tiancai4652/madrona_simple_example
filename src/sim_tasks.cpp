@@ -101,6 +101,20 @@ MADRONA_NO_INLINE void deliverStepSystem(Engine &ctx, SimDriver &)
     sim.deliverEvents(ctx);
 }
 
+MADRONA_NO_INLINE void resetIngressPortStateStepSystem(
+    Engine &ctx,
+    PortState &port_state)
+{
+    Sim &sim = ctx.data();
+    int32_t port_id = port_state.port_id;
+    PortInbox &inbox = sim.portInboxes[port_id];
+    inbox.num_arrival = 0;
+    inbox.num_bwupd = 0;
+    inbox.num_pfc = 0;
+    sim.portCreateLists[port_id].num = 0;
+    sim.portCompletionLists[port_id].num = 0;
+}
+
 // Phase E: per-Port ingress-chain workers. Each operates on a single
 // port's inbox + local components only; all cross-port effects are
 // deferred to flushTagCreate / flushFlowCompletion / flushPortOutbox /
@@ -418,8 +432,10 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
 
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
         scheduleStepSystem, SimDriver>>({});
+    auto n1reset = builder.addToGraph<ParallelForNode<Engine,
+        resetIngressPortStateStepSystem, PortState>>({n0});
     auto n1 = builder.addToGraph<ParallelForNode<Engine,
-        deliverStepSystem, SimDriver>>({n0});
+        deliverStepSystem, SimDriver>>({n1reset});
     // Phase E: per-Port ingress chain. deliverEvents (n1) already
     // dispatched each due event into the target port's PortInbox and
     // zeroed the per-port PortCreateList / PortCompletionList. We run

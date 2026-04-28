@@ -22,6 +22,39 @@ inline int32_t hashFlowIndex(FlowId flow_id, int32_t count)
     return (int32_t)(v % (uint64_t)count);
 }
 
+inline int32_t minI32(int32_t a, int32_t b)
+{
+    return a < b ? a : b;
+}
+
+MADRONA_NO_INLINE void mergeDelayedEventRuns(
+    const DelayedEvent *src,
+    DelayedEvent *dst,
+    int32_t left,
+    int32_t mid,
+    int32_t right)
+{
+    int32_t i = left;
+    int32_t j = mid;
+    int32_t out = left;
+
+    while (i < mid && j < right) {
+        if (src[i].t <= src[j].t) {
+            dst[out++] = src[i++];
+        } else {
+            dst[out++] = src[j++];
+        }
+    }
+
+    while (i < mid) {
+        dst[out++] = src[i++];
+    }
+
+    while (j < right) {
+        dst[out++] = src[j++];
+    }
+}
+
 }
 
 int32_t Sim::findNodeSlot(NodeId node_id) const
@@ -262,6 +295,71 @@ MADRONA_NO_INLINE void Sim::pushDelayedEvent(const DelayedEvent &ev)
         delayedEvents[idx] = tmp;
         idx -= 1;
     }
+}
+
+MADRONA_NO_INLINE void Sim::pushDelayedEventsBatch(
+    const DelayedEvent *events,
+    int32_t count)
+{
+    if (count <= 0) {
+        return;
+    }
+
+    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
+    if (available <= 0) {
+        return;
+    }
+    if (count > available) {
+        count = available;
+    }
+
+    if (events != delayedEventScratch) {
+        for (int32_t i = 0; i < count; i++) {
+            delayedEventScratch[i] = events[i];
+        }
+    }
+
+    if (count > 1) {
+        DelayedEvent *src = delayedEventScratch;
+        DelayedEvent *dst = delayedEvents + numDelayedEvents;
+
+        for (int32_t width = 1; width < count; width *= 2) {
+            for (int32_t left = 0; left < count; left += 2 * width) {
+                int32_t mid = minI32(left + width, count);
+                int32_t right = minI32(left + 2 * width, count);
+                mergeDelayedEventRuns(src, dst, left, mid, right);
+            }
+
+            DelayedEvent *tmp = src;
+            src = dst;
+            dst = tmp;
+        }
+
+        if (src != delayedEventScratch) {
+            for (int32_t i = 0; i < count; i++) {
+                delayedEventScratch[i] = src[i];
+            }
+        }
+    }
+
+    int32_t existing = numDelayedEvents;
+    int32_t write = existing + count - 1;
+    int32_t i = existing - 1;
+    int32_t j = count - 1;
+
+    while (i >= 0 && j >= 0) {
+        if (delayedEvents[i].t > delayedEventScratch[j].t) {
+            delayedEvents[write--] = delayedEvents[i--];
+        } else {
+            delayedEvents[write--] = delayedEventScratch[j--];
+        }
+    }
+
+    while (j >= 0) {
+        delayedEvents[write--] = delayedEventScratch[j--];
+    }
+
+    numDelayedEvents = existing + count;
 }
 
 Time Sim::computePropagationTimeAt(Time base_time, Time link_delay) const

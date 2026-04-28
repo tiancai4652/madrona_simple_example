@@ -24,19 +24,6 @@ void Sim::deliverEvents(Context &ctx)
     numInboxBwUpdate = 0;
     numInboxPfc = 0;
 
-    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none()) {
-            continue;
-        }
-        PortInbox &inbox = portInboxes[port_id];
-        inbox.num_arrival = 0;
-        inbox.num_bwupd = 0;
-        inbox.num_pfc = 0;
-        portCreateLists[port_id].num = 0;
-        portCompletionLists[port_id].num = 0;
-    }
-
     int32_t write_idx = 0;
     for (int32_t i = 0; i < numDelayedEvents; i++) {
         if (delayedEvents[i].t <= now + 1e-15) {
@@ -252,17 +239,29 @@ void Sim::logAllocTraces(Context &ctx)
 
 void Sim::flushPortOutbox(Context &ctx)
 {
+    (void)ctx;
+
+    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
+    int32_t batch_count = 0;
+
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
             continue;
         }
         PortOutbox &outbox = portOutboxes[port_id];
-        for (int32_t i = 0; i < outbox.num_events; i++) {
-            pushDelayedEvent(outbox.events[i]);
+        int32_t remaining = available - batch_count;
+        int32_t take = outbox.num_events;
+        if (take > remaining) {
+            take = remaining;
+        }
+        for (int32_t i = 0; i < take; i++) {
+            delayedEventScratch[batch_count++] = outbox.events[i];
         }
         outbox.num_events = 0;
     }
+
+    pushDelayedEventsBatch(delayedEventScratch, batch_count);
 }
 
 void Sim::flushPortPfcTimers(Context &ctx)
