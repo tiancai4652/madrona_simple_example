@@ -436,10 +436,10 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         resetIngressPortStateStepSystem, PortState>>({n0});
     auto n1 = builder.addToGraph<ParallelForNode<Engine,
         deliverStepSystem, SimDriver>>({n1reset});
-    // Phase E: per-Port ingress chain. deliverEvents (n1) already
-    // dispatched each due event into the target port's PortInbox and
-    // zeroed the per-port PortCreateList / PortCompletionList. We run
-    // pfcPropagate → arrival → flushTagCreate → bwUpdate →
+    // Phase E: per-Port ingress chain. resetIngressPortStateStepSystem
+    // has already cleared each port's inbox / create / completion
+    // scratch, and deliverEvents (n1) has dispatched each due event into
+    // the target port's PortInbox. We run pfcPropagate → arrival → flushTagCreate → bwUpdate →
     // flushTagCreate → flushTagCleanup → flushFlowCompletion →
     // flushPortOutbox → logIngressChain, matching the effective order
     // the legacy singleton path produced.

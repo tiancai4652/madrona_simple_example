@@ -24,66 +24,72 @@ void Sim::deliverEvents(Context &ctx)
     numInboxBwUpdate = 0;
     numInboxPfc = 0;
 
-    int32_t write_idx = 0;
-    for (int32_t i = 0; i < numDelayedEvents; i++) {
-        if (delayedEvents[i].t <= now + 1e-15) {
-            if (delayedEvents[i].type == DelayedEvent::Type::Arrival) {
-                const FlowArrivalEv &ev = delayedEvents[i].arrival;
-                if (numInboxArrival < MAX_EVENTS_PER_STEP) {
-                    inboxArrival[numInboxArrival++] = ev;
-                    if (log_enabled) {
-                        printSystemDeliverArrival(step, now, ev);
+    int32_t due_count = 0;
+    while (due_count < numDelayedEvents &&
+           delayedEvents[due_count].t <= now + 1e-15) {
+        due_count += 1;
+    }
+
+    for (int32_t i = 0; i < due_count; i++) {
+        if (delayedEvents[i].type == DelayedEvent::Type::Arrival) {
+            const FlowArrivalEv &ev = delayedEvents[i].arrival;
+            if (numInboxArrival < MAX_EVENTS_PER_STEP) {
+                inboxArrival[numInboxArrival++] = ev;
+                if (log_enabled) {
+                    printSystemDeliverArrival(step, now, ev);
+                }
+            }
+            if (ev.port_id >= 0 && ev.port_id < numPorts) {
+                Entity port_e = portEntities[ev.port_id];
+                if (port_e != Entity::none()) {
+                    PortInbox &inbox = portInboxes[ev.port_id];
+                    if (inbox.num_arrival < MAX_PORT_INBOX_ARRIVAL) {
+                        inbox.arrivals[inbox.num_arrival++] = ev;
                     }
                 }
-                if (ev.port_id >= 0 && ev.port_id < numPorts) {
-                    Entity port_e = portEntities[ev.port_id];
-                    if (port_e != Entity::none()) {
-                        PortInbox &inbox = portInboxes[ev.port_id];
-                        if (inbox.num_arrival < MAX_PORT_INBOX_ARRIVAL) {
-                            inbox.arrivals[inbox.num_arrival++] = ev;
-                        }
-                    }
+            }
+        } else if (delayedEvents[i].type == DelayedEvent::Type::BwUpdate) {
+            const BwUpdateEv &ev = delayedEvents[i].bwupd;
+            if (numInboxBwUpdate < MAX_EVENTS_PER_STEP) {
+                inboxBwUpdate[numInboxBwUpdate++] = ev;
+                if (log_enabled) {
+                    printSystemDeliverBwUpdate(step, now, ev);
                 }
-            } else if (delayedEvents[i].type == DelayedEvent::Type::BwUpdate) {
-                const BwUpdateEv &ev = delayedEvents[i].bwupd;
-                if (numInboxBwUpdate < MAX_EVENTS_PER_STEP) {
-                    inboxBwUpdate[numInboxBwUpdate++] = ev;
-                    if (log_enabled) {
-                        printSystemDeliverBwUpdate(step, now, ev);
-                    }
-                }
-                if (ev.port_id >= 0 && ev.port_id < numPorts) {
-                    Entity port_e = portEntities[ev.port_id];
-                    if (port_e != Entity::none()) {
-                        PortInbox &inbox = portInboxes[ev.port_id];
-                        if (inbox.num_bwupd < MAX_PORT_INBOX_BWUPD) {
-                            inbox.bwupds[inbox.num_bwupd++] = ev;
-                        }
-                    }
-                }
-            } else {
-                const PfcControlEv &ev = delayedEvents[i].pfcctrl;
-                if (numInboxPfc < MAX_EVENTS_PER_STEP) {
-                    inboxPfc[numInboxPfc++] = ev;
-                    if (log_enabled) {
-                        printSystemDeliverPfc(step, now, ev);
-                    }
-                }
-                if (ev.target_port_id >= 0 && ev.target_port_id < numPorts) {
-                    Entity port_e = portEntities[ev.target_port_id];
-                    if (port_e != Entity::none()) {
-                        PortInbox &inbox = portInboxes[ev.target_port_id];
-                        if (inbox.num_pfc < MAX_PORT_INBOX_PFC) {
-                            inbox.pfcs[inbox.num_pfc++] = ev;
-                        }
+            }
+            if (ev.port_id >= 0 && ev.port_id < numPorts) {
+                Entity port_e = portEntities[ev.port_id];
+                if (port_e != Entity::none()) {
+                    PortInbox &inbox = portInboxes[ev.port_id];
+                    if (inbox.num_bwupd < MAX_PORT_INBOX_BWUPD) {
+                        inbox.bwupds[inbox.num_bwupd++] = ev;
                     }
                 }
             }
         } else {
-            delayedEvents[write_idx++] = delayedEvents[i];
+            const PfcControlEv &ev = delayedEvents[i].pfcctrl;
+            if (numInboxPfc < MAX_EVENTS_PER_STEP) {
+                inboxPfc[numInboxPfc++] = ev;
+                if (log_enabled) {
+                    printSystemDeliverPfc(step, now, ev);
+                }
+            }
+            if (ev.target_port_id >= 0 && ev.target_port_id < numPorts) {
+                Entity port_e = portEntities[ev.target_port_id];
+                if (port_e != Entity::none()) {
+                    PortInbox &inbox = portInboxes[ev.target_port_id];
+                    if (inbox.num_pfc < MAX_PORT_INBOX_PFC) {
+                        inbox.pfcs[inbox.num_pfc++] = ev;
+                    }
+                }
+            }
         }
     }
-    numDelayedEvents = write_idx;
+
+    int32_t remaining = numDelayedEvents - due_count;
+    for (int32_t i = 0; i < remaining; i++) {
+        delayedEvents[i] = delayedEvents[i + due_count];
+    }
+    numDelayedEvents = remaining;
 
     if (log_enabled) {
         printSystemDeliverSummary(step, now,
@@ -175,6 +181,12 @@ void Sim::flushPortDrainHints(Context &ctx)
 
 void Sim::flushPortTagCleanup(Context &ctx)
 {
+    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
+    if (available < 0) {
+        available = 0;
+    }
+    int32_t batch_count = 0;
+
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
@@ -185,10 +197,17 @@ void Sim::flushPortTagCleanup(Context &ctx)
             if (cleanup.tags[i] == Entity::none()) {
                 continue;
             }
-            destroyTag(ctx, cleanup.tags[i], cleanup.propagate[i] != 0, now);
+            DelayedEvent ev {};
+            if (destroyTagCollectCleanupEvent(
+                    ctx, cleanup.tags[i], cleanup.propagate[i] != 0, now, ev) &&
+                batch_count < available) {
+                delayedEventScratch[batch_count++] = ev;
+            }
         }
         cleanup.num = 0;
     }
+
+    pushDelayedEventsBatch(delayedEventScratch, batch_count);
 }
 
 void Sim::logAllocTraces(Context &ctx)

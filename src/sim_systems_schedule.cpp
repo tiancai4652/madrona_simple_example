@@ -6,8 +6,9 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-MADRONA_NO_INLINE void Sim::injectFlow(int32_t src_port_id,
-                                       const FlowDef &flow)
+MADRONA_NO_INLINE bool Sim::buildFlowArrivalEvent(int32_t src_port_id,
+                                                  const FlowDef &flow,
+                                                  DelayedEvent &out_ev) const
 {
     Bw src_in_bw = 0.0;
     if (src_port_id >= 0 && src_port_id < numPorts) {
@@ -26,10 +27,10 @@ MADRONA_NO_INLINE void Sim::injectFlow(int32_t src_port_id,
         }
     }
 
-    DelayedEvent ev {};
-    ev.t = now;
-    ev.type = DelayedEvent::Type::Arrival;
-    ev.arrival = FlowArrivalEv {
+    out_ev = DelayedEvent {};
+    out_ev.t = now;
+    out_ev.type = DelayedEvent::Type::Arrival;
+    out_ev.arrival = FlowArrivalEv {
         .port_id = src_port_id,
         .flow_id = flow.id,
         .size = flow.size,
@@ -37,27 +38,28 @@ MADRONA_NO_INLINE void Sim::injectFlow(int32_t src_port_id,
         .is_source = 1,
         .priority = flow.priority,
     };
-    pushDelayedEvent(ev);
+    return true;
 }
 
-MADRONA_NO_INLINE void Sim::injectFlowDef(const FlowDef &flow)
+MADRONA_NO_INLINE bool Sim::injectFlowDef(const FlowDef &flow,
+                                          DelayedEvent &out_ev)
 {
     NodeId path[MAX_PATH_NODES] {};
     int32_t path_len = getPath(flow.src_node, flow.dst_node, flow.id,
         path, MAX_PATH_NODES);
     if (path_len < 2) {
-        return;
+        return false;
     }
 
     int32_t src_slot = findNodeSlot(flow.src_node);
     if (src_slot < 0) {
-        return;
+        return false;
     }
 
     NodeId first_hop = path[1];
     int32_t first_neighbor_idx = findNeighborSlot(src_slot, first_hop);
     if (first_neighbor_idx < 0) {
-        return;
+        return false;
     }
 
     int32_t port_path[MAX_FLOW_ROUTE_STEPS + 1] {};
@@ -66,11 +68,11 @@ MADRONA_NO_INLINE void Sim::injectFlowDef(const FlowDef &flow)
     for (int32_t i = 0; i + 1 < path_len; i++) {
         int32_t node_slot = findNodeSlot(path[i]);
         if (node_slot < 0) {
-            return;
+            return false;
         }
         int32_t neighbor_idx = findNeighborSlot(node_slot, path[i + 1]);
         if (neighbor_idx < 0) {
-            return;
+            return false;
         }
         port_path[port_path_len++] =
             topoNodes[node_slot].neighbors[neighbor_idx].port_id;
@@ -95,7 +97,7 @@ MADRONA_NO_INLINE void Sim::injectFlowDef(const FlowDef &flow)
 
     int32_t src_port_id =
         topoNodes[src_slot].neighbors[first_neighbor_idx].port_id;
-    injectFlow(src_port_id, flow);
+    return buildFlowArrivalEvent(src_port_id, flow, out_ev);
 }
 
 MADRONA_NO_INLINE void Sim::schedulePendingFlows()
@@ -105,6 +107,12 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
            pendingFlows[ready_count].start_time <= now + 1e-15) {
         ready_count += 1;
     }
+
+    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
+    if (available < 0) {
+        available = 0;
+    }
+    int32_t batch_count = 0;
 
     if constexpr (system_log_compiled_in) {
         if (traceModeEnabled()) {
@@ -126,8 +134,13 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
                 if (log_enabled && num_logged_flows < MAX_FLOWS) {
                     logged_flows[num_logged_flows++] = flow;
                 }
-                injectFlowDef(flow);
+                DelayedEvent ev {};
+                if (injectFlowDef(flow, ev) && batch_count < available) {
+                    delayedEventScratch[batch_count++] = ev;
+                }
             }
+
+            pushDelayedEventsBatch(delayedEventScratch, batch_count);
 
             if (ready_count > 0) {
                 for (int32_t i = ready_count; i < numPendingFlows; i++) {
@@ -164,8 +177,13 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
     }
 
     for (int32_t i = 0; i < ready_count; i++) {
-        injectFlowDef(pendingFlows[i]);
+        DelayedEvent ev {};
+        if (injectFlowDef(pendingFlows[i], ev) && batch_count < available) {
+            delayedEventScratch[batch_count++] = ev;
+        }
     }
+
+    pushDelayedEventsBatch(delayedEventScratch, batch_count);
 
     if (ready_count > 0) {
         for (int32_t i = ready_count; i < numPendingFlows; i++) {

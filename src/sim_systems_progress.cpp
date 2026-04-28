@@ -36,6 +36,11 @@ void Sim::progressFinishedSources(Context &ctx,
     if (need_check_finish) {
         int32_t num_finished = 0;
         Time next_finish = std::numeric_limits<Time>::max();
+        int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
+        if (available < 0) {
+            available = 0;
+        }
+        int32_t batch_count = 0;
 
         for (int32_t i = 0; i < numSourceTags; i++) {
             Entity tag_e = sourceTags[i].entity;
@@ -73,7 +78,9 @@ void Sim::progressFinishedSources(Context &ctx,
                         .flow_id = tag.flow_id,
                         .in_bw = 0.0,
                     };
-                    pushDelayedEvent(ev);
+                    if (batch_count < available) {
+                        delayedEventScratch[batch_count++] = ev;
+                    }
                     emitted_cleanup_count += 1;
                 }
             } else if (tag.out_bw > 1e-15) {
@@ -83,6 +90,8 @@ void Sim::progressFinishedSources(Context &ctx,
                 }
             }
         }
+
+        pushDelayedEventsBatch(delayedEventScratch, batch_count);
 
         for (int32_t i = 0; i < num_finished; i++) {
             destroyTag(ctx, finishedSourceScratch[i], false, next_now);

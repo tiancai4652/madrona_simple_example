@@ -525,6 +525,12 @@ void Sim::advanceOnePortBuffer(
 void Sim::flushBufferTagCleanup(Context &ctx)
 {
     Time frame_end = now + nextDT;
+    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
+    if (available < 0) {
+        available = 0;
+    }
+    int32_t batch_count = 0;
+
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
@@ -535,10 +541,21 @@ void Sim::flushBufferTagCleanup(Context &ctx)
             if (cleanup.tags[i] == Entity::none()) {
                 continue;
             }
-            destroyTag(ctx, cleanup.tags[i], cleanup.propagate[i] != 0, frame_end);
+            DelayedEvent ev {};
+            if (destroyTagCollectCleanupEvent(
+                    ctx,
+                    cleanup.tags[i],
+                    cleanup.propagate[i] != 0,
+                    frame_end,
+                    ev) &&
+                batch_count < available) {
+                delayedEventScratch[batch_count++] = ev;
+            }
         }
         cleanup.num = 0;
     }
+
+    pushDelayedEventsBatch(delayedEventScratch, batch_count);
 }
 
 // Phase B.3 singleton: sum the per-port buffer traces and emit the

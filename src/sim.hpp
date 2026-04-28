@@ -157,9 +157,11 @@ struct Sim : public madrona::WorldBase {
                     FlowId flow_id,
                     NodeId *out_path,
                     int32_t max_path) const;
-    MADRONA_NO_INLINE void injectFlowDef(const FlowDef &flow);
-    MADRONA_NO_INLINE void injectFlow(int32_t src_port_id,
-                                      const FlowDef &flow);
+    MADRONA_NO_INLINE bool injectFlowDef(const FlowDef &flow,
+                                         DelayedEvent &out_ev);
+    MADRONA_NO_INLINE bool buildFlowArrivalEvent(int32_t src_port_id,
+                                                 const FlowDef &flow,
+                                                 DelayedEvent &out_ev) const;
     MADRONA_NO_INLINE void schedulePendingFlows();
     MADRONA_NO_INLINE void deliverEvents(madrona::Context &ctx);
     MADRONA_NO_INLINE Time chooseDT() const;
@@ -383,6 +385,12 @@ struct Sim : public madrona::WorldBase {
                                       madrona::Entity tag_entity,
                                       bool propagate_cleanup,
                                       Time logical_now);
+    MADRONA_NO_INLINE bool destroyTagCollectCleanupEvent(
+        madrona::Context &ctx,
+        madrona::Entity tag_entity,
+        bool propagate_cleanup,
+        Time logical_now,
+        DelayedEvent &out_ev);
     MADRONA_NO_INLINE void recordFlowCompletion(
         FlowId flow_id, Time end_time);
     MADRONA_NO_INLINE void removeFlowDef(FlowId flow_id);

@@ -6,17 +6,20 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-MADRONA_NO_INLINE void Sim::destroyTag(Context &ctx,
-                                       Entity tag_entity,
-                                       bool propagate_cleanup,
-                                       Time logical_now)
+MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
+    Context &ctx,
+    Entity tag_entity,
+    bool propagate_cleanup,
+    Time logical_now,
+    DelayedEvent &out_ev)
 {
     if (tag_entity == Entity::none()) {
-        return;
+        return false;
     }
 
     FlowTagState tag = ctx.get<FlowTagState>(tag_entity);
     Time effective_now = logical_now >= 0.0 ? logical_now : now;
+    bool has_cleanup_ev = false;
 
     if (tag.next_port_id < 0) {
         recordFlowCompletion(tag.flow_id, effective_now);
@@ -33,15 +36,15 @@ MADRONA_NO_INLINE void Sim::destroyTag(Context &ctx,
                     delay = 0.0;
                 }
             }
-            DelayedEvent ev {};
-            ev.t = effective_now + delay;
-            ev.type = DelayedEvent::Type::BwUpdate;
-            ev.bwupd = BwUpdateEv {
+            out_ev = DelayedEvent {};
+            out_ev.t = effective_now + delay;
+            out_ev.type = DelayedEvent::Type::BwUpdate;
+            out_ev.bwupd = BwUpdateEv {
                 .port_id = tag.next_port_id,
                 .flow_id = tag.flow_id,
                 .in_bw = 0.0,
             };
-            pushDelayedEvent(ev);
+            has_cleanup_ev = true;
         } else {
             int32_t cur = tag.port_id;
             int32_t nxt = lookupFlowRouteNext(tag.flow_id, cur);
@@ -108,6 +111,19 @@ MADRONA_NO_INLINE void Sim::destroyTag(Context &ctx,
     }
 
     ctx.destroyEntity(tag_entity);
+    return has_cleanup_ev;
+}
+
+MADRONA_NO_INLINE void Sim::destroyTag(Context &ctx,
+                                       Entity tag_entity,
+                                       bool propagate_cleanup,
+                                       Time logical_now)
+{
+    DelayedEvent ev {};
+    if (destroyTagCollectCleanupEvent(
+            ctx, tag_entity, propagate_cleanup, logical_now, ev)) {
+        pushDelayedEvent(ev);
+    }
 }
 
 MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
