@@ -305,36 +305,44 @@ Time Sim::chooseDT() const
         }
     }
 
-    if (cachedNextFinishTime > 1e-15 && cachedNextFinishTime < std::numeric_limits<Time>::max()) {
+    if (cachedNextFinishTime > 1e-15 &&
+        cachedNextFinishTime < timerInactiveSentinel()) {
         finish_gap = cachedNextFinishTime;
         dt_event = std::min(dt_event, cachedNextFinishTime);
     }
 
-    if (enableBuffer != 0 && cachedNextDrainTime > 1e-15 && cachedNextDrainTime < std::numeric_limits<Time>::max()) {
+    if (enableBuffer != 0 && cachedNextDrainTime > 1e-15 &&
+        cachedNextDrainTime < timerInactiveSentinel()) {
         drain_gap = cachedNextDrainTime;
         dt_event = std::min(dt_event, cachedNextDrainTime);
     }
 
     if (enableBuffer != 0) {
-        for (int32_t i = 0; i < numBacklogDrainTimers; i++) {
-            if (backlogDrainTimers[i] > 1e-15) {
-                backlog_gap = std::min(backlog_gap, (double)backlogDrainTimers[i]);
-                dt_event = std::min(dt_event, backlogDrainTimers[i]);
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            if (backlogDrainTimers[port_id] > 1e-15 &&
+                timerIsActive(backlogDrainTimers[port_id])) {
+                backlog_gap = std::min(backlog_gap,
+                    (double)backlogDrainTimers[port_id]);
+                dt_event = std::min(dt_event, backlogDrainTimers[port_id]);
             }
         }
     }
 
     if (enablePfc != 0) {
-        for (int32_t i = 0; i < numPfcPauseTimers; i++) {
-            if (pfcPauseTimers[i] > 1e-9) {
-                pfc_pause_gap = std::min(pfc_pause_gap, (double)pfcPauseTimers[i]);
-                dt_event = std::min(dt_event, pfcPauseTimers[i]);
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            if (pfcPauseTimers[port_id] > 1e-9 &&
+                timerIsActive(pfcPauseTimers[port_id])) {
+                pfc_pause_gap = std::min(pfc_pause_gap,
+                    (double)pfcPauseTimers[port_id]);
+                dt_event = std::min(dt_event, pfcPauseTimers[port_id]);
             }
         }
-        for (int32_t i = 0; i < numPfcResumeTimers; i++) {
-            if (pfcResumeTimers[i] > 1e-9) {
-                pfc_resume_gap = std::min(pfc_resume_gap, (double)pfcResumeTimers[i]);
-                dt_event = std::min(dt_event, pfcResumeTimers[i]);
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            if (pfcResumeTimers[port_id] > 1e-9 &&
+                timerIsActive(pfcResumeTimers[port_id])) {
+                pfc_resume_gap = std::min(pfc_resume_gap,
+                    (double)pfcResumeTimers[port_id]);
+                dt_event = std::min(dt_event, pfcResumeTimers[port_id]);
             }
         }
     }
@@ -343,7 +351,7 @@ Time Sim::chooseDT() const
     if (dtMin > 0.0 && dt < dtMin) {
         dt = dtMin;
     }
-    if (dt > 1e12 || dt == std::numeric_limits<Time>::max()) {
+    if (dt > 1e12 || dt == timerInactiveSentinel()) {
         dt = 0.001;
     }
 

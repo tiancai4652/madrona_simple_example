@@ -99,7 +99,7 @@ void Sim::progressFinishedSources(Context &ctx,
     if (cachedNextDrainTime < std::numeric_limits<Time>::max()) {
         cachedNextDrainTime -= dt;
         if (cachedNextDrainTime < 1e-15) {
-            cachedNextDrainTime = std::numeric_limits<Time>::max();
+            cachedNextDrainTime = timerInactiveSentinel();
             cachedDrainPortID = -1;
         }
     }
@@ -107,20 +107,18 @@ void Sim::progressFinishedSources(Context &ctx,
 
 void Sim::progressBacklogDrainTimers(Context &ctx, Time dt)
 {
-    int32_t timer_idx = 0;
-    while (timer_idx < numBacklogDrainTimers) {
-        backlogDrainTimers[timer_idx] -= dt;
-        if (backlogDrainTimers[timer_idx] < 1e-15) {
-            int32_t port_id = backlogDrainPortIDs[timer_idx];
-            if (port_id >= 0 && port_id < numPorts) {
-                Entity port_e = portEntities[port_id];
-                if (port_e != Entity::none()) {
-                    portDirtyStates[port_id].isDirty = 1;
-                }
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (!timerIsActive(backlogDrainTimers[port_id])) {
+            continue;
+        }
+
+        backlogDrainTimers[port_id] -= dt;
+        if (backlogDrainTimers[port_id] < 1e-15) {
+            Entity port_e = portEntities[port_id];
+            if (port_e != Entity::none()) {
+                portDirtyStates[port_id].isDirty = 1;
             }
             clearBacklogDrainTimer(port_id);
-        } else {
-            timer_idx += 1;
         }
     }
 }
@@ -151,27 +149,27 @@ void Sim::markIngressTagsDirty(Context &ctx, int32_t ingress_port)
 
 void Sim::progressPfcTimers(Context &ctx, Time dt)
 {
-    int32_t timer_idx = 0;
-    while (timer_idx < numPfcPauseTimers) {
-        pfcPauseTimers[timer_idx] -= dt;
-        if (pfcPauseTimers[timer_idx] < 1e-9) {
-            int32_t ingress_port = pfcPausePortIDs[timer_idx];
+    for (int32_t ingress_port = 0; ingress_port < numPorts; ingress_port++) {
+        if (!timerIsActive(pfcPauseTimers[ingress_port])) {
+            continue;
+        }
+
+        pfcPauseTimers[ingress_port] -= dt;
+        if (pfcPauseTimers[ingress_port] < 1e-9) {
             markIngressTagsDirty(ctx, ingress_port);
             clearPfcPauseTimer(ingress_port);
-        } else {
-            timer_idx += 1;
         }
     }
 
-    timer_idx = 0;
-    while (timer_idx < numPfcResumeTimers) {
-        pfcResumeTimers[timer_idx] -= dt;
-        if (pfcResumeTimers[timer_idx] < 1e-9) {
-            int32_t ingress_port = pfcResumePortIDs[timer_idx];
+    for (int32_t ingress_port = 0; ingress_port < numPorts; ingress_port++) {
+        if (!timerIsActive(pfcResumeTimers[ingress_port])) {
+            continue;
+        }
+
+        pfcResumeTimers[ingress_port] -= dt;
+        if (pfcResumeTimers[ingress_port] < 1e-9) {
             markIngressTagsDirty(ctx, ingress_port);
             clearPfcResumeTimer(ingress_port);
-        } else {
-            timer_idx += 1;
         }
     }
 }
@@ -322,13 +320,13 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
     progressPfcTimers(ctx, dt);
 
     bool all_exhausted =
-        cachedNextDrainTime >= std::numeric_limits<Time>::max() &&
-        cachedNextFinishTime >= std::numeric_limits<Time>::max() &&
+        cachedNextDrainTime >= timerInactiveSentinel() &&
+        cachedNextFinishTime >= timerInactiveSentinel() &&
         numDelayedEvents == 0 &&
         numPendingFlows == 0 &&
-        numBacklogDrainTimers == 0 &&
-        numPfcPauseTimers == 0 &&
-        numPfcResumeTimers == 0;
+        !hasActiveBacklogDrainTimers() &&
+        !hasActivePfcPauseTimers() &&
+        !hasActivePfcResumeTimers();
 
     if (all_exhausted) {
         markBufferedPortsDirty(ctx);
@@ -339,7 +337,7 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
 
     if (log_enabled) {
         double next_finish_gap =
-            cachedNextFinishTime < std::numeric_limits<Time>::max() ?
+            cachedNextFinishTime < timerInactiveSentinel() ?
             cachedNextFinishTime :
             std::numeric_limits<double>::max();
         printSystemProgressSummary(step, now, dt, finished_source_count,

@@ -169,17 +169,14 @@ void Sim::advanceOnePortBuffer(
     }
     if (!should_process
         && cachedDrainPortID == port_id
-        && cachedNextDrainTime < std::numeric_limits<Time>::max()
+        && cachedNextDrainTime < timerInactiveSentinel()
         && cachedNextDrainTime <= dt + 1e-12) {
         should_process = true;
     }
-    if (!should_process) {
-        for (int32_t i = 0; i < numBacklogDrainTimers && !should_process; i++) {
-            if (backlogDrainPortIDs[i] == port_id
-                && backlogDrainTimers[i] <= dt + 1e-12) {
-                should_process = true;
-            }
-        }
+    if (!should_process
+        && timerIsActive(backlogDrainTimers[port_id])
+        && backlogDrainTimers[port_id] <= dt + 1e-12) {
+        should_process = true;
     }
     if (!should_process) {
         for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {

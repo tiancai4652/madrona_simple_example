@@ -5,6 +5,8 @@
 #include <madrona/custom_context.hpp>
 #include <madrona/ecs.hpp>
 
+#include <limits>
+
 #include "types.hpp"
 #include "init.hpp"
 
@@ -189,6 +191,16 @@ struct Sim : public madrona::WorldBase {
     inline bool traceModeEnabled() const
     {
         return perfFCTOnly == 0;
+    }
+
+    static constexpr Time timerInactiveSentinel()
+    {
+        return std::numeric_limits<Time>::max();
+    }
+
+    inline bool timerIsActive(Time t) const
+    {
+        return t < timerInactiveSentinel();
     }
 
     // Phase B.1 singleton: consumes PortTraceLast.was_dirty_at_clear written
@@ -386,18 +398,24 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE int32_t findSourceTagIndex(FlowId flow_id) const;
     MADRONA_NO_INLINE int32_t findIngressTagIndex(
         int32_t ingress_port_id, FlowId flow_id) const;
-    MADRONA_NO_INLINE int32_t findBacklogDrainTimerIndex(
-        int32_t port_id) const;
-    MADRONA_NO_INLINE int32_t findPfcPauseTimerIndex(
-        int32_t ingress_port_id) const;
-    MADRONA_NO_INLINE int32_t findPfcResumeTimerIndex(
-        int32_t ingress_port_id) const;
     MADRONA_NO_INLINE void setBacklogDrainTimer(int32_t port_id, Time t);
     MADRONA_NO_INLINE void setPfcPauseTimer(int32_t ingress_port_id, Time t);
     MADRONA_NO_INLINE void setPfcResumeTimer(int32_t ingress_port_id, Time t);
     MADRONA_NO_INLINE void clearBacklogDrainTimer(int32_t port_id);
     MADRONA_NO_INLINE void clearPfcPauseTimer(int32_t ingress_port_id);
     MADRONA_NO_INLINE void clearPfcResumeTimer(int32_t ingress_port_id);
+    MADRONA_NO_INLINE int32_t countActiveBacklogDrainTimers() const;
+    MADRONA_NO_INLINE int32_t countActivePfcPauseTimers() const;
+    MADRONA_NO_INLINE int32_t countActivePfcResumeTimers() const;
+    MADRONA_NO_INLINE bool hasActiveBacklogDrainTimers() const;
+    MADRONA_NO_INLINE bool hasActivePfcPauseTimers() const;
+    MADRONA_NO_INLINE bool hasActivePfcResumeTimers() const;
+    MADRONA_NO_INLINE void applyDrainHintOnePort(
+        int32_t port_id,
+        PortDrainHint &hint);
+    MADRONA_NO_INLINE void applyPfcTimerOnePort(
+        int32_t ingress_port_id,
+        PortPfcState &state);
 
     EpisodeManager *episodeMgr;
     const GridState *grid;
@@ -483,14 +501,8 @@ struct Sim : public madrona::WorldBase {
     Time cachedNextDrainTime;
     int32_t cachedDrainPortID;
     Time cachedNextFinishTime;
-    int32_t numBacklogDrainTimers;
-    int32_t backlogDrainPortIDs[MAX_TOPO_PORTS];
     Time backlogDrainTimers[MAX_TOPO_PORTS];
-    int32_t numPfcPauseTimers;
-    int32_t pfcPausePortIDs[MAX_TOPO_PORTS];
     Time pfcPauseTimers[MAX_TOPO_PORTS];
-    int32_t numPfcResumeTimers;
-    int32_t pfcResumePortIDs[MAX_TOPO_PORTS];
     Time pfcResumeTimers[MAX_TOPO_PORTS];
     int32_t numLastDirtyPortIDs;
     int32_t lastDirtyPortIDs[MAX_TOPO_PORTS];

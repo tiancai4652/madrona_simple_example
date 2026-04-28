@@ -182,22 +182,7 @@ void Sim::flushPortDrainHints(Context &ctx)
             continue;
         }
         PortDrainHint &hint = portDrainHints[port_id];
-        if (hint.want_clear != 0) {
-            clearBacklogDrainTimer(port_id);
-        }
-    }
-    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        Entity port_e = portEntities[port_id];
-        if (port_e == Entity::none()) {
-            continue;
-        }
-        PortDrainHint &hint = portDrainHints[port_id];
-        if (hint.want_set != 0) {
-            int32_t idx = findBacklogDrainTimerIndex(port_id);
-            if (idx < 0 || hint.set_t < backlogDrainTimers[idx]) {
-                setBacklogDrainTimer(port_id, hint.set_t);
-            }
-        }
+        applyDrainHintOnePort(port_id, hint);
     }
 }
 
@@ -288,24 +273,7 @@ void Sim::flushPortPfcTimers(Context &ctx)
             continue;
         }
         PortPfcState &state = portPfcStates[port_id];
-        if (state.want_clear_pause != 0) {
-            clearPfcPauseTimer(port_id);
-        }
-        if (state.want_clear_resume != 0) {
-            clearPfcResumeTimer(port_id);
-        }
-        if (state.want_set_pause != 0) {
-            setPfcPauseTimer(port_id, state.set_pause_t);
-        }
-        if (state.want_set_resume != 0) {
-            setPfcResumeTimer(port_id, state.set_resume_t);
-        }
-        state.want_clear_pause = 0;
-        state.want_clear_resume = 0;
-        state.want_set_pause = 0;
-        state.want_set_resume = 0;
-        state.set_pause_t = 0.0;
-        state.set_resume_t = 0.0;
+        applyPfcTimerOnePort(port_id, state);
     }
 }
 
@@ -336,7 +304,7 @@ void Sim::logPfcDetectTraces(Context &ctx)
     }
 
     printSystemPfcDetectSummary(step, now, checked, emitted,
-        numPfcPauseTimers, numPfcResumeTimers);
+        countActivePfcPauseTimers(), countActivePfcResumeTimers());
 }
 
 void Sim::logEmitTraces(Context &ctx)

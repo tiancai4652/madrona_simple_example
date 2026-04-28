@@ -36,12 +36,9 @@ void Sim::resetNetworkState()
     pfcXonThreshold = 0.5e9;
     dtMin = 0.0;
     qosMode = 0;
-    cachedNextDrainTime = std::numeric_limits<Time>::max();
+    cachedNextDrainTime = timerInactiveSentinel();
     cachedDrainPortID = -1;
-    cachedNextFinishTime = std::numeric_limits<Time>::max();
-    numBacklogDrainTimers = 0;
-    numPfcPauseTimers = 0;
-    numPfcResumeTimers = 0;
+    cachedNextFinishTime = timerInactiveSentinel();
     numLastDirtyPortIDs = 0;
     nextDT = 0.0;
     systemLogStep = 0;
@@ -57,6 +54,12 @@ void Sim::resetNetworkState()
 
     for (int32_t i = 0; i < MAX_TOPO_LINKS; i++) {
         topoLinks[i] = TopoLinkState {};
+    }
+
+    for (int32_t i = 0; i < MAX_TOPO_PORTS; i++) {
+        backlogDrainTimers[i] = timerInactiveSentinel();
+        pfcPauseTimers[i] = timerInactiveSentinel();
+        pfcResumeTimers[i] = timerInactiveSentinel();
     }
 }
 

@@ -197,11 +197,24 @@ MADRONA_NO_INLINE void flushTagCleanupStepSystem(Engine &ctx, SimDriver &)
     sim.flushPortTagCleanup(ctx);
 }
 
-MADRONA_NO_INLINE void postAllocStepSystem(Engine &ctx, SimDriver &)
+MADRONA_NO_INLINE void reducePortCachedHintsStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.reducePortCachedHints(ctx);
-    sim.flushPortDrainHints(ctx);
+}
+
+MADRONA_NO_INLINE void applyDrainHintOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state)
+{
+    Sim &sim = ctx.data();
+    PortDrainHint &hint = sim.portDrainHints[port_state.port_id];
+    sim.applyDrainHintOnePort(port_state.port_id, hint);
+}
+
+MADRONA_NO_INLINE void postAllocStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
     sim.flushPortTagCleanup(ctx);
     if (sim.traceModeEnabled()) {
         sim.logAllocTraces(ctx);
@@ -245,10 +258,18 @@ MADRONA_NO_INLINE void emitOnePortStepSystem(
 }
 
 // Phase C singletons.
+MADRONA_NO_INLINE void applyPfcTimerOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state)
+{
+    Sim &sim = ctx.data();
+    PortPfcState &state = sim.portPfcStates[port_state.port_id];
+    sim.applyPfcTimerOnePort(port_state.port_id, state);
+}
+
 MADRONA_NO_INLINE void postPfcStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
-    sim.flushPortPfcTimers(ctx);
     sim.flushPortOutbox(ctx);
     if (sim.traceModeEnabled()) {
         sim.logPfcDetectTraces(ctx);
@@ -425,34 +446,36 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         postIngressStepSystem, SimDriver>>({n2cleanup});
     TaskGraphNodeID final_node = n4;
     // Phase B.2: per-Port fan-out of the bandwidth alloc phase, followed by
-    // four SimDriver singletons that fold the hint / cleanup / trace buffers
-    // back into global state in port_id ascending order. Sequencing the
-    // singletons this way matches the legacy effective-order:
-    //   - reducePortCachedHints: cachedNextDrainTime/cachedNextFinishTime
-    //   - flushPortDrainHints: backlogDrainTimers clear-then-set
-    //   - flushPortTagCleanup: deferred destroyTag in port_id order
-    //   - logAllocTraces: alloc-scope log lines
+    // a singleton reduction for cachedNextDrainTime / cachedNextFinishTime,
+    // then a per-Port drain-hint apply pass, then the remaining singleton
+    // cleanup / logging fold-back. backlogDrainTimers is now indexed directly
+    // by port_id, so applying each port's PortDrainHint is race-free.
     if constexpr (kTaskgraphStageLimit >= 5) {
     auto n5a = builder.addToGraph<ParallelForNode<Engine,
         allocOnePortStepSystem,
     PortState, PortBuffer>>({n4});
+    auto n5reduce = builder.addToGraph<ParallelForNode<Engine,
+        reducePortCachedHintsStepSystem, SimDriver>>({n5a});
+    auto n5drain = builder.addToGraph<ParallelForNode<Engine,
+        applyDrainHintOnePortStepSystem, PortState>>({n5reduce});
     auto n5 = builder.addToGraph<ParallelForNode<Engine,
-        postAllocStepSystem, SimDriver>>({n5a});
+        postAllocStepSystem, SimDriver>>({n5drain});
     final_node = n5;
-    // Phase C: per-Port pfcDetect fan-out, followed by singletons that
-    // apply deferred want_* PFC timer mutations and emit the
-    // pfc_detect summary log in port_id ascending order. We then flush
-    // the PFC-phase PortOutbox into Sim::delayedEvents BEFORE the emit
-    // per-Port nodes write their own Arrival/BwUpdate events into the
-    // same outbox, so the final delayedEvents ordering matches the
-    // legacy order (all PFC events in port_id order, then all emit
-    // events in port_id order).
+    // Phase C: per-Port pfcDetect fan-out, followed by a per-Port timer
+    // apply pass, then the singleton outbox flush / summary log. PFC
+    // pause/resume timers are now port-indexed, so applying each port's
+    // deferred want_* state is race-free. We still flush the PFC-phase
+    // PortOutbox into Sim::delayedEvents BEFORE the emit per-Port nodes
+    // write their own Arrival/BwUpdate events into the same outbox, so
+    // delayedEvents ordering remains legacy-compatible.
     if constexpr (kTaskgraphStageLimit >= 6) {
     auto n6a = builder.addToGraph<ParallelForNode<Engine,
         pfcDetectOnePortStepSystem,
         PortState, PortBuffer>>({n5});
+    auto n6timers = builder.addToGraph<ParallelForNode<Engine,
+        applyPfcTimerOnePortStepSystem, PortState>>({n6a});
     auto n6 = builder.addToGraph<ParallelForNode<Engine,
-        postPfcStepSystem, SimDriver>>({n6a});
+        postPfcStepSystem, SimDriver>>({n6timers});
     final_node = n6;
     // Phase C: per-Port downstream emit fan-out, followed by an outbox
     // flush and the emit summary log singleton.

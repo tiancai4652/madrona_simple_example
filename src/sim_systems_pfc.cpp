@@ -8,120 +8,170 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-MADRONA_NO_INLINE int32_t Sim::findBacklogDrainTimerIndex(
-    int32_t port_id) const
+MADRONA_NO_INLINE int32_t Sim::countActiveBacklogDrainTimers() const
 {
-    for (int32_t i = 0; i < numBacklogDrainTimers; i++) {
-        if (backlogDrainPortIDs[i] == port_id) {
-            return i;
+    int32_t count = 0;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (timerIsActive(backlogDrainTimers[port_id])) {
+            count += 1;
         }
     }
-    return -1;
+    return count;
 }
 
-MADRONA_NO_INLINE int32_t Sim::findPfcPauseTimerIndex(
-    int32_t ingress_port_id) const
+MADRONA_NO_INLINE int32_t Sim::countActivePfcPauseTimers() const
 {
-    for (int32_t i = 0; i < numPfcPauseTimers; i++) {
-        if (pfcPausePortIDs[i] == ingress_port_id) {
-            return i;
+    int32_t count = 0;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (timerIsActive(pfcPauseTimers[port_id])) {
+            count += 1;
         }
     }
-    return -1;
+    return count;
 }
 
-MADRONA_NO_INLINE int32_t Sim::findPfcResumeTimerIndex(
-    int32_t ingress_port_id) const
+MADRONA_NO_INLINE int32_t Sim::countActivePfcResumeTimers() const
 {
-    for (int32_t i = 0; i < numPfcResumeTimers; i++) {
-        if (pfcResumePortIDs[i] == ingress_port_id) {
-            return i;
+    int32_t count = 0;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (timerIsActive(pfcResumeTimers[port_id])) {
+            count += 1;
         }
     }
-    return -1;
+    return count;
+}
+
+MADRONA_NO_INLINE bool Sim::hasActiveBacklogDrainTimers() const
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (timerIsActive(backlogDrainTimers[port_id])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+MADRONA_NO_INLINE bool Sim::hasActivePfcPauseTimers() const
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (timerIsActive(pfcPauseTimers[port_id])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+MADRONA_NO_INLINE bool Sim::hasActivePfcResumeTimers() const
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        if (timerIsActive(pfcResumeTimers[port_id])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 MADRONA_NO_INLINE void Sim::setBacklogDrainTimer(int32_t port_id, Time t)
 {
-    int32_t idx = findBacklogDrainTimerIndex(port_id);
-    if (idx >= 0) {
-        backlogDrainTimers[idx] = t;
+    if (port_id < 0 || port_id >= numPorts) {
         return;
     }
-    if (numBacklogDrainTimers < MAX_TOPO_PORTS) {
-        backlogDrainPortIDs[numBacklogDrainTimers] = port_id;
-        backlogDrainTimers[numBacklogDrainTimers] = t;
-        numBacklogDrainTimers += 1;
+
+    if (!timerIsActive(backlogDrainTimers[port_id]) ||
+        t < backlogDrainTimers[port_id]) {
+        backlogDrainTimers[port_id] = t;
     }
 }
 
 MADRONA_NO_INLINE void Sim::setPfcPauseTimer(
     int32_t ingress_port_id, Time t)
 {
-    int32_t idx = findPfcPauseTimerIndex(ingress_port_id);
-    if (idx >= 0) {
-        pfcPauseTimers[idx] = t;
+    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
         return;
     }
-    if (numPfcPauseTimers < MAX_TOPO_PORTS) {
-        pfcPausePortIDs[numPfcPauseTimers] = ingress_port_id;
-        pfcPauseTimers[numPfcPauseTimers] = t;
-        numPfcPauseTimers += 1;
+
+    if (!timerIsActive(pfcPauseTimers[ingress_port_id]) ||
+        t < pfcPauseTimers[ingress_port_id]) {
+        pfcPauseTimers[ingress_port_id] = t;
     }
 }
 
 MADRONA_NO_INLINE void Sim::setPfcResumeTimer(
     int32_t ingress_port_id, Time t)
 {
-    int32_t idx = findPfcResumeTimerIndex(ingress_port_id);
-    if (idx >= 0) {
-        pfcResumeTimers[idx] = t;
+    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
         return;
     }
-    if (numPfcResumeTimers < MAX_TOPO_PORTS) {
-        pfcResumePortIDs[numPfcResumeTimers] = ingress_port_id;
-        pfcResumeTimers[numPfcResumeTimers] = t;
-        numPfcResumeTimers += 1;
+
+    if (!timerIsActive(pfcResumeTimers[ingress_port_id]) ||
+        t < pfcResumeTimers[ingress_port_id]) {
+        pfcResumeTimers[ingress_port_id] = t;
     }
 }
 
 MADRONA_NO_INLINE void Sim::clearBacklogDrainTimer(int32_t port_id)
 {
-    int32_t idx = findBacklogDrainTimerIndex(port_id);
-    if (idx < 0) {
+    if (port_id < 0 || port_id >= numPorts) {
         return;
     }
-    for (int32_t i = idx + 1; i < numBacklogDrainTimers; i++) {
-        backlogDrainPortIDs[i - 1] = backlogDrainPortIDs[i];
-        backlogDrainTimers[i - 1] = backlogDrainTimers[i];
-    }
-    numBacklogDrainTimers -= 1;
+    backlogDrainTimers[port_id] = timerInactiveSentinel();
 }
 
 MADRONA_NO_INLINE void Sim::clearPfcPauseTimer(int32_t ingress_port_id)
 {
-    int32_t idx = findPfcPauseTimerIndex(ingress_port_id);
-    if (idx < 0) {
+    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
         return;
     }
-    for (int32_t i = idx + 1; i < numPfcPauseTimers; i++) {
-        pfcPausePortIDs[i - 1] = pfcPausePortIDs[i];
-        pfcPauseTimers[i - 1] = pfcPauseTimers[i];
-    }
-    numPfcPauseTimers -= 1;
+    pfcPauseTimers[ingress_port_id] = timerInactiveSentinel();
 }
 
 MADRONA_NO_INLINE void Sim::clearPfcResumeTimer(int32_t ingress_port_id)
 {
-    int32_t idx = findPfcResumeTimerIndex(ingress_port_id);
-    if (idx < 0) {
+    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
         return;
     }
-    for (int32_t i = idx + 1; i < numPfcResumeTimers; i++) {
-        pfcResumePortIDs[i - 1] = pfcResumePortIDs[i];
-        pfcResumeTimers[i - 1] = pfcResumeTimers[i];
+    pfcResumeTimers[ingress_port_id] = timerInactiveSentinel();
+}
+
+MADRONA_NO_INLINE void Sim::applyDrainHintOnePort(
+    int32_t port_id,
+    PortDrainHint &hint)
+{
+    if (hint.want_clear != 0) {
+        clearBacklogDrainTimer(port_id);
     }
-    numPfcResumeTimers -= 1;
+    if (hint.want_set != 0) {
+        setBacklogDrainTimer(port_id, hint.set_t);
+    }
+
+    hint.want_clear = 0;
+    hint.want_set = 0;
+    hint.set_t = 0.0;
+}
+
+MADRONA_NO_INLINE void Sim::applyPfcTimerOnePort(
+    int32_t ingress_port_id,
+    PortPfcState &state)
+{
+    if (state.want_clear_pause != 0) {
+        clearPfcPauseTimer(ingress_port_id);
+    }
+    if (state.want_clear_resume != 0) {
+        clearPfcResumeTimer(ingress_port_id);
+    }
+    if (state.want_set_pause != 0) {
+        setPfcPauseTimer(ingress_port_id, state.set_pause_t);
+    }
+    if (state.want_set_resume != 0) {
+        setPfcResumeTimer(ingress_port_id, state.set_resume_t);
+    }
+
+    state.want_clear_pause = 0;
+    state.want_clear_resume = 0;
+    state.want_set_pause = 0;
+    state.want_set_resume = 0;
+    state.set_pause_t = 0.0;
+    state.set_resume_t = 0.0;
 }
 
 // Phase C: per-Port PFC threshold detect worker. Only writes this port's
