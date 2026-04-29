@@ -1,36 +1,15 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
-#ifdef MADRONA_GPU_MODE
-#include <madrona/mw_gpu/host_print.hpp>
-#endif
 
 using namespace madrona;
 using namespace madrona::math;
 
 namespace madsimple {
-// Emit a one-shot init trace. Suppressed when init_log_print_enabled is on,
-// or when FCT-only perf mode is enabled, so the [INIT] log dump consumed by
-// check/run_parity.py stays free of any extra `[init-trace]` lines that would
-// shift line numbers and break diffs. On GPU, only thread 0 prints to avoid
-// flooding the CUDA printf buffer while initTasks builds the task graph on
-// device.
+// Retained as a no-op so existing call sites stay minimal.
 static inline void initTrace(const char *msg, bool trace_mode_enabled)
 {
-    if (!trace_mode_enabled) {
-        return;
-    }
-
-#ifdef MADRONA_GPU_MODE
-    if constexpr (init_trace_compiled_in) {
-        if (threadIdx.x == 0) {
-            printf("[init-trace] %s\n", msg);
-        }
-    }
-#else
-    if (!init_log_print_enabled) {
-        printf("[init-trace] %s\n", msg);
-    }
-#endif
+    (void)msg;
+    (void)trace_mode_enabled;
 }
 
 // IMPORTANT: must NOT be an anonymous namespace.
@@ -65,34 +44,7 @@ MADRONA_NO_INLINE void scheduleStepSystem(Engine &ctx, SimDriver &driver)
         sim.systemLogStep += 1;
     }
     driver.tick += 1;
-    // [step-trace] SimDriver 只有 1 entity, ParallelForNode 在 megakernel
-    // 里只会派 1 个 thread 跑这个 system，但 thread index 不固定，所以
-    // 不能用 threadIdx.x == 0 过滤。只用 tick<=3 限频。
-#ifdef MADRONA_GPU_MODE
-    if constexpr (step_trace_compiled_in) {
-        if (sim.traceModeEnabled() && driver.tick <= 3) {
-            int32_t t = driver.tick;
-            int32_t pend_before = sim.numPendingFlows;
-            float now_f = (float)sim.now;
-            mwGPU::HostPrint::log(
-                "[step-trace] scheduleStepSystem tick=%d pend_before=%d now=%f\n",
-                t, pend_before, now_f);
-        }
-    }
-#endif
     sim.schedulePendingFlows();
-#ifdef MADRONA_GPU_MODE
-    if constexpr (step_trace_compiled_in) {
-        if (sim.traceModeEnabled() && driver.tick <= 3) {
-            int32_t t = driver.tick;
-            int32_t pend_after = sim.numPendingFlows;
-            int32_t delayed_after = sim.numDelayedEvents;
-            mwGPU::HostPrint::log(
-                "[step-trace] scheduleStepSystem AFTER tick=%d pend=%d delayed=%d\n",
-                t, pend_after, delayed_after);
-        }
-    }
-#endif
 }
 
 MADRONA_NO_INLINE void deliverStepSystem(Engine &ctx, SimDriver &)
@@ -325,20 +277,6 @@ MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
     if (sim.nextDT < 1e-9) {
         sim.nextDT = 0.001;
     }
-#ifdef MADRONA_GPU_MODE
-    if constexpr (step_trace_compiled_in) {
-        if (sim.traceModeEnabled() && driver.tick <= 3) {
-            int32_t t = driver.tick;
-            float dt_f = (float)sim.nextDT;
-            float now_f = (float)sim.now;
-            int32_t pend = sim.numPendingFlows;
-            int32_t delayed = sim.numDelayedEvents;
-            mwGPU::HostPrint::log(
-                "[step-trace] chooseDTStepSystem tick=%d nextDT=%f now=%f pend=%d delayed=%d\n",
-                t, dt_f, now_f, pend, delayed);
-        }
-    }
-#endif
 }
 
 // Phase B.3: per-Port ParallelForNode that advances a single port's
@@ -368,31 +306,8 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     if (sim.traceModeEnabled()) {
         sim.logBufferTraces(ctx);
     }
-#ifdef MADRONA_GPU_MODE
-    if constexpr (step_trace_compiled_in) {
-        if (sim.traceModeEnabled() && driver.tick <= 3) {
-            int32_t t = driver.tick;
-            float dt_f = (float)sim.nextDT;
-            float now_f = (float)sim.now;
-            mwGPU::HostPrint::log(
-                "[step-trace] flowProgressStepSystem BEFORE tick=%d nextDT=%f now=%f\n",
-                t, dt_f, now_f);
-        }
-    }
-#endif
     sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
     sim.now += sim.nextDT;
-#ifdef MADRONA_GPU_MODE
-    if constexpr (step_trace_compiled_in) {
-        if (sim.traceModeEnabled() && driver.tick <= 3) {
-            int32_t t = driver.tick;
-            float now_f = (float)sim.now;
-            mwGPU::HostPrint::log(
-                "[step-trace] flowProgressStepSystem AFTER tick=%d now=%f\n",
-                t, now_f);
-        }
-    }
-#endif
     SimStats &stats = ctx.singleton<SimStats>();
     FlowCompletionBuf &buf = ctx.singleton<FlowCompletionBuf>();
     stats.simulationTime = sim.now;
@@ -402,11 +317,6 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     stats.numActiveTags = sim.numTagIndexEntries;
     stats.numSourceTags = sim.numSourceTags;
     stats.numFlowCompletions = sim.numFlowCompletions;
-    // [step-trace] If host sees lastTick stuck at 0 across many world.step()
-    // calls, then this final task graph node never ran. If lastTick climbs
-    // but simulationTime stays at 0, the task graph runs but Sim mutations
-    // by user systems are not persisted (or sim systems read a different
-    // Sim instance than ctx.data() returns).
     stats.lastTick = driver.tick;
 
     int32_t n = sim.numFlowCompletions;

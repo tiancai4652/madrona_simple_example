@@ -128,8 +128,6 @@ inline CompileConfig::OptMode getGPUOptMode()
         return CompileConfig::OptMode::LTO;
     }
 
-    std::cerr << "[madrona] unknown MADRONA_MWGPU_OPT_MODE='" << env
-              << "', falling back to LTO\n";
     return CompileConfig::OptMode::LTO;
 }
 #endif

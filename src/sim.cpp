@@ -13,21 +13,8 @@ namespace madsimple {
 // flooding the 1 MB CUDA printf buffer with 256 duplicates.
 static inline void initTrace(const char *msg, bool trace_mode_enabled)
 {
-    if (!trace_mode_enabled) {
-        return;
-    }
-
-#ifdef MADRONA_GPU_MODE
-    if constexpr (init_trace_compiled_in) {
-        if (threadIdx.x == 0) {
-            printf("[init-trace] %s\n", msg);
-        }
-    }
-#else
-    if (!init_log_print_enabled) {
-        printf("[init-trace] %s\n", msg);
-    }
-#endif
+    (void)msg;
+    (void)trace_mode_enabled;
 }
 
 // MWGPU's initECS kernel calls WorldT::registerTypes on device during GPU

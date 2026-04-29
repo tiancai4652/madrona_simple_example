@@ -209,7 +209,7 @@ struct Sim : public madrona::WorldBase {
 
     inline bool traceModeEnabled() const
     {
-        return perfFCTOnly == 0;
+        return false;
     }
 
     static constexpr Time timerInactiveSentinel()
