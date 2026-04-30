@@ -37,6 +37,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortBuffer>();
 
     registry.registerSingleton<SimStats>();
+    registry.registerSingleton<StepWorkloadStats>();
     registry.registerSingleton<FlowCompletionBuf>();
 
     registry.registerArchetype<Agent>();
@@ -51,6 +52,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportColumn<Agent, Done>((uint32_t)ExportID::Done);
     // GPU-mode introspection mirrors (see types.hpp ExportID comment).
     registry.exportSingleton<SimStats>((uint32_t)ExportID::SimStats);
+    registry.exportSingleton<StepWorkloadStats>(
+        (uint32_t)ExportID::StepWorkloadStats);
     registry.exportSingleton<FlowCompletionBuf>(
         (uint32_t)ExportID::FlowCompletionBuf);
 }
@@ -80,6 +83,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     enablePfc = cfg.enable_pfc;
     pfcEgress = cfg.pfc_egress;
     perfFCTOnly = cfg.perf_fct_only;
+    stepWorkload = cfg.step_workload;
     defaultLinkDelay = cfg.default_link_delay;
     propagationInterval = cfg.propagation_interval;
     pfcXoffThreshold = cfg.pfc_xoff_threshold;
@@ -121,6 +125,9 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     init_stats.numActiveTags = numTagIndexEntries;
     init_stats.numSourceTags = numSourceTags;
     init_stats.numFlowCompletions = numFlowCompletions;
+
+    StepWorkloadStats &init_work = ctx.singleton<StepWorkloadStats>();
+    init_work = StepWorkloadStats {};
 
     FlowCompletionBuf &init_buf = ctx.singleton<FlowCompletionBuf>();
     int32_t n_init = numFlowCompletions;

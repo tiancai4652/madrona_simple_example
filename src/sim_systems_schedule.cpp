@@ -107,6 +107,9 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
            pendingFlows[ready_count].start_time <= now + 1e-15) {
         ready_count += 1;
     }
+    if (workloadStatsEnabled()) {
+        stepWorkloadStats.ready_flows = ready_count;
+    }
 
     int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
     if (available < 0) {
@@ -147,6 +150,11 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
                     pendingFlows[i - ready_count] = pendingFlows[i];
                 }
                 numPendingFlows -= ready_count;
+            }
+
+            if (workloadStatsEnabled()) {
+                stepWorkloadStats.scheduled_events = batch_count;
+                stepWorkloadStats.pending_flows_after = numPendingFlows;
             }
 
             if (log_enabled) {
@@ -190,6 +198,11 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
             pendingFlows[i - ready_count] = pendingFlows[i];
         }
         numPendingFlows -= ready_count;
+    }
+
+    if (workloadStatsEnabled()) {
+        stepWorkloadStats.scheduled_events = batch_count;
+        stepWorkloadStats.pending_flows_after = numPendingFlows;
     }
 }
 

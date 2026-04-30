@@ -20,6 +20,7 @@ enum class ExportID : uint32_t {
     // via TaskGraphExecutor::getWorldData), but we still populate them
     // so the export layout stays identical between backends.
     SimStats,
+    StepWorkloadStats,
     FlowCompletionBuf,
     NumExports,
 };
@@ -119,6 +120,50 @@ struct SimStats {
     // updateSimStatsStepSystem. Used to distinguish "task graph silent"
     // from "HostPrint output lost".
     int32_t lastTick = 0;
+};
+
+// Per-step workload snapshot used to judge whether the simulation exposes
+// enough active work to benefit from deeper ECS / GPU parallelization.
+struct StepWorkloadStats {
+    int32_t step = 0;
+    double now = 0.0;
+
+    int32_t ready_flows = 0;
+    int32_t scheduled_events = 0;
+    int32_t pending_flows_after = 0;
+
+    int32_t due_events = 0;
+    int32_t due_arrival = 0;
+    int32_t due_bwupdate = 0;
+    int32_t due_pfc = 0;
+    int32_t due_ports = 0;
+    int32_t delayed_events_after = 0;
+
+    int32_t dirty_ports = 0;
+    int32_t last_dirty_ports = 0;
+    int32_t alloc_ports = 0;
+    int32_t alloc_tags = 0;
+    int32_t emit_ports = 0;
+    int32_t buffer_ports = 0;
+
+    int32_t create_reqs = 0;
+    int32_t create_ports = 0;
+    int32_t cleanup_reqs = 0;
+    int32_t cleanup_ports = 0;
+    int32_t completion_reqs = 0;
+    int32_t completion_ports = 0;
+    int32_t outbox_events = 0;
+    int32_t outbox_ports = 0;
+
+    int32_t active_tags = 0;
+    int32_t source_tags = 0;
+    int32_t ingress_tags = 0;
+    int32_t finished_sources = 0;
+    int32_t emitted_cleanup = 0;
+    int32_t drain_timers = 0;
+    int32_t pause_timers = 0;
+    int32_t resume_timers = 0;
+    double next_dt = 0.0;
 };
 
 // Singleton mirror of Sim::flowCompletions[].record for GPU export. Same
@@ -410,9 +455,7 @@ struct PortInbox {
     PfcControlEv pfcs[MAX_PORT_INBOX_PFC] {};
 };
 
-// Phase E: deferred tag-create requests. Per-Port arrival/bwUpdate
-// workers must not call ctx.makeEntity<FlowTag>() directly (entity-id
-// assignment would be non-deterministic under parallel execution), so
+
 // they push requests here and flushTagCreateSystem (singleton) walks
 // port_id ascending and actually creates the tags via createTagOnPort.
 struct PortCreateReq {

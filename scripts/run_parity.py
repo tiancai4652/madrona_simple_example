@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import os
 import sys
@@ -69,27 +70,43 @@ def _pstage(msg, t_start):
     print(f"[parity] {msg}  (+{time.time() - t_start:.2f}s)", flush=True)
 
 
+def write_timing_summary(path: Path, summary: dict):
+    path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
 def main():
     args = parse_args()
-    t_start = time.time()
-    _pstage("main() entered", t_start)
+    wall_clock_start = time.time()
+    program_start = time.perf_counter()
+    _pstage("main() entered", wall_clock_start)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    step_timing_path = out_dir / "madrona_step_times.csv"
+    timing_summary_path = out_dir / "madrona_timing_summary.json"
 
-    _pstage(f"loading inputs: topo={args.topo} flows={args.flows}", t_start)
+    _pstage(
+        f"loading inputs: topo={args.topo} flows={args.flows}",
+        wall_clock_start,
+    )
+    load_inputs_start = time.perf_counter()
     network_inputs = load_network_inputs_from_files(Path(args.topo), Path(args.flows))
     walls, rewards, end_cells, start_cell = build_grid_inputs()
-    _pstage("inputs loaded", t_start)
+    load_inputs_elapsed = time.perf_counter() - load_inputs_start
+    _pstage("inputs loaded", wall_clock_start)
 
     prior_weights = []
     if args.prior_weights:
         prior_weights = [float(x) for x in args.prior_weights.split(',')]
 
+    gridworld_init_start = time.perf_counter()
     _pstage(
         f"constructing GridWorld(gpu={bool(args.gpu)}, pfc={bool(args.pfc)}, "
         f"num_worlds={args.num_worlds}) ...",
-        t_start,
+        wall_clock_start,
     )
     world = GridWorld(
         args.num_worlds,
@@ -98,7 +115,7 @@ def main():
         rewards,
         walls,
         gpu_sim=bool(args.gpu),
-        gpu_id=0,
+        gpu_id=1,
         network_inputs=network_inputs,
         propagation_interval=args.prop_interval,
         enable_pfc=1 if args.pfc else 0,
@@ -109,59 +126,121 @@ def main():
         qos_mode={"none": 0, "sp": 1, "wrr": 2}.get(args.qos, 0),
         prior_weights=prior_weights if prior_weights else None,
     )
-    _pstage("GridWorld constructed (GPU init + launch graph built)", t_start)
+    gridworld_init_elapsed = time.perf_counter() - gridworld_init_start
+    _pstage(
+        "GridWorld constructed (GPU init + launch graph built)",
+        wall_clock_start,
+    )
+
+    init_elapsed = time.perf_counter() - program_start
 
     if os.environ.get("init_log_print_enabled") not in (None, "", "0"):
+        write_timing_summary(
+            timing_summary_path,
+            {
+                "gpu": bool(args.gpu),
+                "init_input_load_wall_time_s": load_inputs_elapsed,
+                "init_gridworld_wall_time_s": gridworld_init_elapsed,
+                "init_wall_time_s": init_elapsed,
+                "loop_wall_time_s": 0.0,
+                "postprocess_wall_time_s": 0.0,
+                "program_wall_time_s": time.perf_counter() - program_start,
+                "steps_executed": 0,
+                "step_wall_time_avg_ms": 0.0,
+                "step_wall_time_min_ms": 0.0,
+                "step_wall_time_max_ms": 0.0,
+                "timing_mode": "init_only",
+            },
+        )
         return
 
     log_capture_mode = _is_log_capture_mode()
     progress_every = int(os.environ.get("PARITY_PROGRESS_EVERY", "500"))
 
     steps = 0
-    t0 = time.time()
-    t_prev = t0
+    loop_start_wall = time.time()
+    loop_start = time.perf_counter()
+    t_prev = loop_start_wall
     steps_prev = 0
+    step_time_sum = 0.0
+    step_time_min = None
+    step_time_max = 0.0
     if not log_capture_mode:
         print(
             f"[parity] start loop: max_steps={args.max_steps} "
             f"gpu={bool(args.gpu)} pfc={bool(args.pfc)} "
+            f"init_elapsed={init_elapsed:.3f}s "
             f"progress_every={progress_every}",
             flush=True,
         )
 
-    while steps < args.max_steps and not should_stop(world):
-        world.step()
-        steps += 1
+    with step_timing_path.open("w", newline="", encoding="utf-8", buffering=1) as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "step",
+            "step_wall_time_s",
+            "step_wall_time_ms",
+            "cumulative_loop_wall_time_s",
+        ])
 
-        if (
-            not log_capture_mode
-            and progress_every > 0
-            and steps % progress_every == 0
-        ):
-            now = time.time()
-            dt = max(now - t_prev, 1e-6)
-            sps = (steps - steps_prev) / dt
-            elapsed = now - t0
-            print(
-                f"[parity] step={steps}/{args.max_steps} "
-                f"sim_t={world.simulation_time():.3f} "
-                f"pend={world.num_pending_flows()} "
-                f"delayed={world.num_delayed_events()} "
-                f"active={world.num_active_tags()} "
-                f"sps={sps:.1f} elapsed={elapsed:.1f}s",
-                flush=True,
-            )
-            t_prev = now
-            steps_prev = steps
+        while steps < args.max_steps and not should_stop(world):
+            step_start = time.perf_counter()
+            world.step()
+            step_elapsed = time.perf_counter() - step_start
+            steps += 1
+
+            step_time_sum += step_elapsed
+            if step_time_min is None or step_elapsed < step_time_min:
+                step_time_min = step_elapsed
+            if step_elapsed > step_time_max:
+                step_time_max = step_elapsed
+
+            writer.writerow([
+                steps,
+                f"{step_elapsed:.9f}",
+                f"{step_elapsed * 1e3:.6f}",
+                f"{time.perf_counter() - loop_start:.9f}",
+            ])
+
+            if (
+                not log_capture_mode
+                and progress_every > 0
+                and steps % progress_every == 0
+            ):
+                now = time.time()
+                dt = max(now - t_prev, 1e-6)
+                sps = (steps - steps_prev) / dt
+                elapsed = now - loop_start_wall
+                print(
+                    f"[parity] step={steps}/{args.max_steps} "
+                    f"sim_t={world.simulation_time():.3f} "
+                    f"pend={world.num_pending_flows()} "
+                    f"delayed={world.num_delayed_events()} "
+                    f"active={world.num_active_tags()} "
+                    f"step_ms={step_elapsed * 1e3:.3f} "
+                    f"sps={sps:.1f} elapsed={elapsed:.1f}s",
+                    flush=True,
+                )
+                t_prev = now
+                steps_prev = steps
+
+    loop_elapsed = time.perf_counter() - loop_start
+    avg_step_ms = (step_time_sum / steps * 1e3) if steps > 0 else 0.0
+    min_step_ms = (step_time_min * 1e3) if step_time_min is not None else 0.0
+    max_step_ms = step_time_max * 1e3
 
     if not log_capture_mode:
         print(
             f"[parity] loop done: steps={steps} "
-            f"elapsed={time.time() - t0:.1f}s "
+            f"elapsed={loop_elapsed:.3f}s "
+            f"avg_step_ms={avg_step_ms:.3f} "
+            f"min_step_ms={min_step_ms:.3f} "
+            f"max_step_ms={max_step_ms:.3f} "
             f"stopped_cleanly={should_stop(world)}",
             flush=True,
         )
 
+    postprocess_start = time.perf_counter()
     completion_path = out_dir / "flow_completion_times.csv"
     world.write_flow_completion_csv(completion_path)
 
@@ -181,8 +260,29 @@ def main():
 
     summary_path = out_dir / "madrona_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    timing_summary = {
+        "gpu": bool(args.gpu),
+        "init_input_load_wall_time_s": load_inputs_elapsed,
+        "init_gridworld_wall_time_s": gridworld_init_elapsed,
+        "init_wall_time_s": init_elapsed,
+        "loop_wall_time_s": loop_elapsed,
+        "postprocess_wall_time_s": 0.0,
+        "program_wall_time_s": 0.0,
+        "steps_executed": steps,
+        "step_wall_time_avg_ms": avg_step_ms,
+        "step_wall_time_min_ms": min_step_ms,
+        "step_wall_time_max_ms": max_step_ms,
+        "step_times_csv": str(step_timing_path),
+        "timing_mode": "full_run",
+    }
+    timing_summary["postprocess_wall_time_s"] = (
+        time.perf_counter() - postprocess_start
+    )
+    timing_summary["program_wall_time_s"] = time.perf_counter() - program_start
+    write_timing_summary(timing_summary_path, timing_summary)
     if os.environ.get("parity_print_summary") not in (None, "", "0"):
         print(json.dumps(summary, indent=2, sort_keys=True))
+        print(json.dumps(timing_summary, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

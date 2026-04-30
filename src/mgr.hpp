@@ -31,6 +31,7 @@ public:
         int32_t qos_mode = 0;
         double prior_weights[8] = {};
         int32_t perf_fct_only = 1;
+        int32_t step_workload = 0;
     };
 
     MGR_EXPORT Manager(const Config &cfg,
@@ -54,6 +55,7 @@ public:
     MGR_EXPORT int32_t numSourceTags();
     MGR_EXPORT int32_t numFlowCompletions();
     MGR_EXPORT FlowCompletionRecord flowCompletion(int32_t idx);
+    MGR_EXPORT StepWorkloadStats stepWorkload();
 
 private:
     struct Impl;

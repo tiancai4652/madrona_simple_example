@@ -398,6 +398,10 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
 
     progressFinishedSources(ctx, dt, next_now, finished_source_count,
         emitted_cleanup_count);
+    if (workloadStatsEnabled()) {
+        stepWorkloadStats.finished_sources = finished_source_count;
+        stepWorkloadStats.emitted_cleanup = emitted_cleanup_count;
+    }
     progressBacklogDrainTimers(ctx, dt);
     progressPfcTimers(ctx, dt);
 

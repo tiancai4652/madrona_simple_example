@@ -44,6 +44,18 @@ MADRONA_NO_INLINE void scheduleStepSystem(Engine &ctx, SimDriver &driver)
         sim.systemLogStep += 1;
     }
     driver.tick += 1;
+    sim.stepWorkloadStats = StepWorkloadStats {};
+    sim.stepWorkloadStats.step = driver.tick;
+    sim.stepWorkloadStats.now = sim.now;
+    if (sim.workloadStatsEnabled()) {
+        for (int32_t port_id = 0; port_id < sim.numPorts; port_id++) {
+            sim.stepDueTouched[port_id] = 0;
+            sim.stepCreateTouched[port_id] = 0;
+            sim.stepCleanupTouched[port_id] = 0;
+            sim.stepCompletionTouched[port_id] = 0;
+            sim.stepOutboxTouched[port_id] = 0;
+        }
+    }
     sim.schedulePendingFlows();
 }
 
@@ -309,6 +321,7 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
     sim.now += sim.nextDT;
     SimStats &stats = ctx.singleton<SimStats>();
+    StepWorkloadStats &work = ctx.singleton<StepWorkloadStats>();
     FlowCompletionBuf &buf = ctx.singleton<FlowCompletionBuf>();
     stats.simulationTime = sim.now;
     stats.numFlowDefs = sim.numFlowDefs;
@@ -318,6 +331,48 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     stats.numSourceTags = sim.numSourceTags;
     stats.numFlowCompletions = sim.numFlowCompletions;
     stats.lastTick = driver.tick;
+
+    sim.stepWorkloadStats.active_tags = sim.numTagIndexEntries;
+    sim.stepWorkloadStats.source_tags = sim.numSourceTags;
+    sim.stepWorkloadStats.ingress_tags = sim.numIngressTags;
+    sim.stepWorkloadStats.drain_timers =
+        sim.countActiveBacklogDrainTimers();
+    sim.stepWorkloadStats.pause_timers =
+        sim.countActivePfcPauseTimers();
+    sim.stepWorkloadStats.resume_timers =
+        sim.countActivePfcResumeTimers();
+    sim.stepWorkloadStats.next_dt = sim.nextDT;
+
+    if (sim.workloadStatsEnabled()) {
+        int32_t alloc_ports = 0;
+        int32_t alloc_tags = 0;
+        int32_t emit_ports = 0;
+        int32_t buffer_ports = 0;
+        for (int32_t port_id = 0; port_id < sim.numPorts; port_id++) {
+            madrona::Entity port_e = sim.portEntities[port_id];
+            if (port_e == madrona::Entity::none()) {
+                continue;
+            }
+
+            const PortTraceLast &trace = sim.portTraceLasts[port_id];
+            if (trace.was_dirty_at_alloc != 0 && trace.alloc_num_tags > 0) {
+                alloc_ports += 1;
+                alloc_tags += trace.alloc_num_tags;
+            }
+            if (trace.emit_arrival_count > 0 || trace.emit_bwupdate_count > 0) {
+                emit_ports += 1;
+            }
+            if (trace.buffer_processed != 0) {
+                buffer_ports += 1;
+            }
+        }
+        sim.stepWorkloadStats.alloc_ports = alloc_ports;
+        sim.stepWorkloadStats.alloc_tags = alloc_tags;
+        sim.stepWorkloadStats.emit_ports = emit_ports;
+        sim.stepWorkloadStats.buffer_ports = buffer_ports;
+    }
+
+    work = sim.stepWorkloadStats;
 
     int32_t n = sim.numFlowCompletions;
     if (n < 0) n = 0;

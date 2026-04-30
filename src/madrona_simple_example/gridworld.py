@@ -1,4 +1,5 @@
 import csv
+import os
 import numpy as np
 from ._madrona_simple_example_cpp import SimpleGridworldSimulator, madrona
 
@@ -205,6 +206,8 @@ class GridWorld:
                  dt_min = 0.0,
                  qos_mode = 0,
                  prior_weights = None,
+                 step_workload = False,
+                 print_step_workload = False,
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -212,6 +215,11 @@ class GridWorld:
         self.rewards_input = rewards
         self.walls = walls
         self.network_inputs = make_default_network_inputs() if network_inputs is None else network_inputs
+        env_print = os.environ.get("MADSIMPLE_PRINT_STEP_WORKLOAD")
+        if env_print not in (None, "", "0"):
+            print_step_workload = True
+        self.print_step_workload_enabled = bool(print_step_workload)
+        self.step_workload_enabled = bool(step_workload) or self.print_step_workload_enabled
 
         if prior_weights is None:
             prior_weights = np.zeros(8, dtype=np.float64)
@@ -251,6 +259,7 @@ class GridWorld:
                 dt_min = dt_min,
                 qos_mode = qos_mode,
                 prior_weights = prior_weights,
+                step_workload = 1 if self.step_workload_enabled else 0,
             )
 
         self.force_reset = self.sim.reset_tensor().to_torch()
@@ -261,6 +270,8 @@ class GridWorld:
 
     def step(self):
         self.sim.step()
+        if self.print_step_workload_enabled:
+            print(self.format_step_workload(), flush=True)
 
     def simulation_time(self):
         return self.sim.simulation_time()
@@ -285,6 +296,43 @@ class GridWorld:
             self.sim.flow_completion(i)
             for i in range(self.sim.num_flow_completions())
         ]
+
+    def step_workload(self):
+        return self.sim.step_workload()
+
+    def format_step_workload(self):
+        stats = self.step_workload()
+        return (
+            f"[STEP_WORK] step={stats['step']} "
+            f"now={stats['now']:.6f} "
+            f"ready_flows={stats['ready_flows']} "
+            f"scheduled_events={stats['scheduled_events']} "
+            f"due_events={stats['due_events']} "
+            f"due_arrival={stats['due_arrival']} "
+            f"due_bwupdate={stats['due_bwupdate']} "
+            f"due_pfc={stats['due_pfc']} "
+            f"due_ports={stats['due_ports']} "
+            f"dirty_ports={stats['dirty_ports']} "
+            f"alloc_ports={stats['alloc_ports']} "
+            f"alloc_tags={stats['alloc_tags']} "
+            f"create_reqs={stats['create_reqs']} "
+            f"cleanup_reqs={stats['cleanup_reqs']} "
+            f"completion_reqs={stats['completion_reqs']} "
+            f"outbox_events={stats['outbox_events']} "
+            f"outbox_ports={stats['outbox_ports']} "
+            f"active_tags={stats['active_tags']} "
+            f"source_tags={stats['source_tags']} "
+            f"ingress_tags={stats['ingress_tags']} "
+            f"finished_sources={stats['finished_sources']} "
+            f"emitted_cleanup={stats['emitted_cleanup']} "
+            f"drain_timers={stats['drain_timers']} "
+            f"pause_timers={stats['pause_timers']} "
+            f"resume_timers={stats['resume_timers']} "
+            f"next_dt={stats['next_dt']:.6f}"
+        )
+
+    def print_step_workload(self):
+        print(self.format_step_workload(), flush=True)
 
     def write_flow_completion_csv(self, output_path):
         rows = sorted(self.flow_completions(), key=lambda row: row['flow_id'])

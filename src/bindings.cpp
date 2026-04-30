@@ -248,7 +248,8 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                             double dt_min,
                             int32_t qos_mode,
                             nb::ndarray<double, nb::shape<-1>,
-                                nb::c_contig, nb::device::cpu> prior_weights) {
+                                nb::c_contig, nb::device::cpu> prior_weights,
+                            int32_t step_workload) {
             int64_t grid_y = (int64_t)walls.shape(0);
             int64_t grid_x = (int64_t)walls.shape(1);
 
@@ -289,6 +290,7 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                                   prior_weights_arr[2], prior_weights_arr[3],
                                   prior_weights_arr[4], prior_weights_arr[5],
                                   prior_weights_arr[6], prior_weights_arr[7]},
+                .step_workload = step_workload,
             }, GridState {
                 .cells = cells.get(),
                 .startX = (int32_t)start_x,
@@ -332,7 +334,8 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
            nb::arg("pfc_xon_threshold") = 0.5e9,
            nb::arg("dt_min") = 0.0,
            nb::arg("qos_mode") = 0,
-           nb::arg("prior_weights") = nb::ndarray<double, nb::shape<-1>, nb::c_contig, nb::device::cpu>())
+           nb::arg("prior_weights") = nb::ndarray<double, nb::shape<-1>, nb::c_contig, nb::device::cpu>(),
+           nb::arg("step_workload") = 0)
         .def("step", &Manager::step)
         .def("reset_tensor", &Manager::resetTensor)
         .def("action_tensor", &Manager::actionTensor)
@@ -346,6 +349,45 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
         .def("num_active_tags", &Manager::numActiveTags)
         .def("num_source_tags", &Manager::numSourceTags)
         .def("num_flow_completions", &Manager::numFlowCompletions)
+        .def("step_workload", [](Manager &mgr) {
+            StepWorkloadStats stats = mgr.stepWorkload();
+            nb::dict result;
+            result["step"] = nb::int_(stats.step);
+            result["now"] = nb::float_(stats.now);
+            result["ready_flows"] = nb::int_(stats.ready_flows);
+            result["scheduled_events"] = nb::int_(stats.scheduled_events);
+            result["pending_flows_after"] = nb::int_(stats.pending_flows_after);
+            result["due_events"] = nb::int_(stats.due_events);
+            result["due_arrival"] = nb::int_(stats.due_arrival);
+            result["due_bwupdate"] = nb::int_(stats.due_bwupdate);
+            result["due_pfc"] = nb::int_(stats.due_pfc);
+            result["due_ports"] = nb::int_(stats.due_ports);
+            result["delayed_events_after"] = nb::int_(stats.delayed_events_after);
+            result["dirty_ports"] = nb::int_(stats.dirty_ports);
+            result["last_dirty_ports"] = nb::int_(stats.last_dirty_ports);
+            result["alloc_ports"] = nb::int_(stats.alloc_ports);
+            result["alloc_tags"] = nb::int_(stats.alloc_tags);
+            result["emit_ports"] = nb::int_(stats.emit_ports);
+            result["buffer_ports"] = nb::int_(stats.buffer_ports);
+            result["create_reqs"] = nb::int_(stats.create_reqs);
+            result["create_ports"] = nb::int_(stats.create_ports);
+            result["cleanup_reqs"] = nb::int_(stats.cleanup_reqs);
+            result["cleanup_ports"] = nb::int_(stats.cleanup_ports);
+            result["completion_reqs"] = nb::int_(stats.completion_reqs);
+            result["completion_ports"] = nb::int_(stats.completion_ports);
+            result["outbox_events"] = nb::int_(stats.outbox_events);
+            result["outbox_ports"] = nb::int_(stats.outbox_ports);
+            result["active_tags"] = nb::int_(stats.active_tags);
+            result["source_tags"] = nb::int_(stats.source_tags);
+            result["ingress_tags"] = nb::int_(stats.ingress_tags);
+            result["finished_sources"] = nb::int_(stats.finished_sources);
+            result["emitted_cleanup"] = nb::int_(stats.emitted_cleanup);
+            result["drain_timers"] = nb::int_(stats.drain_timers);
+            result["pause_timers"] = nb::int_(stats.pause_timers);
+            result["resume_timers"] = nb::int_(stats.resume_timers);
+            result["next_dt"] = nb::float_(stats.next_dt);
+            return result;
+        })
         .def("flow_completion", [](Manager &mgr, int64_t idx) {
             FlowCompletionRecord record = mgr.flowCompletion((int32_t)idx);
             nb::dict result;

@@ -328,6 +328,14 @@ void Sim::flushTagCreate(Context &ctx)
             continue;
         }
 
+        if (workloadStatsEnabled()) {
+            stepWorkloadStats.create_reqs += cl.num;
+            if (stepCreateTouched[port_id] == 0) {
+                stepCreateTouched[port_id] = 1;
+                stepWorkloadStats.create_ports += 1;
+            }
+        }
+
         PortTraceLast &trace = portTraceLasts[port_id];
         for (int32_t i = 0; i < cl.num; i++) {
             const PortCreateReq &req = cl.reqs[i];
@@ -378,6 +386,13 @@ void Sim::flushFlowCompletion(Context &ctx)
         }
 
         PortCompletionList &cl = portCompletionLists[port_id];
+        if (workloadStatsEnabled() && cl.num > 0) {
+            stepWorkloadStats.completion_reqs += cl.num;
+            if (stepCompletionTouched[port_id] == 0) {
+                stepCompletionTouched[port_id] = 1;
+                stepWorkloadStats.completion_ports += 1;
+            }
+        }
         for (int32_t i = 0; i < cl.num; i++) {
             recordFlowCompletion(cl.flow_ids[i], now);
         }

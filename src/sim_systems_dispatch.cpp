@@ -29,10 +29,16 @@ void Sim::deliverEvents(Context &ctx)
            delayedEvents[due_count].t <= now + 1e-15) {
         due_count += 1;
     }
+    if (workloadStatsEnabled()) {
+        stepWorkloadStats.due_events = due_count;
+    }
 
     for (int32_t i = 0; i < due_count; i++) {
         if (delayedEvents[i].type == DelayedEvent::Type::Arrival) {
             const FlowArrivalEv &ev = delayedEvents[i].arrival;
+            if (workloadStatsEnabled()) {
+                stepWorkloadStats.due_arrival += 1;
+            }
             if (numInboxArrival < MAX_EVENTS_PER_STEP) {
                 inboxArrival[numInboxArrival++] = ev;
                 if (log_enabled) {
@@ -40,6 +46,9 @@ void Sim::deliverEvents(Context &ctx)
                 }
             }
             if (ev.port_id >= 0 && ev.port_id < numPorts) {
+                if (workloadStatsEnabled()) {
+                    stepDueTouched[ev.port_id] = 1;
+                }
                 Entity port_e = portEntities[ev.port_id];
                 if (port_e != Entity::none()) {
                     PortInbox &inbox = portInboxes[ev.port_id];
@@ -50,6 +59,9 @@ void Sim::deliverEvents(Context &ctx)
             }
         } else if (delayedEvents[i].type == DelayedEvent::Type::BwUpdate) {
             const BwUpdateEv &ev = delayedEvents[i].bwupd;
+            if (workloadStatsEnabled()) {
+                stepWorkloadStats.due_bwupdate += 1;
+            }
             if (numInboxBwUpdate < MAX_EVENTS_PER_STEP) {
                 inboxBwUpdate[numInboxBwUpdate++] = ev;
                 if (log_enabled) {
@@ -57,6 +69,9 @@ void Sim::deliverEvents(Context &ctx)
                 }
             }
             if (ev.port_id >= 0 && ev.port_id < numPorts) {
+                if (workloadStatsEnabled()) {
+                    stepDueTouched[ev.port_id] = 1;
+                }
                 Entity port_e = portEntities[ev.port_id];
                 if (port_e != Entity::none()) {
                     PortInbox &inbox = portInboxes[ev.port_id];
@@ -67,6 +82,9 @@ void Sim::deliverEvents(Context &ctx)
             }
         } else {
             const PfcControlEv &ev = delayedEvents[i].pfcctrl;
+            if (workloadStatsEnabled()) {
+                stepWorkloadStats.due_pfc += 1;
+            }
             if (numInboxPfc < MAX_EVENTS_PER_STEP) {
                 inboxPfc[numInboxPfc++] = ev;
                 if (log_enabled) {
@@ -74,6 +92,9 @@ void Sim::deliverEvents(Context &ctx)
                 }
             }
             if (ev.target_port_id >= 0 && ev.target_port_id < numPorts) {
+                if (workloadStatsEnabled()) {
+                    stepDueTouched[ev.target_port_id] = 1;
+                }
                 Entity port_e = portEntities[ev.target_port_id];
                 if (port_e != Entity::none()) {
                     PortInbox &inbox = portInboxes[ev.target_port_id];
@@ -90,6 +111,15 @@ void Sim::deliverEvents(Context &ctx)
         delayedEvents[i] = delayedEvents[i + due_count];
     }
     numDelayedEvents = remaining;
+
+    if (workloadStatsEnabled()) {
+        int32_t due_ports = 0;
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            due_ports += stepDueTouched[port_id] != 0 ? 1 : 0;
+        }
+        stepWorkloadStats.due_ports = due_ports;
+        stepWorkloadStats.delayed_events_after = numDelayedEvents;
+    }
 
     if (log_enabled) {
         printSystemDeliverSummary(step, now,
@@ -128,6 +158,11 @@ void Sim::snapshotDirtyPorts(Context &ctx)
 
     if (log_enabled) {
         printSystemClearSummary(step, now, cleared_port_count);
+    }
+
+    if (workloadStatsEnabled()) {
+        stepWorkloadStats.dirty_ports = cleared_port_count;
+        stepWorkloadStats.last_dirty_ports = numLastDirtyPortIDs;
     }
 }
 
@@ -193,6 +228,13 @@ void Sim::flushPortTagCleanup(Context &ctx)
             continue;
         }
         PortCleanup &cleanup = portCleanups[port_id];
+        if (workloadStatsEnabled() && cleanup.num > 0) {
+            stepWorkloadStats.cleanup_reqs += cleanup.num;
+            if (stepCleanupTouched[port_id] == 0) {
+                stepCleanupTouched[port_id] = 1;
+                stepWorkloadStats.cleanup_ports += 1;
+            }
+        }
         for (int32_t i = 0; i < cleanup.num; i++) {
             if (cleanup.tags[i] == Entity::none()) {
                 continue;
@@ -269,6 +311,13 @@ void Sim::flushPortOutbox(Context &ctx)
             continue;
         }
         PortOutbox &outbox = portOutboxes[port_id];
+        if (workloadStatsEnabled() && outbox.num_events > 0) {
+            stepWorkloadStats.outbox_events += outbox.num_events;
+            if (stepOutboxTouched[port_id] == 0) {
+                stepOutboxTouched[port_id] = 1;
+                stepWorkloadStats.outbox_ports += 1;
+            }
+        }
         int32_t remaining = available - batch_count;
         int32_t take = outbox.num_events;
         if (take > remaining) {

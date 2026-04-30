@@ -537,6 +537,13 @@ void Sim::flushBufferTagCleanup(Context &ctx)
             continue;
         }
         PortCleanup &cleanup = portCleanups[port_id];
+        if (workloadStatsEnabled() && cleanup.num > 0) {
+            stepWorkloadStats.cleanup_reqs += cleanup.num;
+            if (stepCleanupTouched[port_id] == 0) {
+                stepCleanupTouched[port_id] = 1;
+                stepWorkloadStats.cleanup_ports += 1;
+            }
+        }
         for (int32_t i = 0; i < cleanup.num; i++) {
             if (cleanup.tags[i] == Entity::none()) {
                 continue;

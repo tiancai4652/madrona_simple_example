@@ -129,6 +129,7 @@ struct Sim : public madrona::WorldBase {
         int32_t qos_mode = QOS_NONE;
         double prior_weights[PFC_MAX_PRIORITY] {};
         int32_t perf_fct_only = 1;
+        int32_t step_workload = 0;
     };
 
     static void registerTypes(madrona::ECSRegistry &registry,
@@ -207,9 +208,14 @@ struct Sim : public madrona::WorldBase {
         return perfFCTOnly != 0;
     }
 
+    inline bool workloadStatsEnabled() const
+    {
+        return stepWorkload != 0;
+    }
+
     inline bool traceModeEnabled() const
     {
-        return false;
+        return workloadStatsEnabled();
     }
 
     static constexpr Time timerInactiveSentinel()
@@ -530,6 +536,7 @@ struct Sim : public madrona::WorldBase {
     int32_t enablePfc;
     int32_t pfcEgress;
     int32_t perfFCTOnly;
+    int32_t stepWorkload;
     Time defaultLinkDelay;
     Time propagationInterval;
     double pfcXoffThreshold;
@@ -547,6 +554,12 @@ struct Sim : public madrona::WorldBase {
     int32_t lastDirtyPortIDs[MAX_TOPO_PORTS];
     Time nextDT;
     uint64_t systemLogStep;
+    StepWorkloadStats stepWorkloadStats;
+    uint8_t stepDueTouched[MAX_TOPO_PORTS] {};
+    uint8_t stepCreateTouched[MAX_TOPO_PORTS] {};
+    uint8_t stepCleanupTouched[MAX_TOPO_PORTS] {};
+    uint8_t stepCompletionTouched[MAX_TOPO_PORTS] {};
+    uint8_t stepOutboxTouched[MAX_TOPO_PORTS] {};
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

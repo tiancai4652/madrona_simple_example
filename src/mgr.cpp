@@ -107,6 +107,16 @@ inline int32_t resolvePerfFCTOnly(const Manager::Config &cfg)
     return cfg.perf_fct_only != 0 ? 1 : 0;
 }
 
+inline int32_t resolveStepWorkload(const Manager::Config &cfg)
+{
+    const char *override_env = std::getenv("MADSIMPLE_STEP_WORKLOAD");
+    if (override_env != nullptr && override_env[0] != '\0') {
+        return envFlagValue(override_env) ? 1 : 0;
+    }
+
+    return cfg.step_workload != 0 ? 1 : 0;
+}
+
 #ifdef MADRONA_CUDA_SUPPORT
 inline CompileConfig::OptMode getGPUOptMode()
 {
@@ -163,6 +173,7 @@ struct Manager::Impl {
     virtual int32_t numSourceTags() = 0;
     virtual int32_t numFlowCompletions() = 0;
     virtual FlowCompletionRecord flowCompletion(int32_t idx) = 0;
+    virtual StepWorkloadStats stepWorkload() = 0;
 
     static inline Impl * init(const Config &cfg,
                               const GridState &src_grid,
@@ -245,6 +256,11 @@ struct Manager::CPUImpl final : Manager::Impl {
         }
         return world.flowCompletions[idx].record;
     }
+
+    inline virtual StepWorkloadStats stepWorkload() final
+    {
+        return cpuExec.getWorldData(0).stepWorkloadStats;
+    }
 };
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -312,6 +328,16 @@ struct Manager::GPUImpl final : Manager::Impl {
         return host_stats;
     }
 
+    inline StepWorkloadStats fetchStepWorkload()
+    {
+        auto *dev_ptr = (StepWorkloadStats *)gpuExec.getExported(
+            (uint32_t)ExportID::StepWorkloadStats);
+        StepWorkloadStats host_stats {};
+        REQ_CUDA(cudaMemcpy(&host_stats, dev_ptr, sizeof(StepWorkloadStats),
+                            cudaMemcpyDeviceToHost));
+        return host_stats;
+    }
+
     inline virtual double simulationTime() final
     {
         return fetchSimStats().simulationTime;
@@ -361,6 +387,11 @@ struct Manager::GPUImpl final : Manager::Impl {
                             cudaMemcpyDeviceToHost));
         return rec;
     }
+
+    inline virtual StepWorkloadStats stepWorkload() final
+    {
+        return fetchStepWorkload();
+    }
 };
 #endif
 
@@ -389,6 +420,7 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
     static_assert(sizeof(GridState) % alignof(Cell) == 0);
 
     int32_t perf_fct_only = resolvePerfFCTOnly(cfg);
+    int32_t step_workload = resolveStepWorkload(cfg);
 
     Sim::Config sim_cfg {
         .maxEpisodeLength = cfg.maxEpisodeLength,
@@ -404,6 +436,7 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
         .qos_mode = cfg.qos_mode,
         .prior_weights = {},
         .perf_fct_only = perf_fct_only,
+        .step_workload = step_workload,
     };
     for (int i = 0; i < 8; i++) {
         sim_cfg.prior_weights[i] = cfg.prior_weights[i];
@@ -632,6 +665,11 @@ int32_t Manager::numFlowCompletions()
 FlowCompletionRecord Manager::flowCompletion(int32_t idx)
 {
     return impl_->flowCompletion(idx);
+}
+
+StepWorkloadStats Manager::stepWorkload()
+{
+    return impl_->stepWorkload();
 }
 
 }
