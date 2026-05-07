@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import os
 import sys
@@ -121,6 +122,7 @@ def main():
     t0 = time.time()
     t_prev = t0
     steps_prev = 0
+    step_phase_rows = []
     if not log_capture_mode:
         print(
             f"[parity] start loop: max_steps={args.max_steps} "
@@ -132,6 +134,10 @@ def main():
     while steps < args.max_steps and not should_stop(world):
         world.step()
         steps += 1
+        phase_times = world.last_step_phase_times()
+        if phase_times.get("step", 0) == 0:
+            phase_times["step"] = steps
+        step_phase_rows.append(phase_times)
 
         if (
             not log_capture_mode
@@ -164,6 +170,24 @@ def main():
 
     completion_path = out_dir / "flow_completion_times.csv"
     world.write_flow_completion_csv(completion_path)
+    phase_times_path = out_dir / "madrona_step_phase_times.csv"
+    if step_phase_rows:
+        fieldnames = [
+            "step",
+            "total_wall_time_s",
+            "schedule_wall_time_s",
+            "deliver_wall_time_s",
+            "ingress_wall_time_s",
+            "alloc_wall_time_s",
+            "pfc_emit_wall_time_s",
+            "clear_dt_wall_time_s",
+            "buffer_progress_wall_time_s",
+        ]
+        with open(phase_times_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in step_phase_rows:
+                writer.writerow({k: row.get(k, 0.0) for k in fieldnames})
 
     summary = {
         "steps_executed": steps,
@@ -176,6 +200,7 @@ def main():
         "num_source_tags": world.num_source_tags(),
         "num_flow_completions": len(world.flow_completions()),
         "completion_csv": str(completion_path),
+        "step_phase_times_csv": str(phase_times_path),
         "stopped_cleanly": should_stop(world),
     }
 

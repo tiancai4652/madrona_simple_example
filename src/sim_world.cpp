@@ -239,14 +239,16 @@ int32_t Sim::getPath(NodeId src,
 }
 
 MADRONA_NO_INLINE int32_t Sim::lookupFlowRouteNext(
-    FlowId flow_id, int32_t port_id) const
+    Context &ctx,
+    FlowId flow_id,
+    int32_t port_id) const
 {
-    int32_t route_slot = findFlowRouteSlot(flow_id);
-    if (route_slot < 0 || route_slot >= numFlowRoutes) {
+    Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
+    if (flow_entity == Entity::none()) {
         return -1;
     }
 
-    const FlowRouteState &route = flowRoutes[route_slot];
+    const FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
     for (int32_t j = 0; j < route.num_steps; j++) {
         if (route.steps[j].port_id == port_id) {
             return route.steps[j].next_port_id;
@@ -257,14 +259,16 @@ MADRONA_NO_INLINE int32_t Sim::lookupFlowRouteNext(
 }
 
 MADRONA_NO_INLINE int32_t Sim::lookupFlowIngressPort(
-    FlowId flow_id, int32_t port_id) const
+    Context &ctx,
+    FlowId flow_id,
+    int32_t port_id) const
 {
-    int32_t route_slot = findFlowRouteSlot(flow_id);
-    if (route_slot < 0 || route_slot >= numFlowRoutes) {
+    Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
+    if (flow_entity == Entity::none()) {
         return -1;
     }
 
-    const FlowRouteState &route = flowRoutes[route_slot];
+    const FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
     for (int32_t step_idx = 0; step_idx < route.num_steps; step_idx++) {
         if (route.steps[step_idx].next_port_id != port_id) {
             continue;
@@ -280,24 +284,79 @@ MADRONA_NO_INLINE int32_t Sim::lookupFlowIngressPort(
     return -1;
 }
 
-MADRONA_NO_INLINE void Sim::pushDelayedEvent(const DelayedEvent &ev)
+namespace {
+
+inline int32_t delayedEventTargetPort(const DelayedEvent &ev)
 {
-    if (numDelayedEvents >= MAX_DELAYED_EVENTS) {
+    switch (ev.type) {
+    case DelayedEvent::Type::Arrival:
+        return ev.arrival.port_id;
+    case DelayedEvent::Type::BwUpdate:
+        return ev.bwupd.port_id;
+    case DelayedEvent::Type::PfcControl:
+        return ev.pfcctrl.target_port_id;
+    }
+    return -1;
+}
+
+inline void compactPortDelayedQueue(PortDelayedQueue &queue)
+{
+    if (queue.head <= 0) {
         return;
     }
 
-    int32_t idx = numDelayedEvents++;
-    delayedEvents[idx] = ev;
+    if (queue.count <= 0) {
+        queue.head = 0;
+        return;
+    }
 
-    while (idx > 0 && delayedEvents[idx].t < delayedEvents[idx - 1].t) {
-        DelayedEvent tmp = delayedEvents[idx - 1];
-        delayedEvents[idx - 1] = delayedEvents[idx];
-        delayedEvents[idx] = tmp;
+    for (int32_t i = 0; i < queue.count; i++) {
+        queue.events[i] = queue.events[queue.head + i];
+    }
+    queue.head = 0;
+}
+
+} // namespace
+
+MADRONA_NO_INLINE void Sim::pushDelayedEvent(Context &ctx,
+                                             const DelayedEvent &ev)
+{
+    int32_t target_port = delayedEventTargetPort(ev);
+    if (target_port < 0 || target_port >= numPorts) {
+        return;
+    }
+
+    Entity port_e = portEntities[target_port];
+    if (port_e == Entity::none()) {
+        return;
+    }
+
+    PortDelayedQueue &queue = ctx.get<PortDelayedQueue>(port_e);
+    if (queue.head > 0 &&
+        queue.head + queue.count >= MAX_PORT_DELAYED_EVENTS) {
+        compactPortDelayedQueue(queue);
+    }
+
+    if (queue.count >= MAX_PORT_DELAYED_EVENTS) {
+        return;
+    }
+
+    int32_t idx = queue.head + queue.count;
+    queue.count += 1;
+    queue.events[idx] = ev;
+
+    while (idx > queue.head && queue.events[idx].t < queue.events[idx - 1].t) {
+        DelayedEvent tmp = queue.events[idx - 1];
+        queue.events[idx - 1] = queue.events[idx];
+        queue.events[idx] = tmp;
         idx -= 1;
     }
+
+    numDelayedEvents += 1;
 }
 
 MADRONA_NO_INLINE void Sim::pushDelayedEventsBatch(
+    Context &ctx,
     const DelayedEvent *events,
     int32_t count)
 {
@@ -305,61 +364,9 @@ MADRONA_NO_INLINE void Sim::pushDelayedEventsBatch(
         return;
     }
 
-    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
-    if (available <= 0) {
-        return;
+    for (int32_t i = 0; i < count; i++) {
+        pushDelayedEvent(ctx, events[i]);
     }
-    if (count > available) {
-        count = available;
-    }
-
-    if (events != delayedEventScratch) {
-        for (int32_t i = 0; i < count; i++) {
-            delayedEventScratch[i] = events[i];
-        }
-    }
-
-    if (count > 1) {
-        DelayedEvent *src = delayedEventScratch;
-        DelayedEvent *dst = delayedEvents + numDelayedEvents;
-
-        for (int32_t width = 1; width < count; width *= 2) {
-            for (int32_t left = 0; left < count; left += 2 * width) {
-                int32_t mid = minI32(left + width, count);
-                int32_t right = minI32(left + 2 * width, count);
-                mergeDelayedEventRuns(src, dst, left, mid, right);
-            }
-
-            DelayedEvent *tmp = src;
-            src = dst;
-            dst = tmp;
-        }
-
-        if (src != delayedEventScratch) {
-            for (int32_t i = 0; i < count; i++) {
-                delayedEventScratch[i] = src[i];
-            }
-        }
-    }
-
-    int32_t existing = numDelayedEvents;
-    int32_t write = existing + count - 1;
-    int32_t i = existing - 1;
-    int32_t j = count - 1;
-
-    while (i >= 0 && j >= 0) {
-        if (delayedEvents[i].t > delayedEventScratch[j].t) {
-            delayedEvents[write--] = delayedEvents[i--];
-        } else {
-            delayedEvents[write--] = delayedEventScratch[j--];
-        }
-    }
-
-    while (j >= 0) {
-        delayedEvents[write--] = delayedEventScratch[j--];
-    }
-
-    numDelayedEvents = existing + count;
 }
 
 Time Sim::computePropagationTimeAt(Time base_time, Time link_delay) const
@@ -396,7 +403,7 @@ Time Sim::computePropagationTimeForPort(int32_t src_port_id, int32_t dst_port_id
     return computePropagationTime(delay);
 }
 
-Time Sim::chooseDT() const
+Time Sim::chooseDT(Context &ctx) const
 {
     constexpr const char *scope = "dt";
     uint64_t step = systemLogStep;
@@ -412,18 +419,38 @@ Time Sim::chooseDT() const
     double pfc_resume_gap = std::numeric_limits<double>::max();
 
     if (numDelayedEvents > 0) {
-        Time gap = delayedEvents[0].t - now;
-        if (gap > 1e-15) {
-            delayed_gap = gap;
-            dt_event = std::min(dt_event, gap);
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            Entity port_e = portEntities[port_id];
+            if (port_e == Entity::none()) {
+                continue;
+            }
+            const PortDelayedQueue &queue = ctx.get<PortDelayedQueue>(port_e);
+            if (queue.count <= 0) {
+                continue;
+            }
+
+            Time gap = queue.events[queue.head].t - now;
+            if (gap > 1e-15) {
+                delayed_gap = std::min(delayed_gap, (double)gap);
+                dt_event = std::min(dt_event, gap);
+            }
         }
     }
 
-    if (numPendingFlows > 0) {
-        Time gap = pendingFlows[0].start_time - now;
-        if (gap > 1e-15) {
-            pending_gap = gap;
-            dt_event = std::min(dt_event, gap);
+    const FlowCounters &counters = ctx.singleton<FlowCounters>();
+
+    if (counters.numPendingFlows > 0) {
+        Entity flow_entity =
+            (counters.pendingFlowCursor >= 0 && network != nullptr &&
+             counters.pendingFlowCursor < network->numFlows) ?
+            flowMetaEntities[counters.pendingFlowCursor] :
+            Entity::none();
+        if (flow_entity != Entity::none()) {
+            Time gap = ctx.get<FlowDef>(flow_entity).start_time - now;
+            if (gap > 1e-15) {
+                pending_gap = gap;
+                dt_event = std::min(dt_event, gap);
+            }
         }
     }
 
@@ -441,30 +468,45 @@ Time Sim::chooseDT() const
 
     if (enableBuffer != 0) {
         for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            if (backlogDrainTimers[port_id] > 1e-15 &&
-                timerIsActive(backlogDrainTimers[port_id])) {
+            Entity port_e = portEntities[port_id];
+            if (port_e == Entity::none()) {
+                continue;
+            }
+            Time backlog_drain = ctx.get<PortTimers>(port_e).backlog_drain;
+            if (backlog_drain > 1e-15 &&
+                timerIsActive(backlog_drain)) {
                 backlog_gap = std::min(backlog_gap,
-                    (double)backlogDrainTimers[port_id]);
-                dt_event = std::min(dt_event, backlogDrainTimers[port_id]);
+                    (double)backlog_drain);
+                dt_event = std::min(dt_event, backlog_drain);
             }
         }
     }
 
     if (enablePfc != 0) {
         for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            if (pfcPauseTimers[port_id] > 1e-9 &&
-                timerIsActive(pfcPauseTimers[port_id])) {
+            Entity port_e = portEntities[port_id];
+            if (port_e == Entity::none()) {
+                continue;
+            }
+            Time pfc_pause = ctx.get<PortTimers>(port_e).pfc_pause;
+            if (pfc_pause > 1e-9 &&
+                timerIsActive(pfc_pause)) {
                 pfc_pause_gap = std::min(pfc_pause_gap,
-                    (double)pfcPauseTimers[port_id]);
-                dt_event = std::min(dt_event, pfcPauseTimers[port_id]);
+                    (double)pfc_pause);
+                dt_event = std::min(dt_event, pfc_pause);
             }
         }
         for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            if (pfcResumeTimers[port_id] > 1e-9 &&
-                timerIsActive(pfcResumeTimers[port_id])) {
+            Entity port_e = portEntities[port_id];
+            if (port_e == Entity::none()) {
+                continue;
+            }
+            Time pfc_resume = ctx.get<PortTimers>(port_e).pfc_resume;
+            if (pfc_resume > 1e-9 &&
+                timerIsActive(pfc_resume)) {
                 pfc_resume_gap = std::min(pfc_resume_gap,
-                    (double)pfcResumeTimers[port_id]);
-                dt_event = std::min(dt_event, pfcResumeTimers[port_id]);
+                    (double)pfc_resume);
+                dt_event = std::min(dt_event, pfc_resume);
             }
         }
     }

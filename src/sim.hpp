@@ -45,9 +45,7 @@ constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
 constexpr int32_t MAX_DELAYED_EVENTS = 131072;
 constexpr int32_t MAX_EVENTS_PER_STEP = 1024;
 constexpr int32_t MAX_TAG_INDEX = 258048;
-constexpr int32_t TAG_LOOKUP_CAPACITY = 1 << 19;
 constexpr int32_t MAX_SOURCE_TAGS = 64512;
-constexpr int32_t MAX_INGRESS_TAGS = 258048;
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {
@@ -83,36 +81,23 @@ struct FlowRouteState {
     FlowRouteStep steps[MAX_FLOW_ROUTE_STEPS] {};
 };
 
+struct FlowRuntimeState {
+    madrona::Entity source_tag_entity = madrona::Entity::none();
+    int32_t pending = 1;
+    int32_t active = 0;
+    int32_t completed = 0;
+    int32_t route_active = 0;
+    FlowCompletionRecord completion_record {};
+};
+
+struct FlowMeta : public madrona::Archetype<
+    FlowDef,
+    FlowRouteState,
+    FlowRuntimeState
+> {};
+
 // FlowArrivalEv / BwUpdateEv / PfcControlEv / DelayedEvent were moved to
 // types.hpp (phase C) so PortOutbox can embed them in the Port archetype.
-
-struct TagIndexEntry {
-    int32_t port_id = -1;
-    FlowId flow_id = -1;
-    madrona::Entity entity = madrona::Entity::none();
-};
-
-struct TagLookupEntry {
-    int32_t port_id = -1;
-    FlowId flow_id = -1;
-    madrona::Entity entity = madrona::Entity::none();
-};
-
-struct SourceTagEntry {
-    FlowId flow_id = -1;
-    madrona::Entity entity = madrona::Entity::none();
-};
-
-struct IngressTagEntry {
-    int32_t ingress_port_id = -1;
-    FlowId flow_id = -1;
-    madrona::Entity entity = madrona::Entity::none();
-};
-
-struct FlowCompletionEntry {
-    FlowId flow_id = -1;
-    FlowCompletionRecord record {};
-};
 
 struct Sim : public madrona::WorldBase {
     struct Config {
@@ -157,36 +142,50 @@ struct Sim : public madrona::WorldBase {
     int32_t findNodeSlot(NodeId node_id) const;
     int32_t findNeighborSlot(int32_t node_slot, NodeId neighbor_id) const;
     int32_t flowLookupIndex(FlowId flow_id) const;
-    int32_t findFlowDefSlot(FlowId flow_id) const;
-    int32_t findFlowRouteSlot(FlowId flow_id) const;
-    int32_t findFlowCompletionSlot(FlowId flow_id) const;
-    int32_t findTagLookupSlot(int32_t port_id, FlowId flow_id) const;
-    void insertTagLookup(int32_t port_id,
+    int32_t findTagLookupSlot(const PortTagLookup &lookup,
+                              FlowId flow_id) const;
+    void insertTagLookup(PortTagLookup &lookup,
                          FlowId flow_id,
                          madrona::Entity entity);
-    void removeTagLookup(int32_t port_id, FlowId flow_id);
-    const FlowDef *getFlowDef(FlowId flow_id) const;
+    void removeTagLookup(PortTagLookup &lookup, FlowId flow_id);
+    madrona::Entity findFlowMetaEntity(
+        madrona::Context &ctx, FlowId flow_id) const;
+    const FlowDef *getFlowDef(madrona::Context &ctx, FlowId flow_id) const;
     int32_t getPath(NodeId src,
                     NodeId dst,
                     FlowId flow_id,
                     NodeId *out_path,
                     int32_t max_path) const;
-    MADRONA_NO_INLINE bool injectFlowDef(const FlowDef &flow,
+    MADRONA_NO_INLINE bool injectFlowDef(madrona::Context &ctx,
+                                         madrona::Entity flow_entity,
                                          DelayedEvent &out_ev);
     MADRONA_NO_INLINE bool buildFlowArrivalEvent(int32_t src_port_id,
                                                  const FlowDef &flow,
                                                  DelayedEvent &out_ev) const;
-    MADRONA_NO_INLINE void schedulePendingFlows();
+    MADRONA_NO_INLINE void schedulePendingFlows(madrona::Context &ctx);
     MADRONA_NO_INLINE void deliverEvents(madrona::Context &ctx);
-    MADRONA_NO_INLINE Time chooseDT() const;
+    MADRONA_NO_INLINE void deliverEventsOnePort(
+        madrona::Context &ctx,
+        int32_t port_id,
+        PortDelayedQueue &queue,
+        PortInbox &inbox,
+        PortTraceLast &trace);
+    MADRONA_NO_INLINE void finishDeliverEvents(madrona::Context &ctx);
+    MADRONA_NO_INLINE Time chooseDT(madrona::Context &ctx) const;
     MADRONA_NO_INLINE void flowProgressAndCleanupSystem(
         madrona::Context &ctx, Time dt);
-    MADRONA_NO_INLINE void progressFinishedSources(
+    MADRONA_NO_INLINE void progressFinishedSourcesOnePort(
         madrona::Context &ctx,
         Time dt,
         Time next_now,
-        int32_t &finished_source_count,
-        int32_t &emitted_cleanup_count);
+        int32_t port_id,
+        PortState &port_state,
+        PortTagList &tag_list,
+        const PortSourceTagList &source_tag_list,
+        PortCachedHints &hints,
+        PortFinishedSourceList &finished_list,
+        PortTraceLast &trace,
+        PortOutbox &outbox);
     MADRONA_NO_INLINE void progressBacklogDrainTimers(
         madrona::Context &ctx,
         Time dt);
@@ -209,7 +208,7 @@ struct Sim : public madrona::WorldBase {
 
     inline bool traceModeEnabled() const
     {
-        return false;
+        return perfFCTOnly == 0;
     }
 
     static constexpr Time timerInactiveSentinel()
@@ -222,9 +221,9 @@ struct Sim : public madrona::WorldBase {
         return t < timerInactiveSentinel();
     }
 
-    // Phase B.1 singleton: consumes PortTraceLast.was_dirty_at_clear written
-    // by the per-Port clearDirtyOnePortSystem to rebuild lastDirtyPortIDs in
-    // port_id ascending order.
+    // Phase B.1 singleton: emits the clear-summary log and computes nextDT
+    // after clearDirtyOnePortSystem has snapshotted each port's
+    // was_dirty_at_clear flag locally.
     MADRONA_NO_INLINE void snapshotDirtyPorts(madrona::Context &ctx);
 
     // Phase B.2: per-Port bandwidth allocation worker. Reads global
@@ -255,11 +254,12 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE void logAllocTraces(madrona::Context &ctx);
 
     // Phase B.3: per-Port buffer-advance worker. Computes the legacy
-    // processPorts decision locally (lastDirtyPortIDs / cachedDrainPortID /
-    // backlogDrainTimers / any-priority-empty heuristic) and, if the port
-    // is eligible, advances that port's PortBuffer / FlowTagState in
-    // place. Tags queued for destruction land in PortCleanup and are
-    // flushed sequentially by flushBufferTagCleanup below.
+    // processPorts decision locally (this port's was_dirty_at_clear /
+    // cachedDrainPortID / backlogDrainTimers / any-priority-empty
+    // heuristic) and, if the port is eligible, advances that port's
+    // PortBuffer / FlowTagState in place. Tags queued for destruction land
+    // in PortCleanup and are flushed sequentially by
+    // flushBufferTagCleanup below.
     MADRONA_NO_INLINE void advanceOnePortBuffer(madrona::Context &ctx,
                                                 int32_t port_id,
                                                 Time dt,
@@ -267,6 +267,7 @@ struct Sim : public madrona::WorldBase {
                                                 PortBuffer &port_buf,
                                                 DirtyPort &dirty,
                                                 PortPfcState &pfc_state,
+                                                PortTimers &timers,
                                                 PortCleanup &cleanup,
                                                 PortTraceLast &trace,
                                                 PortTagList &tag_list);
@@ -291,7 +292,8 @@ struct Sim : public madrona::WorldBase {
                                             PortPfcState &pfc_state,
                                             PortOutbox &outbox,
                                             PortTraceLast &trace,
-                                            PortTagList &tag_list);
+                                            PortTagList &tag_list,
+                                            IngressTagList &ingress_list);
 
     // Helper split of pfcDetectOnePort for the egress and ingress branches.
     // Kept as two separate non-inlined functions so NVRTC + ptxas optimize
@@ -316,7 +318,8 @@ struct Sim : public madrona::WorldBase {
         PortPfcConfig &cfg,
         PortPfcState &state,
         PortOutbox &outbox,
-        PortTraceLast &trace);
+        PortTraceLast &trace,
+        IngressTagList &ingress_list);
 
     // Phase C: per-Port emit worker. Mirrors legacy downstreamEmitSystem
     // but for a single port. Pushes Arrival/BwUpdate DelayedEvents into
@@ -355,6 +358,7 @@ struct Sim : public madrona::WorldBase {
                                               DirtyPort &dirty,
                                               PortInbox &inbox,
                                               PortTagList &tag_list,
+                                              PortSourceTagList &source_tag_list,
                                               PortCreateList &create_list,
                                               PortTraceLast &trace);
     MADRONA_NO_INLINE void bwUpdateOnePort(madrona::Context &ctx,
@@ -382,9 +386,13 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE void logIngressChain(madrona::Context &ctx);
 
     MADRONA_NO_INLINE int32_t lookupFlowRouteNext(
-        FlowId flow_id, int32_t port_id) const;
+        madrona::Context &ctx,
+        FlowId flow_id,
+        int32_t port_id) const;
     MADRONA_NO_INLINE int32_t lookupFlowIngressPort(
-        FlowId flow_id, int32_t port_id) const;
+        madrona::Context &ctx,
+        FlowId flow_id,
+        int32_t port_id) const;
     MADRONA_NO_INLINE madrona::Entity findTag(
         madrona::Context &ctx, int32_t port_id, FlowId flow_id) const;
     MADRONA_NO_INLINE madrona::Entity createTagOnPort(
@@ -406,9 +414,7 @@ struct Sim : public madrona::WorldBase {
         Time logical_now,
         DelayedEvent &out_ev);
     MADRONA_NO_INLINE void recordFlowCompletion(
-        FlowId flow_id, Time end_time);
-    MADRONA_NO_INLINE void removeFlowDef(FlowId flow_id);
-    MADRONA_NO_INLINE void removeFlowRoute(FlowId flow_id);
+        madrona::Context &ctx, FlowId flow_id, Time end_time);
     MADRONA_NO_INLINE void materializeBacklog(FlowTagState &tag, Time at_time);
     MADRONA_NO_INLINE void materializeRemaining(FlowTagState &tag, Time at_time);
     MADRONA_NO_INLINE void materializeBufCnt(PortBuffer &port_buf,
@@ -421,31 +427,39 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE Time computePropagationTime(Time link_delay) const;
     MADRONA_NO_INLINE Time computePropagationTimeForPort(
         int32_t src_port_id, int32_t dst_port_id) const;
-    MADRONA_NO_INLINE void pushDelayedEvent(const DelayedEvent &ev);
+    MADRONA_NO_INLINE void pushDelayedEvent(
+        madrona::Context &ctx,
+        const DelayedEvent &ev);
     MADRONA_NO_INLINE void pushDelayedEventsBatch(
+        madrona::Context &ctx,
         const DelayedEvent *events,
         int32_t count);
-    MADRONA_NO_INLINE int32_t findSourceTagIndex(FlowId flow_id) const;
-    MADRONA_NO_INLINE int32_t findIngressTagIndex(
-        int32_t ingress_port_id, FlowId flow_id) const;
-    MADRONA_NO_INLINE void setBacklogDrainTimer(int32_t port_id, Time t);
-    MADRONA_NO_INLINE void setPfcPauseTimer(int32_t ingress_port_id, Time t);
-    MADRONA_NO_INLINE void setPfcResumeTimer(int32_t ingress_port_id, Time t);
-    MADRONA_NO_INLINE void clearBacklogDrainTimer(int32_t port_id);
-    MADRONA_NO_INLINE void clearPfcPauseTimer(int32_t ingress_port_id);
-    MADRONA_NO_INLINE void clearPfcResumeTimer(int32_t ingress_port_id);
-    MADRONA_NO_INLINE int32_t countActiveBacklogDrainTimers() const;
-    MADRONA_NO_INLINE int32_t countActivePfcPauseTimers() const;
-    MADRONA_NO_INLINE int32_t countActivePfcResumeTimers() const;
-    MADRONA_NO_INLINE bool hasActiveBacklogDrainTimers() const;
-    MADRONA_NO_INLINE bool hasActivePfcPauseTimers() const;
-    MADRONA_NO_INLINE bool hasActivePfcResumeTimers() const;
+    MADRONA_NO_INLINE void setBacklogDrainTimer(PortTimers &timers, Time t);
+    MADRONA_NO_INLINE void setPfcPauseTimer(PortTimers &timers, Time t);
+    MADRONA_NO_INLINE void setPfcResumeTimer(PortTimers &timers, Time t);
+    MADRONA_NO_INLINE void clearBacklogDrainTimer(PortTimers &timers);
+    MADRONA_NO_INLINE void clearPfcPauseTimer(PortTimers &timers);
+    MADRONA_NO_INLINE void clearPfcResumeTimer(PortTimers &timers);
+    MADRONA_NO_INLINE int32_t countActiveBacklogDrainTimers(
+        madrona::Context &ctx) const;
+    MADRONA_NO_INLINE int32_t countActivePfcPauseTimers(
+        madrona::Context &ctx) const;
+    MADRONA_NO_INLINE int32_t countActivePfcResumeTimers(
+        madrona::Context &ctx) const;
+    MADRONA_NO_INLINE bool hasActiveBacklogDrainTimers(
+        madrona::Context &ctx) const;
+    MADRONA_NO_INLINE bool hasActivePfcPauseTimers(
+        madrona::Context &ctx) const;
+    MADRONA_NO_INLINE bool hasActivePfcResumeTimers(
+        madrona::Context &ctx) const;
     MADRONA_NO_INLINE void applyDrainHintOnePort(
         int32_t port_id,
-        PortDrainHint &hint);
+        PortDrainHint &hint,
+        PortTimers &timers);
     MADRONA_NO_INLINE void applyPfcTimerOnePort(
         int32_t ingress_port_id,
-        PortPfcState &state);
+        PortPfcState &state,
+        PortTimers &timers);
 
     EpisodeManager *episodeMgr;
     const GridState *grid;
@@ -475,57 +489,14 @@ struct Sim : public madrona::WorldBase {
     // scratch matrix inside the device-side constructor.
     int32_t bfsDist[MAX_TOPO_NODES];
     int32_t bfsQueue[MAX_TOPO_NODES];
-    int32_t numFlowDefs;
     FlowId flowLookupBase = 0;
     int32_t flowLookupSpan = 0;
-    int32_t flowDefSlotLookup[MAX_FLOWS];
-    int32_t flowRouteSlotLookup[MAX_FLOWS];
-    int32_t flowCompletionSlotLookup[MAX_FLOWS];
-    int32_t sourceTagSlotLookup[MAX_FLOWS];
-    FlowDef flowDefs[MAX_FLOWS];
-    int32_t numPendingFlows;
-    FlowDef pendingFlows[MAX_FLOWS];
-    int32_t numFlowRoutes;
-    FlowRouteState flowRoutes[MAX_FLOWS];
+    madrona::Entity flowMetaEntityLookup[MAX_FLOWS];
+    madrona::Entity flowMetaEntities[MAX_FLOWS];
 
     int32_t numDelayedEvents;
-    DelayedEvent delayedEvents[MAX_DELAYED_EVENTS];
-    DelayedEvent delayedEventScratch[MAX_DELAYED_EVENTS];
-    int32_t numInboxArrival;
-    FlowArrivalEv inboxArrival[MAX_EVENTS_PER_STEP];
-    int32_t numInboxBwUpdate;
-    BwUpdateEv inboxBwUpdate[MAX_EVENTS_PER_STEP];
-    int32_t numInboxPfc;
-    PfcControlEv inboxPfc[MAX_EVENTS_PER_STEP];
     int32_t numTagIndexEntries;
-    TagIndexEntry tagIndex[MAX_TAG_INDEX];
-    TagLookupEntry tagLookup[TAG_LOOKUP_CAPACITY];
     int32_t numSourceTags;
-    SourceTagEntry sourceTags[MAX_SOURCE_TAGS];
-    // GPU megakernel stack must stay small; progressFinishedSources reuses this
-    // world-owned scratch buffer instead of materializing MAX_SOURCE_TAGS on
-    // every thread stack.
-    madrona::Entity finishedSourceScratch[MAX_SOURCE_TAGS];
-    int32_t numIngressTags;
-    IngressTagEntry ingressTags[MAX_INGRESS_TAGS];
-    IngressTagList ingressTagLists[MAX_TOPO_PORTS];
-    int32_t numFlowCompletions;
-    FlowCompletionEntry flowCompletions[MAX_FLOW_COMPLETIONS];
-    // Large per-port scratch queues live on Sim instead of the Port
-    // archetype to keep GPU initWorlds / createPort archetype creation
-    // lighter while preserving deterministic port_id indexing.
-    DirtyPort portDirtyStates[MAX_TOPO_PORTS];
-    PortCleanup portCleanups[MAX_TOPO_PORTS];
-    PortOutbox portOutboxes[MAX_TOPO_PORTS];
-    PortTagList portTagLists[MAX_TOPO_PORTS];
-    PortInbox portInboxes[MAX_TOPO_PORTS];
-    PortCreateList portCreateLists[MAX_TOPO_PORTS];
-    PortCompletionList portCompletionLists[MAX_TOPO_PORTS];
-    PortPfcConfig portPfcConfigs[MAX_TOPO_PORTS];
-    PortPfcState portPfcStates[MAX_TOPO_PORTS];
-    PortCachedHints portCachedHints[MAX_TOPO_PORTS];
-    PortDrainHint portDrainHints[MAX_TOPO_PORTS];
-    PortTraceLast portTraceLasts[MAX_TOPO_PORTS];
     int32_t enableBuffer;
     int32_t enablePfc;
     int32_t pfcEgress;
@@ -540,11 +511,6 @@ struct Sim : public madrona::WorldBase {
     Time cachedNextDrainTime;
     int32_t cachedDrainPortID;
     Time cachedNextFinishTime;
-    Time backlogDrainTimers[MAX_TOPO_PORTS];
-    Time pfcPauseTimers[MAX_TOPO_PORTS];
-    Time pfcResumeTimers[MAX_TOPO_PORTS];
-    int32_t numLastDirtyPortIDs;
-    int32_t lastDirtyPortIDs[MAX_TOPO_PORTS];
     Time nextDT;
     uint64_t systemLogStep;
 };

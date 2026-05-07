@@ -23,53 +23,66 @@ inline bool hasActivePause(const PortPfcState &pfc)
 
 } // namespace
 
-void Sim::progressFinishedSources(Context &ctx,
-                                  Time dt,
-                                  Time next_now,
-                                  int32_t &finished_source_count,
-                                  int32_t &emitted_cleanup_count)
+MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
+    Context &ctx,
+    Time dt,
+    Time next_now,
+    int32_t port_id,
+    PortState &,
+    PortTagList &tag_list,
+    const PortSourceTagList &source_tag_list,
+    PortCachedHints &hints,
+    PortFinishedSourceList &finished_list,
+    PortTraceLast &trace,
+    PortOutbox &outbox)
 {
-    bool need_check_finish =
-        cachedNextFinishTime < std::numeric_limits<Time>::max() &&
-        cachedNextFinishTime <= dt + 1e-12;
+    trace.progress_source_scan_count = 0;
+    trace.progress_finished_source_count = 0;
+    trace.progress_emitted_cleanup_count = 0;
+    hints.has_finish_hint = 0;
+    hints.finish_hint_t = std::numeric_limits<Time>::max();
+    finished_list.num = 0;
+    outbox.num_events = 0;
 
-    if (need_check_finish) {
-        int32_t num_finished = 0;
-        Time next_finish = std::numeric_limits<Time>::max();
-        int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
-        if (available < 0) {
-            available = 0;
-        }
-        int32_t batch_count = 0;
+    if (hints.has_active_finish == 0) {
+        return;
+    }
 
-        for (int32_t i = 0; i < numSourceTags; i++) {
-            Entity tag_e = sourceTags[i].entity;
-            if (tag_e == Entity::none()) {
-                continue;
+    hints.active_finish_t -= dt;
+    if (hints.active_finish_t > 1e-12) {
+        return;
+    }
+
+    hints.has_active_finish = 0;
+    hints.active_finish_t = 0.0;
+
+    auto handle_source_tag = [&](Entity tag_e) {
+        trace.progress_source_scan_count += 1;
+        FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+        materializeRemaining(tag, next_now);
+
+        if (tag.remaining < 1.0) {
+            tag.remaining = 0.0;
+            FlowTagProgress &progress = ctx.get<FlowTagProgress>(tag_e);
+            if (progress.pending_source_destroy == 0 &&
+                finished_list.num < MAX_PORT_CLEANUP) {
+                progress.pending_source_destroy = 1;
+                finished_list.tags[finished_list.num++] = tag_e;
+                trace.progress_finished_source_count += 1;
             }
 
-            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
-            materializeRemaining(tag, next_now);
+            if (tag.next_port_id >= 0) {
+                Time link_delay = defaultLinkDelay;
+                int32_t src_node_slot = findNodeSlot(portToNode[tag.port_id]);
+                int32_t dst_node_slot =
+                    findNodeSlot(portToNode[tag.next_port_id]);
 
-            if (tag.remaining < 1.0) {
-                tag.remaining = 0.0;
-                if (num_finished < MAX_SOURCE_TAGS) {
-                    finishedSourceScratch[num_finished++] = tag_e;
+                if (src_node_slot >= 0 && dst_node_slot >= 0 &&
+                    linkDelays[src_node_slot][dst_node_slot] >= 0.0) {
+                    link_delay = linkDelays[src_node_slot][dst_node_slot];
                 }
-                finished_source_count += 1;
 
-                if (tag.next_port_id >= 0) {
-                    Time link_delay = defaultLinkDelay;
-                    int32_t src_node_slot =
-                        findNodeSlot(portToNode[tag.port_id]);
-                    int32_t dst_node_slot =
-                        findNodeSlot(portToNode[tag.next_port_id]);
-
-                    if (src_node_slot >= 0 && dst_node_slot >= 0 &&
-                        linkDelays[src_node_slot][dst_node_slot] >= 0.0) {
-                        link_delay = linkDelays[src_node_slot][dst_node_slot];
-                    }
-
+                if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent ev {};
                     ev.t = next_now + link_delay;
                     ev.type = DelayedEvent::Type::BwUpdate;
@@ -78,93 +91,87 @@ void Sim::progressFinishedSources(Context &ctx,
                         .flow_id = tag.flow_id,
                         .in_bw = 0.0,
                     };
-                    if (batch_count < available) {
-                        delayedEventScratch[batch_count++] = ev;
-                    }
-                    emitted_cleanup_count += 1;
+                    outbox.events[outbox.num_events++] = ev;
+                    trace.progress_emitted_cleanup_count += 1;
                 }
-            } else if (tag.out_bw > 1e-15) {
-                Time t_finish = tag.remaining / tag.out_bw;
-                if (t_finish > 1e-15) {
-                    next_finish = std::min(next_finish, t_finish);
+            }
+        } else if (tag.out_bw > 1e-15) {
+            Time t_finish = tag.remaining / tag.out_bw;
+            if (t_finish > 1e-15) {
+                if (!hints.has_finish_hint || t_finish < hints.finish_hint_t) {
+                    hints.has_finish_hint = 1;
+                    hints.finish_hint_t = t_finish;
                 }
             }
         }
+    };
 
-        pushDelayedEventsBatch(delayedEventScratch, batch_count);
+    // Fast path: progress only needs source tags. If the per-port source
+    // mirror stayed within capacity, we can skip scanning non-source tags.
+    // Ports that overflow this mirror fall back to PortTagList so behaviour
+    // remains identical.
+    if (source_tag_list.overflow == 0) {
+        for (int32_t i = 0; i < source_tag_list.count; i++) {
+            Entity tag_e = source_tag_list.tags[i];
+            if (tag_e == Entity::none()) {
+                continue;
+            }
 
-        for (int32_t i = 0; i < num_finished; i++) {
-            destroyTag(ctx, finishedSourceScratch[i], false, next_now);
+            handle_source_tag(tag_e);
         }
-
-        cachedNextFinishTime = next_finish;
-    } else if (cachedNextFinishTime < std::numeric_limits<Time>::max()) {
-        cachedNextFinishTime -= dt;
-        if (cachedNextFinishTime < 1e-15) {
-            cachedNextFinishTime = 1e-15;
-        }
+        return;
     }
 
-    if (cachedNextDrainTime < std::numeric_limits<Time>::max()) {
-        cachedNextDrainTime -= dt;
-        if (cachedNextDrainTime < 1e-15) {
-            cachedNextDrainTime = timerInactiveSentinel();
-            cachedDrainPortID = -1;
+    for (int32_t i = 0; i < tag_list.count; i++) {
+        Entity tag_e = tag_list.tags[i];
+        if (tag_e == Entity::none()) {
+            continue;
         }
+
+        FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+        if (tag.is_source == 0) {
+            continue;
+        }
+
+        handle_source_tag(tag_e);
     }
 }
 
 void Sim::progressBacklogDrainTimers(Context &ctx, Time dt)
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (!timerIsActive(backlogDrainTimers[port_id])) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
             continue;
         }
 
-        backlogDrainTimers[port_id] -= dt;
-        if (backlogDrainTimers[port_id] < 1e-15) {
-            Entity port_e = portEntities[port_id];
-            if (port_e != Entity::none()) {
-                portDirtyStates[port_id].isDirty = 1;
-            }
-            clearBacklogDrainTimer(port_id);
+        PortTimers &timers = ctx.get<PortTimers>(port_e);
+        if (!timerIsActive(timers.backlog_drain)) {
+            continue;
+        }
+
+        timers.backlog_drain -= dt;
+        if (timers.backlog_drain < 1e-15) {
+            ctx.get<DirtyPort>(port_e).isDirty = 1;
+            clearBacklogDrainTimer(timers);
         }
     }
 }
 
 void Sim::markIngressTagsDirty(Context &ctx, int32_t ingress_port)
 {
-    bool use_ingress_list =
-        ingress_port >= 0 && ingress_port < numPorts &&
-        ingressTagLists[ingress_port].overflow == 0;
-
-    if (use_ingress_list) {
-        const IngressTagList &itl = ingressTagLists[ingress_port];
-        for (int32_t i = 0; i < itl.count; i++) {
-            Entity tag_e = itl.tags[i];
-            if (tag_e == Entity::none()) {
-                continue;
-            }
-
-            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
-            if (tag.port_id < 0 || tag.port_id >= numPorts) {
-                continue;
-            }
-
-            Entity port_e = portEntities[tag.port_id];
-            if (port_e != Entity::none()) {
-                portDirtyStates[tag.port_id].isDirty = 1;
-            }
-        }
+    if (ingress_port < 0 || ingress_port >= numPorts) {
         return;
     }
 
-    for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
-        if (ingressTags[tag_idx].ingress_port_id != ingress_port) {
-            continue;
-        }
+    Entity ingress_e = portEntities[ingress_port];
+    if (ingress_e == Entity::none()) {
+        return;
+    }
 
-        Entity tag_e = ingressTags[tag_idx].entity;
+    const IngressTagList &itl = ctx.get<IngressTagList>(ingress_e);
+    for (int32_t i = 0; i < itl.count; i++) {
+        Entity tag_e = itl.tags[i];
         if (tag_e == Entity::none()) {
             continue;
         }
@@ -176,7 +183,7 @@ void Sim::markIngressTagsDirty(Context &ctx, int32_t ingress_port)
 
         Entity port_e = portEntities[tag.port_id];
         if (port_e != Entity::none()) {
-            portDirtyStates[tag.port_id].isDirty = 1;
+            ctx.get<DirtyPort>(port_e).isDirty = 1;
         }
     }
 }
@@ -184,26 +191,38 @@ void Sim::markIngressTagsDirty(Context &ctx, int32_t ingress_port)
 void Sim::progressPfcTimers(Context &ctx, Time dt)
 {
     for (int32_t ingress_port = 0; ingress_port < numPorts; ingress_port++) {
-        if (!timerIsActive(pfcPauseTimers[ingress_port])) {
+        Entity ingress_e = portEntities[ingress_port];
+        if (ingress_e == Entity::none()) {
             continue;
         }
 
-        pfcPauseTimers[ingress_port] -= dt;
-        if (pfcPauseTimers[ingress_port] < 1e-9) {
+        PortTimers &timers = ctx.get<PortTimers>(ingress_e);
+        if (!timerIsActive(timers.pfc_pause)) {
+            continue;
+        }
+
+        timers.pfc_pause -= dt;
+        if (timers.pfc_pause < 1e-9) {
             markIngressTagsDirty(ctx, ingress_port);
-            clearPfcPauseTimer(ingress_port);
+            clearPfcPauseTimer(timers);
         }
     }
 
     for (int32_t ingress_port = 0; ingress_port < numPorts; ingress_port++) {
-        if (!timerIsActive(pfcResumeTimers[ingress_port])) {
+        Entity ingress_e = portEntities[ingress_port];
+        if (ingress_e == Entity::none()) {
             continue;
         }
 
-        pfcResumeTimers[ingress_port] -= dt;
-        if (pfcResumeTimers[ingress_port] < 1e-9) {
+        PortTimers &timers = ctx.get<PortTimers>(ingress_e);
+        if (!timerIsActive(timers.pfc_resume)) {
+            continue;
+        }
+
+        timers.pfc_resume -= dt;
+        if (timers.pfc_resume < 1e-9) {
             markIngressTagsDirty(ctx, ingress_port);
-            clearPfcResumeTimer(ingress_port);
+            clearPfcResumeTimer(timers);
         }
     }
 }
@@ -220,11 +239,42 @@ void Sim::markBufferedPortsDirty(Context &ctx)
         for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
             PriorityBuffer &pb = port_buf.prior_bufs[pri];
             if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
-                portDirtyStates[port_id].isDirty = 1;
+                ctx.get<DirtyPort>(port_e).isDirty = 1;
                 break;
             }
         }
     }
+}
+
+int32_t countBufferedPortsMarkedDirty(Sim &sim, Context &ctx)
+{
+    int32_t count = 0;
+    for (int32_t port_id = 0; port_id < sim.numPorts; port_id++) {
+        Entity port_e = sim.portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+
+        if (ctx.get<DirtyPort>(port_e).isDirty == 0) {
+            continue;
+        }
+
+        PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
+        bool has_buffer = false;
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            PriorityBuffer &pb = port_buf.prior_bufs[pri];
+            if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
+                has_buffer = true;
+                break;
+            }
+        }
+
+        if (has_buffer) {
+            count += 1;
+        }
+    }
+
+    return count;
 }
 
 void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
@@ -235,29 +285,18 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
             continue;
         }
 
-        PortPfcState &pfc = portPfcStates[ingress_port];
+        PortPfcState &pfc = ctx.get<PortPfcState>(ingress_e);
         if (!hasActivePause(pfc)) {
             continue;
         }
 
-        bool use_ingress_list =
-            ingressTagLists[ingress_port].overflow == 0;
+        const IngressTagList &ingress_list =
+            ctx.get<IngressTagList>(ingress_e);
         bool no_tags = true;
-        if (use_ingress_list) {
-            const IngressTagList &itl = ingressTagLists[ingress_port];
-            for (int32_t i = 0; i < itl.count; i++) {
-                if (itl.tags[i] != Entity::none()) {
-                    no_tags = false;
-                    break;
-                }
-            }
-        } else {
-            for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
-                if (ingressTags[tag_idx].ingress_port_id == ingress_port &&
-                    ingressTags[tag_idx].entity != Entity::none()) {
-                    no_tags = false;
-                    break;
-                }
+        for (int32_t i = 0; i < ingress_list.count; i++) {
+            if (ingress_list.tags[i] != Entity::none()) {
+                no_tags = false;
+                break;
             }
         }
 
@@ -297,7 +336,7 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
                         .priority = pri,
                         .paused = 0,
                     };
-                    pushDelayedEvent(ev);
+                    pushDelayedEvent(ctx, ev);
                 }
 
                 pfc.paused_upstream_count[pri] = 0;
@@ -307,76 +346,36 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
         }
 
         bool any_capped = false;
-        if (use_ingress_list) {
-            const IngressTagList &itl = ingressTagLists[ingress_port];
-            for (int32_t i = 0; i < itl.count; i++) {
-                Entity tag_e = itl.tags[i];
-                if (tag_e == Entity::none()) {
-                    continue;
-                }
-
-                FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
-                if (tag.is_source != 0) {
-                    continue;
-                }
-                if (tag.port_id < 0 || tag.port_id >= numPorts) {
-                    continue;
-                }
-
-                Entity port_e = portEntities[tag.port_id];
-                if (port_e == Entity::none()) {
-                    continue;
-                }
-
-                PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
-                materializeBufCnt(port_buf, now);
-                materializeBacklog(tag, now);
-
-                int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-                double actual = port_buf.prior_bufs[pri].buf_cnt;
-
-                if (actual < 1.0 && tag.backlog > 1.0) {
-                    tag.backlog = actual;
-                    tag.last_backlog_time = now;
-                    any_capped = true;
-                }
+        for (int32_t i = 0; i < ingress_list.count; i++) {
+            Entity tag_e = ingress_list.tags[i];
+            if (tag_e == Entity::none()) {
+                continue;
             }
-        } else {
-            for (int32_t tag_idx = 0; tag_idx < numIngressTags; tag_idx++) {
-                if (ingressTags[tag_idx].ingress_port_id != ingress_port) {
-                    continue;
-                }
 
-                Entity tag_e = ingressTags[tag_idx].entity;
-                if (tag_e == Entity::none()) {
-                    continue;
-                }
+            FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+            if (tag.is_source != 0) {
+                continue;
+            }
+            if (tag.port_id < 0 || tag.port_id >= numPorts) {
+                continue;
+            }
 
-                FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
-                if (tag.is_source != 0) {
-                    continue;
-                }
-                if (tag.port_id < 0 || tag.port_id >= numPorts) {
-                    continue;
-                }
+            Entity port_e = portEntities[tag.port_id];
+            if (port_e == Entity::none()) {
+                continue;
+            }
 
-                Entity port_e = portEntities[tag.port_id];
-                if (port_e == Entity::none()) {
-                    continue;
-                }
+            PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
+            materializeBufCnt(port_buf, now);
+            materializeBacklog(tag, now);
 
-                PortBuffer &port_buf = ctx.get<PortBuffer>(port_e);
-                materializeBufCnt(port_buf, now);
-                materializeBacklog(tag, now);
+            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+            double actual = port_buf.prior_bufs[pri].buf_cnt;
 
-                int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-                double actual = port_buf.prior_bufs[pri].buf_cnt;
-
-                if (actual < 1.0 && tag.backlog > 1.0) {
-                    tag.backlog = actual;
-                    tag.last_backlog_time = now;
-                    any_capped = true;
-                }
+            if (actual < 1.0 && tag.backlog > 1.0) {
+                tag.backlog = actual;
+                tag.last_backlog_time = now;
+                any_capped = true;
             }
         }
 
@@ -395,9 +394,54 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
     Time next_now = now + dt;
     int32_t finished_source_count = 0;
     int32_t emitted_cleanup_count = 0;
+    int32_t source_scan_count = 0;
+    int32_t source_destroy_count = 0;
+    int32_t buffered_dirty_port_count = 0;
 
-    progressFinishedSources(ctx, dt, next_now, finished_source_count,
-        emitted_cleanup_count);
+    flushPortOutbox(ctx);
+    const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
+
+    Time next_finish = timerInactiveSentinel();
+    for (int32_t i = 0; i < numPorts; i++) {
+        Entity port_e = portEntities[i];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+
+        PortFinishedSourceList &finished_list =
+            ctx.get<PortFinishedSourceList>(port_e);
+        int32_t local_num = finished_list.num;
+        Entity local_finished[MAX_PORT_CLEANUP] {};
+        for (int32_t j = 0; j < local_num && j < MAX_PORT_CLEANUP; j++) {
+            local_finished[j] = finished_list.tags[j];
+            finished_list.tags[j] = Entity::none();
+        }
+        finished_list.num = 0;
+
+        for (int32_t j = 0; j < local_num; j++) {
+            Entity tag_e = local_finished[j];
+            if (tag_e == Entity::none()) {
+                continue;
+            }
+
+            FlowTagProgress &progress = ctx.get<FlowTagProgress>(tag_e);
+            if (progress.pending_source_destroy == 0) {
+                continue;
+            }
+
+            progress.pending_source_destroy = 0;
+            destroyTag(ctx, tag_e, false, next_now);
+            source_destroy_count += 1;
+        }
+
+        PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
+        if (hints.has_active_finish != 0 &&
+            hints.active_finish_t < next_finish) {
+            next_finish = hints.active_finish_t;
+        }
+    }
+    cachedNextFinishTime = next_finish;
+
     progressBacklogDrainTimers(ctx, dt);
     progressPfcTimers(ctx, dt);
 
@@ -405,25 +449,37 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
         cachedNextDrainTime >= timerInactiveSentinel() &&
         cachedNextFinishTime >= timerInactiveSentinel() &&
         numDelayedEvents == 0 &&
-        numPendingFlows == 0 &&
-        !hasActiveBacklogDrainTimers() &&
-        !hasActivePfcPauseTimers() &&
-        !hasActivePfcResumeTimers();
+        flow_counters.numPendingFlows == 0 &&
+        !hasActiveBacklogDrainTimers(ctx) &&
+        !hasActivePfcPauseTimers(ctx) &&
+        !hasActivePfcResumeTimers(ctx);
 
     if (all_exhausted) {
         markBufferedPortsDirty(ctx);
+        buffered_dirty_port_count = countBufferedPortsMarkedDirty(*this, ctx);
         if (enablePfc != 0) {
             progressExhaustedPfcState(ctx, dt);
         }
     }
 
     if (log_enabled) {
+        for (int32_t i = 0; i < numPorts; i++) {
+            Entity port_e = portEntities[i];
+            if (port_e == Entity::none()) {
+                continue;
+            }
+            PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+            finished_source_count += trace.progress_finished_source_count;
+            emitted_cleanup_count += trace.progress_emitted_cleanup_count;
+            source_scan_count += trace.progress_source_scan_count;
+        }
         double next_finish_gap =
             cachedNextFinishTime < timerInactiveSentinel() ?
             cachedNextFinishTime :
             std::numeric_limits<double>::max();
         printSystemProgressSummary(step, now, dt, finished_source_count,
-            emitted_cleanup_count, next_now, next_finish_gap);
+            emitted_cleanup_count, source_scan_count, source_destroy_count,
+            buffered_dirty_port_count, next_now, next_finish_gap);
     }
 }
 

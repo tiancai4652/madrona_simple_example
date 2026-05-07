@@ -280,6 +280,12 @@ class GridWorld:
     def num_source_tags(self):
         return self.sim.num_source_tags()
 
+    def num_flow_completions(self):
+        return self.sim.num_flow_completions()
+
+    def last_step_phase_times(self):
+        return dict(self.sim.last_step_phase_times())
+
     def flow_completions(self):
         return [
             self.sim.flow_completion(i)

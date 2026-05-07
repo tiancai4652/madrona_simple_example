@@ -33,15 +33,40 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<SimDriver>();
 
     registry.registerComponent<PortState>();
+    registry.registerComponent<FlowDef>();
+    registry.registerComponent<FlowRouteState>();
+    registry.registerComponent<FlowRuntimeState>();
     registry.registerComponent<FlowTagState>();
+    registry.registerComponent<FlowTagProgress>();
     registry.registerComponent<PortBuffer>();
+    registry.registerComponent<DirtyPort>();
+    registry.registerComponent<PortCleanup>();
+    registry.registerComponent<PortFinishedSourceList>();
+    registry.registerComponent<PortOutbox>();
+    registry.registerComponent<PortTagLookup>();
+    registry.registerComponent<PortDelayedQueue>();
+    registry.registerComponent<PortTagList>();
+    registry.registerComponent<PortSourceTagList>();
+    registry.registerComponent<PortInbox>();
+    registry.registerComponent<PortCreateList>();
+    registry.registerComponent<PortCompletionList>();
+    registry.registerComponent<PortPfcConfig>();
+    registry.registerComponent<PortPfcState>();
+    registry.registerComponent<PortCachedHints>();
+    registry.registerComponent<PortDrainHint>();
+    registry.registerComponent<PortTimers>();
+    registry.registerComponent<PortTraceLast>();
+    registry.registerComponent<IngressTagList>();
 
     registry.registerSingleton<SimStats>();
+    registry.registerSingleton<FlowCounters>();
     registry.registerSingleton<FlowCompletionBuf>();
+    registry.registerSingleton<StepPhaseTimes>();
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
     registry.registerArchetype<Port>();
+    registry.registerArchetype<FlowMeta>();
     registry.registerArchetype<FlowTag>();
 
     registry.exportColumn<Agent, Reset>((uint32_t)ExportID::Reset);
@@ -53,6 +78,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.exportSingleton<SimStats>((uint32_t)ExportID::SimStats);
     registry.exportSingleton<FlowCompletionBuf>(
         (uint32_t)ExportID::FlowCompletionBuf);
+    registry.exportSingleton<StepPhaseTimes>(
+        (uint32_t)ExportID::StepPhaseTimes);
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -65,10 +92,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
       nextPortID(0),
       numTopoNodes(0),
       numTopoLinks(0),
-      numPorts(0),
-      numFlowDefs(0),
-      numPendingFlows(0),
-      numFlowRoutes(0)
+      numPorts(0)
 {
     // [init-trace] 用于定位 GPU initWorlds 是否进入、走到哪一步。
     // 噪音抑制 + GPU 单线程打印的细节都封装在 initTrace() 里。
@@ -114,21 +138,40 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     // never needed this; we still write here so both backends observe
     // identical initial state.
     SimStats &init_stats = ctx.singleton<SimStats>();
+    const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
     init_stats.simulationTime = now;
-    init_stats.numFlowDefs = numFlowDefs;
-    init_stats.numPendingFlows = numPendingFlows;
+    init_stats.numFlowDefs = flow_counters.numFlowDefs;
+    init_stats.numPendingFlows = flow_counters.numPendingFlows;
     init_stats.numDelayedEvents = numDelayedEvents;
     init_stats.numActiveTags = numTagIndexEntries;
     init_stats.numSourceTags = numSourceTags;
-    init_stats.numFlowCompletions = numFlowCompletions;
+    init_stats.numFlowCompletions = flow_counters.numFlowCompletions;
 
     FlowCompletionBuf &init_buf = ctx.singleton<FlowCompletionBuf>();
-    int32_t n_init = numFlowCompletions;
+    int32_t n_init = flow_counters.numFlowCompletions;
     if (n_init < 0) n_init = 0;
     if (n_init > MAX_FLOW_COMPLETIONS) n_init = MAX_FLOW_COMPLETIONS;
-    for (int32_t i = 0; i < n_init; i++) {
-        init_buf.records[i] = flowCompletions[i].record;
+    int32_t out_idx = 0;
+    if (network != nullptr) {
+        for (int32_t i = 0; i < network->numFlows && out_idx < n_init; i++) {
+            Entity flow_entity = flowMetaEntities[i];
+            if (flow_entity == Entity::none()) {
+                continue;
+            }
+            const FlowRuntimeState &runtime =
+                ctx.get<FlowRuntimeState>(flow_entity);
+            if (runtime.completed == 0) {
+                continue;
+            }
+            init_buf.records[out_idx++] = runtime.completion_record;
+        }
     }
+    for (int32_t i = out_idx; i < MAX_FLOW_COMPLETIONS; i++) {
+        init_buf.records[i] = FlowCompletionRecord {};
+    }
+
+    StepPhaseTimes &init_phase_times = ctx.singleton<StepPhaseTimes>();
+    init_phase_times = StepPhaseTimes {};
 
     initTrace("Sim::Sim done", trace_mode_enabled);
 }

@@ -36,10 +36,7 @@ void Sim::loadFlow(Engine &ctx)
             flowLookupBase = min_flow_id;
             flowLookupSpan = (int32_t)lookup_span;
             for (int32_t i = 0; i < flowLookupSpan; i++) {
-                flowDefSlotLookup[i] = -1;
-                flowRouteSlotLookup[i] = -1;
-                flowCompletionSlotLookup[i] = -1;
-                sourceTagSlotLookup[i] = -1;
+                flowMetaEntityLookup[i] = Entity::none();
             }
         } else {
             flowLookupBase = 0;
@@ -47,8 +44,14 @@ void Sim::loadFlow(Engine &ctx)
         }
     }
 
-    numFlowDefs = flow_count;
-    numPendingFlows = flow_count;
+    FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
+    flow_counters = FlowCounters {
+        .numFlowDefs = flow_count,
+        .numPendingFlows = flow_count,
+        .pendingFlowCursor = 0,
+        .numFlowRoutes = 0,
+        .numFlowCompletions = 0,
+    };
 
     for (int32_t i = 0; i < flow_count; i++) {
         const FlowDef &flow = network->flows[i];
@@ -56,10 +59,21 @@ void Sim::loadFlow(Engine &ctx)
             FATAL("Flow input must be sorted by nondecreasing start_time");
         }
 
-        flowDefs[i] = flow;
-        pendingFlows[i] = flow;
+        Entity flow_entity = ctx.makeEntity<FlowMeta>();
+        ctx.get<FlowDef>(flow_entity) = flow;
+        ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};
+        ctx.get<FlowRuntimeState>(flow_entity) = FlowRuntimeState {
+            .source_tag_entity = Entity::none(),
+            .pending = 1,
+            .active = 0,
+            .completed = 0,
+            .route_active = 0,
+            .completion_record = FlowCompletionRecord {},
+        };
+        flowMetaEntities[i] = flow_entity;
         if (flowLookupSpan > 0) {
-            flowDefSlotLookup[flow.id - flowLookupBase] = i;
+            int32_t lookup_idx = (int32_t)(flow.id - flowLookupBase);
+            flowMetaEntityLookup[lookup_idx] = flow_entity;
         }
     }
 

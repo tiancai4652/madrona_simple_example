@@ -6,12 +6,17 @@
 
 namespace madsimple {
 
-// Disable all simulator debug / trace logging in the fast path.
-// FCT data export still uses FlowCompletionBuf and is unaffected.
+#if defined(__CUDA_ARCH__)
 inline constexpr bool init_log_compiled_in = false;
 inline constexpr bool init_trace_compiled_in = false;
 inline constexpr bool system_log_compiled_in = false;
 inline constexpr bool step_trace_compiled_in = false;
+#else
+inline constexpr bool init_log_compiled_in = true;
+inline constexpr bool init_trace_compiled_in = true;
+inline constexpr bool system_log_compiled_in = true;
+inline constexpr bool step_trace_compiled_in = true;
+#endif
 
 extern const bool init_log_print_enabled;
 extern const bool system_log_print_enabled;
@@ -125,6 +130,9 @@ void printSystemProgressSummary(uint64_t step, Time now,
                                 double dt,
                                 int32_t finished_source_count,
                                 int32_t emitted_cleanup_count,
+                                int32_t source_scan_count,
+                                int32_t source_destroy_count,
+                                int32_t buffered_dirty_port_count,
                                 double next_now,
                                 double next_finish_gap);
 

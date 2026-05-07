@@ -8,96 +8,126 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-void Sim::deliverEvents(Context &ctx)
+namespace {
+
+inline void compactPortDelayedQueue(PortDelayedQueue &queue)
 {
+    if (queue.head <= 0) {
+        return;
+    }
+
+    if (queue.count <= 0) {
+        queue.head = 0;
+        return;
+    }
+
+    for (int32_t i = 0; i < queue.count; i++) {
+        queue.events[i] = queue.events[queue.head + i];
+    }
+    queue.head = 0;
+}
+
+}
+
+void Sim::deliverEventsOnePort(Context &ctx,
+                               int32_t port_id,
+                               PortDelayedQueue &queue,
+                               PortInbox &inbox,
+                               PortTraceLast &trace)
+{
+    (void)ctx;
+    (void)port_id;
+    constexpr const char *scope = "ingress_chain";
+    uint64_t step = systemLogStep;
+    bool log_enabled =
+        traceModeEnabled() && compiledSystemLogEnabled(scope, step);
+    trace.deliver_arrival_count = 0;
+    trace.deliver_bwupdate_count = 0;
+    trace.deliver_pfc_count = 0;
+
+    int32_t due_count = 0;
+    while (due_count < queue.count &&
+           queue.events[queue.head + due_count].t <= now + 1e-15) {
+        due_count += 1;
+    }
+
+    for (int32_t i = 0; i < due_count; i++) {
+        const DelayedEvent &dev = queue.events[queue.head + i];
+        if (dev.type == DelayedEvent::Type::Arrival) {
+            const FlowArrivalEv &ev = dev.arrival;
+            trace.deliver_arrival_count += 1;
+            if (log_enabled) {
+                printSystemDeliverArrival(step, now, ev);
+            }
+            if (inbox.num_arrival < MAX_PORT_INBOX_ARRIVAL) {
+                inbox.arrivals[inbox.num_arrival++] = ev;
+            }
+        } else if (dev.type == DelayedEvent::Type::BwUpdate) {
+            const BwUpdateEv &ev = dev.bwupd;
+            trace.deliver_bwupdate_count += 1;
+            if (log_enabled) {
+                printSystemDeliverBwUpdate(step, now, ev);
+            }
+            if (inbox.num_bwupd < MAX_PORT_INBOX_BWUPD) {
+                inbox.bwupds[inbox.num_bwupd++] = ev;
+            }
+        } else {
+            const PfcControlEv &ev = dev.pfcctrl;
+            trace.deliver_pfc_count += 1;
+            if (log_enabled) {
+                printSystemDeliverPfc(step, now, ev);
+            }
+            if (inbox.num_pfc < MAX_PORT_INBOX_PFC) {
+                inbox.pfcs[inbox.num_pfc++] = ev;
+            }
+        }
+    }
+
+    queue.head += due_count;
+    queue.count -= due_count;
+    if (queue.count == 0) {
+        queue.head = 0;
+    } else if (queue.head > (MAX_PORT_DELAYED_EVENTS / 4) &&
+               queue.head >= queue.count) {
+        compactPortDelayedQueue(queue);
+    }
+}
+
+void Sim::finishDeliverEvents(Context &ctx)
+{
+    (void)ctx;
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
     bool log_enabled =
         traceModeEnabled() && compiledSystemLogEnabled(scope, step);
     int32_t delayed_before = numDelayedEvents;
+    int32_t delayed_after = 0;
+    int32_t inbox_arrival_count = 0;
+    int32_t inbox_bwupdate_count = 0;
+    int32_t inbox_pfc_count = 0;
 
-    if (log_enabled) {
-        printSystemBegin(step, now, scope, "deliver_events");
-    }
-
-    numInboxArrival = 0;
-    numInboxBwUpdate = 0;
-    numInboxPfc = 0;
-
-    int32_t due_count = 0;
-    while (due_count < numDelayedEvents &&
-           delayedEvents[due_count].t <= now + 1e-15) {
-        due_count += 1;
-    }
-
-    for (int32_t i = 0; i < due_count; i++) {
-        if (delayedEvents[i].type == DelayedEvent::Type::Arrival) {
-            const FlowArrivalEv &ev = delayedEvents[i].arrival;
-            if (numInboxArrival < MAX_EVENTS_PER_STEP) {
-                inboxArrival[numInboxArrival++] = ev;
-                if (log_enabled) {
-                    printSystemDeliverArrival(step, now, ev);
-                }
-            }
-            if (ev.port_id >= 0 && ev.port_id < numPorts) {
-                Entity port_e = portEntities[ev.port_id];
-                if (port_e != Entity::none()) {
-                    PortInbox &inbox = portInboxes[ev.port_id];
-                    if (inbox.num_arrival < MAX_PORT_INBOX_ARRIVAL) {
-                        inbox.arrivals[inbox.num_arrival++] = ev;
-                    }
-                }
-            }
-        } else if (delayedEvents[i].type == DelayedEvent::Type::BwUpdate) {
-            const BwUpdateEv &ev = delayedEvents[i].bwupd;
-            if (numInboxBwUpdate < MAX_EVENTS_PER_STEP) {
-                inboxBwUpdate[numInboxBwUpdate++] = ev;
-                if (log_enabled) {
-                    printSystemDeliverBwUpdate(step, now, ev);
-                }
-            }
-            if (ev.port_id >= 0 && ev.port_id < numPorts) {
-                Entity port_e = portEntities[ev.port_id];
-                if (port_e != Entity::none()) {
-                    PortInbox &inbox = portInboxes[ev.port_id];
-                    if (inbox.num_bwupd < MAX_PORT_INBOX_BWUPD) {
-                        inbox.bwupds[inbox.num_bwupd++] = ev;
-                    }
-                }
-            }
-        } else {
-            const PfcControlEv &ev = delayedEvents[i].pfcctrl;
-            if (numInboxPfc < MAX_EVENTS_PER_STEP) {
-                inboxPfc[numInboxPfc++] = ev;
-                if (log_enabled) {
-                    printSystemDeliverPfc(step, now, ev);
-                }
-            }
-            if (ev.target_port_id >= 0 && ev.target_port_id < numPorts) {
-                Entity port_e = portEntities[ev.target_port_id];
-                if (port_e != Entity::none()) {
-                    PortInbox &inbox = portInboxes[ev.target_port_id];
-                    if (inbox.num_pfc < MAX_PORT_INBOX_PFC) {
-                        inbox.pfcs[inbox.num_pfc++] = ev;
-                    }
-                }
-            }
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
         }
+
+        delayed_after += ctx.get<PortDelayedQueue>(port_e).count;
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        inbox_arrival_count += trace.deliver_arrival_count;
+        inbox_bwupdate_count += trace.deliver_bwupdate_count;
+        inbox_pfc_count += trace.deliver_pfc_count;
     }
 
-    int32_t remaining = numDelayedEvents - due_count;
-    for (int32_t i = 0; i < remaining; i++) {
-        delayedEvents[i] = delayedEvents[i + due_count];
-    }
-    numDelayedEvents = remaining;
+    numDelayedEvents = delayed_after;
 
     if (log_enabled) {
         printSystemDeliverSummary(step, now,
             delayed_before,
-            numDelayedEvents,
-            numInboxArrival,
-            numInboxBwUpdate,
-            numInboxPfc);
+            delayed_after,
+            inbox_arrival_count,
+            inbox_bwupdate_count,
+            inbox_pfc_count);
         printSystemEnd(step, now, scope, "deliver_events");
     }
 }
@@ -108,7 +138,6 @@ void Sim::snapshotDirtyPorts(Context &ctx)
     uint64_t step = systemLogStep;
     bool log_enabled =
         traceModeEnabled() && compiledSystemLogEnabled(scope, step);
-    numLastDirtyPortIDs = 0;
     int32_t cleared_port_count = 0;
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
@@ -116,13 +145,9 @@ void Sim::snapshotDirtyPorts(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        PortTraceLast &trace = portTraceLasts[port_id];
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
         if (trace.was_dirty_at_clear != 0) {
-            if (numLastDirtyPortIDs < MAX_TOPO_PORTS) {
-                lastDirtyPortIDs[numLastDirtyPortIDs++] = port_id;
-            }
             cleared_port_count += 1;
-            trace.was_dirty_at_clear = 0;
         }
     }
 
@@ -133,11 +158,13 @@ void Sim::snapshotDirtyPorts(Context &ctx)
 
 void Sim::reducePortCachedHints(Context &ctx)
 {
+    (void)ctx;
     bool reset_drain = false;
     if (cachedDrainPortID >= 0 && cachedDrainPortID < numPorts) {
         Entity cached_port_e = portEntities[cachedDrainPortID];
         if (cached_port_e != Entity::none()) {
-            if (portTraceLasts[cachedDrainPortID].was_dirty_at_alloc != 0) {
+            if (ctx.get<PortTraceLast>(
+                    cached_port_e).was_dirty_at_alloc != 0) {
                 reset_drain = true;
             }
         }
@@ -147,21 +174,33 @@ void Sim::reducePortCachedHints(Context &ctx)
         cachedDrainPortID = -1;
     }
 
+    cachedNextFinishTime = timerInactiveSentinel();
+
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
             continue;
         }
-        PortCachedHints &hints = portCachedHints[port_id];
+        PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        if (trace.was_dirty_at_alloc != 0) {
+            if (hints.has_finish_hint != 0) {
+                hints.has_active_finish = 1;
+                hints.active_finish_t = hints.finish_hint_t;
+            } else {
+                hints.has_active_finish = 0;
+                hints.active_finish_t = 0.0;
+            }
+        }
         if (hints.has_drain_hint != 0) {
             if (hints.drain_hint_t < cachedNextDrainTime) {
                 cachedNextDrainTime = hints.drain_hint_t;
                 cachedDrainPortID = port_id;
             }
         }
-        if (hints.has_finish_hint != 0) {
-            if (hints.finish_hint_t < cachedNextFinishTime) {
-                cachedNextFinishTime = hints.finish_hint_t;
+        if (hints.has_active_finish != 0) {
+            if (hints.active_finish_t < cachedNextFinishTime) {
+                cachedNextFinishTime = hints.active_finish_t;
             }
         }
     }
@@ -174,40 +213,32 @@ void Sim::flushPortDrainHints(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        PortDrainHint &hint = portDrainHints[port_id];
-        applyDrainHintOnePort(port_id, hint);
+        PortDrainHint &hint = ctx.get<PortDrainHint>(port_e);
+        PortTimers &timers = ctx.get<PortTimers>(port_e);
+        applyDrainHintOnePort(port_id, hint, timers);
     }
 }
 
 void Sim::flushPortTagCleanup(Context &ctx)
 {
-    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
-    if (available < 0) {
-        available = 0;
-    }
-    int32_t batch_count = 0;
-
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
             continue;
         }
-        PortCleanup &cleanup = portCleanups[port_id];
+        PortCleanup &cleanup = ctx.get<PortCleanup>(port_e);
         for (int32_t i = 0; i < cleanup.num; i++) {
             if (cleanup.tags[i] == Entity::none()) {
                 continue;
             }
             DelayedEvent ev {};
             if (destroyTagCollectCleanupEvent(
-                    ctx, cleanup.tags[i], cleanup.propagate[i] != 0, now, ev) &&
-                batch_count < available) {
-                delayedEventScratch[batch_count++] = ev;
+                    ctx, cleanup.tags[i], cleanup.propagate[i] != 0, now, ev)) {
+                pushDelayedEvent(ctx, ev);
             }
         }
         cleanup.num = 0;
     }
-
-    pushDelayedEventsBatch(delayedEventScratch, batch_count);
 }
 
 void Sim::logAllocTraces(Context &ctx)
@@ -232,7 +263,7 @@ void Sim::logAllocTraces(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        PortTraceLast &trace = portTraceLasts[port_id];
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
         if (trace.was_dirty_at_alloc == 0) {
             continue;
         }
@@ -260,27 +291,17 @@ void Sim::flushPortOutbox(Context &ctx)
 {
     (void)ctx;
 
-    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
-    int32_t batch_count = 0;
-
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
             continue;
         }
-        PortOutbox &outbox = portOutboxes[port_id];
-        int32_t remaining = available - batch_count;
-        int32_t take = outbox.num_events;
-        if (take > remaining) {
-            take = remaining;
-        }
-        for (int32_t i = 0; i < take; i++) {
-            delayedEventScratch[batch_count++] = outbox.events[i];
+        PortOutbox &outbox = ctx.get<PortOutbox>(port_e);
+        for (int32_t i = 0; i < outbox.num_events; i++) {
+            pushDelayedEvent(ctx, outbox.events[i]);
         }
         outbox.num_events = 0;
     }
-
-    pushDelayedEventsBatch(delayedEventScratch, batch_count);
 }
 
 void Sim::flushPortPfcTimers(Context &ctx)
@@ -290,8 +311,9 @@ void Sim::flushPortPfcTimers(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        PortPfcState &state = portPfcStates[port_id];
-        applyPfcTimerOnePort(port_id, state);
+        PortPfcState &state = ctx.get<PortPfcState>(port_e);
+        PortTimers &timers = ctx.get<PortTimers>(port_e);
+        applyPfcTimerOnePort(port_id, state, timers);
     }
 }
 
@@ -315,14 +337,14 @@ void Sim::logPfcDetectTraces(Context &ctx)
             if (port_e == Entity::none()) {
                 continue;
             }
-            PortTraceLast &trace = portTraceLasts[port_id];
+            PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
             checked += trace.pfc_detect_checked;
             emitted += trace.pfc_detect_emitted;
         }
     }
 
     printSystemPfcDetectSummary(step, now, checked, emitted,
-        countActivePfcPauseTimers(), countActivePfcResumeTimers());
+        countActivePfcPauseTimers(ctx), countActivePfcResumeTimers(ctx));
 }
 
 void Sim::logEmitTraces(Context &ctx)
@@ -345,7 +367,7 @@ void Sim::logEmitTraces(Context &ctx)
         if (port_e == Entity::none()) {
             continue;
         }
-        PortTraceLast &trace = portTraceLasts[port_id];
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
         dirty_count += trace.emit_is_dirty;
         arrival_count += trace.emit_arrival_count;
         bwupdate_count += trace.emit_bwupdate_count;

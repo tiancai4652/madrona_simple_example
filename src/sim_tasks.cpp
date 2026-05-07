@@ -1,6 +1,10 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
 
+#ifndef MADRONA_GPU_MODE
+#include <chrono>
+#endif
+
 using namespace madrona;
 using namespace madrona::math;
 
@@ -27,6 +31,54 @@ static inline void initTrace(const char *msg, bool trace_mode_enabled)
 // `madsimple` for the rest of this TU.
 inline namespace systems {
 
+#ifndef MADRONA_GPU_MODE
+inline double hostWallNowSeconds()
+{
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::duration<double>>(
+        now.time_since_epoch()).count();
+}
+
+inline void beginHostStepPhase(Engine &ctx, SimDriver &driver)
+{
+    StepPhaseTimes &times = ctx.singleton<StepPhaseTimes>();
+    times = StepPhaseTimes {};
+    times.step = driver.tick + 1;
+    double now_s = hostWallNowSeconds();
+    times._stepStartWallTimeS = now_s;
+    times._lastBoundaryWallTimeS = now_s;
+}
+
+inline void closeHostStepPhase(Engine &ctx, StepPhaseID phase)
+{
+    StepPhaseTimes &times = ctx.singleton<StepPhaseTimes>();
+    double now_s = hostWallNowSeconds();
+    double delta_s = now_s - times._lastBoundaryWallTimeS;
+    if (delta_s < 0.0) {
+        delta_s = 0.0;
+    }
+    times.phaseWallTimeS[(uint32_t)phase] += delta_s;
+    times._lastBoundaryWallTimeS = now_s;
+}
+
+inline void finalizeHostStepPhase(Engine &ctx)
+{
+    StepPhaseTimes &times = ctx.singleton<StepPhaseTimes>();
+    double now_s = hostWallNowSeconds();
+    double delta_s = now_s - times._lastBoundaryWallTimeS;
+    if (delta_s < 0.0) {
+        delta_s = 0.0;
+    }
+    times.phaseWallTimeS[(uint32_t)StepPhaseID::BufferProgress] += delta_s;
+    times._lastBoundaryWallTimeS = now_s;
+    times.totalWallTimeS = now_s - times._stepStartWallTimeS;
+}
+#else
+inline void beginHostStepPhase(Engine &, SimDriver &) {}
+inline void closeHostStepPhase(Engine &, StepPhaseID) {}
+inline void finalizeHostStepPhase(Engine &) {}
+#endif
+
 // Compile-time diagnostic switch for bisecting final NVVM link pressure.
 // Stage meanings in setupTasks():
 //   4 = through ingress chain
@@ -39,32 +91,56 @@ constexpr int kTaskgraphStageLimit = 12;
 
 MADRONA_NO_INLINE void scheduleStepSystem(Engine &ctx, SimDriver &driver)
 {
+    beginHostStepPhase(ctx, driver);
+
     Sim &sim = ctx.data();
     if (sim.traceModeEnabled()) {
         sim.systemLogStep += 1;
     }
     driver.tick += 1;
-    sim.schedulePendingFlows();
+    sim.schedulePendingFlows(ctx);
 }
 
-MADRONA_NO_INLINE void deliverStepSystem(Engine &ctx, SimDriver &)
+MADRONA_NO_INLINE void beginDeliverStepSystem(Engine &ctx, SimDriver &)
+{
+    closeHostStepPhase(ctx, StepPhaseID::Schedule);
+    Sim &sim = ctx.data();
+    if (sim.traceModeEnabled() &&
+        compiledSystemLogEnabled("ingress_chain", sim.systemLogStep)) {
+        printSystemBegin(sim.systemLogStep, sim.now,
+            "ingress_chain", "deliver_events");
+    }
+}
+
+MADRONA_NO_INLINE void deliverOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortDelayedQueue &queue,
+    PortInbox &inbox,
+    PortTraceLast &trace)
 {
     Sim &sim = ctx.data();
-    sim.deliverEvents(ctx);
+    sim.deliverEventsOnePort(ctx, port_state.port_id, queue, inbox, trace);
+}
+
+MADRONA_NO_INLINE void postDeliverStepSystem(Engine &ctx, SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.finishDeliverEvents(ctx);
 }
 
 MADRONA_NO_INLINE void resetIngressPortStateStepSystem(
     Engine &ctx,
-    PortState &port_state)
+    PortInbox &inbox,
+    PortCreateList &create_list,
+    PortCompletionList &completion_list)
 {
-    Sim &sim = ctx.data();
-    int32_t port_id = port_state.port_id;
-    PortInbox &inbox = sim.portInboxes[port_id];
+    (void)ctx;
     inbox.num_arrival = 0;
     inbox.num_bwupd = 0;
     inbox.num_pfc = 0;
-    sim.portCreateLists[port_id].num = 0;
-    sim.portCompletionLists[port_id].num = 0;
+    create_list.num = 0;
+    completion_list.num = 0;
 }
 
 // Phase E: per-Port ingress-chain workers. Each operates on a single
@@ -73,46 +149,46 @@ MADRONA_NO_INLINE void resetIngressPortStateStepSystem(
 // flushTagCleanup singletons that follow.
 MADRONA_NO_INLINE void pfcPropagateOnePortStepSystem(
     Engine &ctx,
-    PortState &port_state)
+    PortState &port_state,
+    DirtyPort &dirty,
+    PortPfcState &pfc_state,
+    PortTraceLast &trace,
+    PortInbox &inbox)
 {
     Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortPfcState &pfc_state = sim.portPfcStates[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
-    PortInbox &inbox = sim.portInboxes[port_state.port_id];
     sim.pfcPropagateOnePort(ctx, port_state.port_id, port_state, pfc_state,
         dirty, inbox, trace);
 }
 
 MADRONA_NO_INLINE void arrivalOnePortStepSystem(
     Engine &ctx,
-    PortState &port_state)
+    PortState &port_state,
+    DirtyPort &dirty,
+    PortTraceLast &trace,
+    PortInbox &inbox,
+    PortTagList &tag_list,
+    PortSourceTagList &source_tag_list,
+    PortCreateList &create_list)
 {
     Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
-    PortInbox &inbox = sim.portInboxes[port_state.port_id];
-    PortTagList &tag_list = sim.portTagLists[port_state.port_id];
-    PortCreateList &create_list = sim.portCreateLists[port_state.port_id];
     sim.flowArrivalOnePort(ctx, port_state.port_id, port_state, dirty, inbox,
-        tag_list, create_list, trace);
+        tag_list, source_tag_list, create_list, trace);
 }
 
 MADRONA_NO_INLINE void bwUpdateOnePortStepSystem(
     Engine &ctx,
     PortState &port_state,
-    PortBuffer &port_buf)
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortTraceLast &trace,
+    PortInbox &inbox,
+    PortTagList &tag_list,
+    PortCreateList &create_list,
+    PortCleanup &cleanup,
+    PortOutbox &outbox,
+    PortCompletionList &completions)
 {
     Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
-    PortInbox &inbox = sim.portInboxes[port_state.port_id];
-    PortTagList &tag_list = sim.portTagLists[port_state.port_id];
-    PortCreateList &create_list = sim.portCreateLists[port_state.port_id];
-    PortCleanup &cleanup = sim.portCleanups[port_state.port_id];
-    PortOutbox &outbox = sim.portOutboxes[port_state.port_id];
-    PortCompletionList &completions =
-        sim.portCompletionLists[port_state.port_id];
     sim.bwUpdateOnePort(ctx, port_state.port_id, port_state, port_buf, dirty,
         inbox, tag_list, create_list, cleanup, outbox, completions, trace);
 }
@@ -125,6 +201,7 @@ MADRONA_NO_INLINE void flushTagCreateStepSystem(Engine &ctx, SimDriver &)
 
 MADRONA_NO_INLINE void postIngressStepSystem(Engine &ctx, SimDriver &)
 {
+    closeHostStepPhase(ctx, StepPhaseID::Deliver);
     Sim &sim = ctx.data();
     sim.flushFlowCompletion(ctx);
     sim.flushPortOutbox(ctx);
@@ -142,17 +219,17 @@ MADRONA_NO_INLINE void postIngressStepSystem(Engine &ctx, SimDriver &)
 MADRONA_NO_INLINE void allocOnePortStepSystem(
     Engine &ctx,
     PortState &port_state,
-    PortBuffer &port_buf)
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortPfcConfig &pfc_cfg,
+    PortPfcState &pfc_state,
+    PortCachedHints &hints,
+    PortDrainHint &drain_hint,
+    PortTraceLast &trace,
+    PortCleanup &cleanup,
+    PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortPfcConfig &pfc_cfg = sim.portPfcConfigs[port_state.port_id];
-    PortPfcState &pfc_state = sim.portPfcStates[port_state.port_id];
-    PortCachedHints &hints = sim.portCachedHints[port_state.port_id];
-    PortDrainHint &drain_hint = sim.portDrainHints[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
-    PortCleanup &cleanup = sim.portCleanups[port_state.port_id];
-    PortTagList &tag_list = sim.portTagLists[port_state.port_id];
     sim.allocOnePort(ctx, port_state.port_id, port_state, port_buf, dirty,
         pfc_cfg, pfc_state, hints, drain_hint, cleanup, trace, tag_list);
 }
@@ -171,15 +248,17 @@ MADRONA_NO_INLINE void reducePortCachedHintsStepSystem(Engine &ctx, SimDriver &)
 
 MADRONA_NO_INLINE void applyDrainHintOnePortStepSystem(
     Engine &ctx,
-    PortState &port_state)
+    PortState &port_state,
+    PortDrainHint &hint,
+    PortTimers &timers)
 {
     Sim &sim = ctx.data();
-    PortDrainHint &hint = sim.portDrainHints[port_state.port_id];
-    sim.applyDrainHintOnePort(port_state.port_id, hint);
+    sim.applyDrainHintOnePort(port_state.port_id, hint, timers);
 }
 
 MADRONA_NO_INLINE void postAllocStepSystem(Engine &ctx, SimDriver &)
 {
+    closeHostStepPhase(ctx, StepPhaseID::Ingress);
     Sim &sim = ctx.data();
     sim.flushPortTagCleanup(ctx);
     if (sim.traceModeEnabled()) {
@@ -194,17 +273,18 @@ MADRONA_NO_INLINE void postAllocStepSystem(Engine &ctx, SimDriver &)
 MADRONA_NO_INLINE void pfcDetectOnePortStepSystem(
     Engine &ctx,
     PortState &port_state,
-    PortBuffer &port_buf)
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortPfcConfig &pfc_cfg,
+    PortPfcState &pfc_state,
+    PortTraceLast &trace,
+    PortOutbox &outbox,
+    PortTagList &tag_list,
+    IngressTagList &ingress_list)
 {
     Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortPfcConfig &pfc_cfg = sim.portPfcConfigs[port_state.port_id];
-    PortPfcState &pfc_state = sim.portPfcStates[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
-    PortOutbox &outbox = sim.portOutboxes[port_state.port_id];
-    PortTagList &tag_list = sim.portTagLists[port_state.port_id];
     sim.pfcDetectOnePort(ctx, port_state.port_id, port_state, port_buf,
-        dirty, pfc_cfg, pfc_state, outbox, trace, tag_list);
+        dirty, pfc_cfg, pfc_state, outbox, trace, tag_list, ingress_list);
 }
 
 // Phase C: per-Port downstream emit. Pushes Arrival/BwUpdate events into
@@ -212,13 +292,13 @@ MADRONA_NO_INLINE void pfcDetectOnePortStepSystem(
 // Sim::delayedEvents in port_id ascending order.
 MADRONA_NO_INLINE void emitOnePortStepSystem(
     Engine &ctx,
-    PortState &port_state)
+    PortState &port_state,
+    DirtyPort &dirty,
+    PortTraceLast &trace,
+    PortOutbox &outbox,
+    PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
-    PortOutbox &outbox = sim.portOutboxes[port_state.port_id];
-    PortTagList &tag_list = sim.portTagLists[port_state.port_id];
     sim.emitOnePort(ctx, port_state.port_id, port_state, dirty, outbox, trace,
         tag_list);
 }
@@ -226,11 +306,12 @@ MADRONA_NO_INLINE void emitOnePortStepSystem(
 // Phase C singletons.
 MADRONA_NO_INLINE void applyPfcTimerOnePortStepSystem(
     Engine &ctx,
-    PortState &port_state)
+    PortState &port_state,
+    PortPfcState &state,
+    PortTimers &timers)
 {
     Sim &sim = ctx.data();
-    PortPfcState &state = sim.portPfcStates[port_state.port_id];
-    sim.applyPfcTimerOnePort(port_state.port_id, state);
+    sim.applyPfcTimerOnePort(port_state.port_id, state, timers);
 }
 
 MADRONA_NO_INLINE void postPfcStepSystem(Engine &ctx, SimDriver &)
@@ -244,6 +325,7 @@ MADRONA_NO_INLINE void postPfcStepSystem(Engine &ctx, SimDriver &)
 
 MADRONA_NO_INLINE void postEmitStepSystem(Engine &ctx, SimDriver &)
 {
+    closeHostStepPhase(ctx, StepPhaseID::Alloc);
     Sim &sim = ctx.data();
     sim.flushPortOutbox(ctx);
     if (sim.traceModeEnabled()) {
@@ -255,25 +337,25 @@ MADRONA_NO_INLINE void postEmitStepSystem(Engine &ctx, SimDriver &)
 // Each port only touches its own DirtyPort / PortTraceLast, so this is safe
 // to iterate in parallel on the GPU backend.
 MADRONA_NO_INLINE void clearDirtyOnePortSystem(Engine &ctx,
-                                               PortState &port_state)
+                                               DirtyPort &dirty,
+                                               PortTraceLast &trace)
 {
-    Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
+    (void)ctx;
     trace.was_dirty_at_clear = (dirty.isDirty != 0) ? 1 : 0;
     dirty.isDirty = 0;
 }
 
-// Singleton driven by SimDriver: rebuilds lastDirtyPortIDs in port_id
-// ascending order, then computes nextDT for the upcoming buffer step. These
-// operations were adjacent singleton nodes already; keeping them together
-// reduces taskgraph / userEntry count without changing ordering.
+// Singleton driven by SimDriver: counts the per-port was_dirty_at_clear
+// snapshots for logging, then computes nextDT for the upcoming buffer step.
+// The buffer phase now consumes was_dirty_at_clear directly on each Port, so
+// no Sim-global dirty-port list is rebuilt here.
 MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
 {
-    Sim &sim = ctx.data();
     (void)driver;
+    closeHostStepPhase(ctx, StepPhaseID::PfcEmit);
+    Sim &sim = ctx.data();
     sim.snapshotDirtyPorts(ctx);
-    sim.nextDT = sim.chooseDT();
+    sim.nextDT = sim.chooseDT(ctx);
     if (sim.nextDT < 1e-9) {
         sim.nextDT = 0.001;
     }
@@ -287,20 +369,39 @@ MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
 MADRONA_NO_INLINE void advanceOnePortBufferStepSystem(
     Engine &ctx,
     PortState &port_state,
-    PortBuffer &port_buf)
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortPfcState &pfc_state,
+    PortTimers &timers,
+    PortTraceLast &trace,
+    PortCleanup &cleanup,
+    PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
-    DirtyPort &dirty = sim.portDirtyStates[port_state.port_id];
-    PortPfcState &pfc_state = sim.portPfcStates[port_state.port_id];
-    PortTraceLast &trace = sim.portTraceLasts[port_state.port_id];
-    PortCleanup &cleanup = sim.portCleanups[port_state.port_id];
-    PortTagList &tag_list = sim.portTagLists[port_state.port_id];
     sim.advanceOnePortBuffer(ctx, port_state.port_id, sim.nextDT,
-        port_state, port_buf, dirty, pfc_state, cleanup, trace, tag_list);
+        port_state, port_buf, dirty, pfc_state, timers, cleanup, trace,
+        tag_list);
+}
+
+MADRONA_NO_INLINE void progressFinishedSourcesOnePortStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortTagList &tag_list,
+    PortSourceTagList &source_tag_list,
+    PortCachedHints &hints,
+    PortFinishedSourceList &finished_list,
+    PortTraceLast &trace,
+    PortOutbox &outbox)
+{
+    Sim &sim = ctx.data();
+    sim.progressFinishedSourcesOnePort(ctx, sim.nextDT, sim.now + sim.nextDT,
+        port_state.port_id, port_state, tag_list, source_tag_list, hints,
+        finished_list, trace, outbox);
 }
 
 MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
 {
+    closeHostStepPhase(ctx, StepPhaseID::ClearDT);
     Sim &sim = ctx.data();
     sim.flushBufferTagCleanup(ctx);
     if (sim.traceModeEnabled()) {
@@ -309,21 +410,39 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
     sim.now += sim.nextDT;
     SimStats &stats = ctx.singleton<SimStats>();
+    const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
     FlowCompletionBuf &buf = ctx.singleton<FlowCompletionBuf>();
     stats.simulationTime = sim.now;
-    stats.numFlowDefs = sim.numFlowDefs;
-    stats.numPendingFlows = sim.numPendingFlows;
+    stats.numFlowDefs = flow_counters.numFlowDefs;
+    stats.numPendingFlows = flow_counters.numPendingFlows;
     stats.numDelayedEvents = sim.numDelayedEvents;
     stats.numActiveTags = sim.numTagIndexEntries;
     stats.numSourceTags = sim.numSourceTags;
-    stats.numFlowCompletions = sim.numFlowCompletions;
+    stats.numFlowCompletions = flow_counters.numFlowCompletions;
     stats.lastTick = driver.tick;
 
-    int32_t n = sim.numFlowCompletions;
+    finalizeHostStepPhase(ctx);
+
+    int32_t n = flow_counters.numFlowCompletions;
     if (n < 0) n = 0;
     if (n > MAX_FLOW_COMPLETIONS) n = MAX_FLOW_COMPLETIONS;
-    for (int32_t i = 0; i < n; i++) {
-        buf.records[i] = sim.flowCompletions[i].record;
+    int32_t out_idx = 0;
+    if (sim.network != nullptr) {
+        for (int32_t i = 0; i < sim.network->numFlows && out_idx < n; i++) {
+            Entity flow_entity = sim.flowMetaEntities[i];
+            if (flow_entity == Entity::none()) {
+                continue;
+            }
+            const FlowRuntimeState &runtime =
+                ctx.get<FlowRuntimeState>(flow_entity);
+            if (runtime.completed == 0) {
+                continue;
+            }
+            buf.records[out_idx++] = runtime.completion_record;
+        }
+    }
+    for (int32_t i = out_idx; i < MAX_FLOW_COMPLETIONS; i++) {
+        buf.records[i] = FlowCompletionRecord {};
     }
 }
 
@@ -343,27 +462,37 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
         scheduleStepSystem, SimDriver>>({});
     auto n1reset = builder.addToGraph<ParallelForNode<Engine,
-        resetIngressPortStateStepSystem, PortState>>({n0});
+        resetIngressPortStateStepSystem,
+        PortInbox, PortCreateList, PortCompletionList>>({n0});
+    auto n1begin = builder.addToGraph<ParallelForNode<Engine,
+        beginDeliverStepSystem, SimDriver>>({n1reset});
+    auto n1deliver = builder.addToGraph<ParallelForNode<Engine,
+        deliverOnePortStepSystem,
+        PortState, PortDelayedQueue, PortInbox, PortTraceLast>>({n1begin});
     auto n1 = builder.addToGraph<ParallelForNode<Engine,
-        deliverStepSystem, SimDriver>>({n1reset});
+        postDeliverStepSystem, SimDriver>>({n1deliver});
     // Phase E: per-Port ingress chain. resetIngressPortStateStepSystem
     // has already cleared each port's inbox / create / completion
-    // scratch, and deliverEvents (n1) has dispatched each due event into
-    // the target port's PortInbox. We run pfcPropagate → arrival → flushTagCreate → bwUpdate →
+    // scratch, and deliverOnePort (n1deliver) has dispatched each due
+    // event from the port-local future queues into that port's PortInbox.
+    // We run pfcPropagate → arrival → flushTagCreate → bwUpdate →
     // flushTagCreate → flushTagCleanup → flushFlowCompletion →
     // flushPortOutbox → logIngressChain, matching the effective order
     // the legacy singleton path produced.
     auto n2pfc = builder.addToGraph<ParallelForNode<Engine,
         pfcPropagateOnePortStepSystem,
-        PortState>>({n1});
+        PortState, DirtyPort, PortPfcState, PortTraceLast, PortInbox>>({n1});
     auto n2arr = builder.addToGraph<ParallelForNode<Engine,
         arrivalOnePortStepSystem,
-        PortState>>({n2pfc});
+        PortState, DirtyPort, PortTraceLast, PortInbox, PortTagList,
+        PortSourceTagList, PortCreateList>>({n2pfc});
     auto n2createA = builder.addToGraph<ParallelForNode<Engine,
         flushTagCreateStepSystem, SimDriver>>({n2arr});
     auto n2bw = builder.addToGraph<ParallelForNode<Engine,
         bwUpdateOnePortStepSystem,
-        PortState, PortBuffer>>({n2createA});
+        PortState, PortBuffer, DirtyPort, PortTraceLast, PortInbox,
+        PortTagList, PortCreateList, PortCleanup, PortOutbox,
+        PortCompletionList>>({n2createA});
     auto n2createB = builder.addToGraph<ParallelForNode<Engine,
         flushTagCreateStepSystem, SimDriver>>({n2bw});
     auto n2cleanup = builder.addToGraph<ParallelForNode<Engine,
@@ -379,11 +508,14 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     if constexpr (kTaskgraphStageLimit >= 5) {
     auto n5a = builder.addToGraph<ParallelForNode<Engine,
         allocOnePortStepSystem,
-    PortState, PortBuffer>>({n4});
+        PortState, PortBuffer, DirtyPort, PortPfcConfig, PortPfcState,
+        PortCachedHints, PortDrainHint, PortTraceLast, PortCleanup,
+        PortTagList>>({n4});
     auto n5reduce = builder.addToGraph<ParallelForNode<Engine,
         reducePortCachedHintsStepSystem, SimDriver>>({n5a});
     auto n5drain = builder.addToGraph<ParallelForNode<Engine,
-        applyDrainHintOnePortStepSystem, PortState>>({n5reduce});
+        applyDrainHintOnePortStepSystem,
+        PortState, PortDrainHint, PortTimers>>({n5reduce});
     auto n5 = builder.addToGraph<ParallelForNode<Engine,
         postAllocStepSystem, SimDriver>>({n5drain});
     final_node = n5;
@@ -397,9 +529,11 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     if constexpr (kTaskgraphStageLimit >= 6) {
     auto n6a = builder.addToGraph<ParallelForNode<Engine,
         pfcDetectOnePortStepSystem,
-        PortState, PortBuffer>>({n5});
+        PortState, PortBuffer, DirtyPort, PortPfcConfig, PortPfcState,
+        PortTraceLast, PortOutbox, PortTagList, IngressTagList>>({n5});
     auto n6timers = builder.addToGraph<ParallelForNode<Engine,
-        applyPfcTimerOnePortStepSystem, PortState>>({n6a});
+        applyPfcTimerOnePortStepSystem,
+        PortState, PortPfcState, PortTimers>>({n6a});
     auto n6 = builder.addToGraph<ParallelForNode<Engine,
         postPfcStepSystem, SimDriver>>({n6timers});
     final_node = n6;
@@ -408,17 +542,17 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     if constexpr (kTaskgraphStageLimit >= 7) {
     auto n7a = builder.addToGraph<ParallelForNode<Engine,
         emitOnePortStepSystem,
-        PortState>>({n6});
+        PortState, DirtyPort, PortTraceLast, PortOutbox, PortTagList>>({n6});
     auto n7 = builder.addToGraph<ParallelForNode<Engine,
         postEmitStepSystem, SimDriver>>({n7a});
     final_node = n7;
     // Phase B.1: per-Port clearDirtyOnePortSystem fans out over every Port
-    // entity; the follow-up SimDriver singleton snapshotDirtyStepSystem
-    // collapses the per-port snapshots into lastDirtyPortIDs in
-    // port_id ascending order and emits the clear-summary log.
+    // entity; the follow-up SimDriver singleton emits the clear-summary log
+    // and computes nextDT. The per-port was_dirty_at_clear flags stay on the
+    // Port entities and are consumed directly by the buffer phase.
     if constexpr (kTaskgraphStageLimit >= 9) {
     auto n8a = builder.addToGraph<ParallelForNode<Engine,
-        clearDirtyOnePortSystem, PortState>>({n7});
+        clearDirtyOnePortSystem, DirtyPort, PortTraceLast>>({n7});
     auto n9 = builder.addToGraph<ParallelForNode<Engine,
         postClearStepSystem, SimDriver>>({n8a});
     final_node = n9;
@@ -429,10 +563,15 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     if constexpr (kTaskgraphStageLimit >= 12) {
     auto n10a = builder.addToGraph<ParallelForNode<Engine,
         advanceOnePortBufferStepSystem,
-        PortState, PortBuffer>>({n9});
+        PortState, PortBuffer, DirtyPort, PortPfcState, PortTimers,
+        PortTraceLast, PortCleanup, PortTagList>>({n9});
+    auto n11progress = builder.addToGraph<ParallelForNode<Engine,
+        progressFinishedSourcesOnePortStepSystem,
+        PortState, PortTagList, PortSourceTagList, PortCachedHints,
+        PortFinishedSourceList, PortTraceLast, PortOutbox>>({n10a});
     auto n12 = builder.addToGraph<ParallelForNode<Engine,
         postBufferStepSystem,
-        SimDriver>>({n10a});
+        SimDriver>>({n11progress});
     final_node = n12;
     }
     }

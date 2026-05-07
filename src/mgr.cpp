@@ -18,7 +18,6 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-
 using namespace madrona;
 using namespace madrona::py;
 
@@ -163,6 +162,7 @@ struct Manager::Impl {
     virtual int32_t numSourceTags() = 0;
     virtual int32_t numFlowCompletions() = 0;
     virtual FlowCompletionRecord flowCompletion(int32_t idx) = 0;
+    virtual StepPhaseTimes lastStepPhaseTimes() = 0;
 
     static inline Impl * init(const Config &cfg,
                               const GridState &src_grid,
@@ -202,48 +202,63 @@ struct Manager::CPUImpl final : Manager::Impl {
         return Tensor(dev_ptr, type, dims, Optional<int>::none());
     }
 
+    inline SimStats &fetchSimStats()
+    {
+        auto *stats = (SimStats *)cpuExec.getExported(
+            (uint32_t)ExportID::SimStats);
+        return stats[0];
+    }
+
     inline virtual double simulationTime() final
     {
-        return cpuExec.getWorldData(0).now;
+        return fetchSimStats().simulationTime;
     }
 
     inline virtual int32_t numFlowDefs() final
     {
-        return cpuExec.getWorldData(0).numFlowDefs;
+        return fetchSimStats().numFlowDefs;
     }
 
     inline virtual int32_t numPendingFlows() final
     {
-        return cpuExec.getWorldData(0).numPendingFlows;
+        return fetchSimStats().numPendingFlows;
     }
 
     inline virtual int32_t numDelayedEvents() final
     {
-        return cpuExec.getWorldData(0).numDelayedEvents;
+        return fetchSimStats().numDelayedEvents;
     }
 
     inline virtual int32_t numActiveTags() final
     {
-        return cpuExec.getWorldData(0).numTagIndexEntries;
+        return fetchSimStats().numActiveTags;
     }
 
     inline virtual int32_t numSourceTags() final
     {
-        return cpuExec.getWorldData(0).numSourceTags;
+        return fetchSimStats().numSourceTags;
     }
 
     inline virtual int32_t numFlowCompletions() final
     {
-        return cpuExec.getWorldData(0).numFlowCompletions;
+        return fetchSimStats().numFlowCompletions;
     }
 
     inline virtual FlowCompletionRecord flowCompletion(int32_t idx) final
     {
-        const Sim &world = cpuExec.getWorldData(0);
-        if (idx < 0 || idx >= world.numFlowCompletions) {
+        if (idx < 0 || idx >= fetchSimStats().numFlowCompletions) {
             return FlowCompletionRecord {};
         }
-        return world.flowCompletions[idx].record;
+        auto *buf = (FlowCompletionBuf *)cpuExec.getExported(
+            (uint32_t)ExportID::FlowCompletionBuf);
+        return buf[0].records[idx];
+    }
+
+    inline virtual StepPhaseTimes lastStepPhaseTimes() final
+    {
+        auto *times = (StepPhaseTimes *)cpuExec.getExported(
+            (uint32_t)ExportID::StepPhaseTimes);
+        return times[0];
     }
 };
 
@@ -360,6 +375,16 @@ struct Manager::GPUImpl final : Manager::Impl {
                             sizeof(FlowCompletionRecord),
                             cudaMemcpyDeviceToHost));
         return rec;
+    }
+
+    inline virtual StepPhaseTimes lastStepPhaseTimes() final
+    {
+        auto *dev_ptr = (StepPhaseTimes *)gpuExec.getExported(
+            (uint32_t)ExportID::StepPhaseTimes);
+        StepPhaseTimes host_times {};
+        REQ_CUDA(cudaMemcpy(&host_times, dev_ptr, sizeof(StepPhaseTimes),
+                            cudaMemcpyDeviceToHost));
+        return host_times;
     }
 };
 #endif
@@ -632,6 +657,11 @@ int32_t Manager::numFlowCompletions()
 FlowCompletionRecord Manager::flowCompletion(int32_t idx)
 {
     return impl_->flowCompletion(idx);
+}
+
+StepPhaseTimes Manager::lastStepPhaseTimes()
+{
+    return impl_->lastStepPhaseTimes();
 }
 
 }

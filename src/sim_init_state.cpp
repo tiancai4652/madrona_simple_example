@@ -16,19 +16,11 @@ void Sim::resetNetworkState()
     nodeLookupSpan = 0;
     numTopoLinks = 0;
     numPorts = 0;
-    numFlowDefs = 0;
     flowLookupBase = 0;
     flowLookupSpan = 0;
-    numPendingFlows = 0;
-    numFlowRoutes = 0;
     numDelayedEvents = 0;
-    numInboxArrival = 0;
-    numInboxBwUpdate = 0;
-    numInboxPfc = 0;
     numTagIndexEntries = 0;
     numSourceTags = 0;
-    numIngressTags = 0;
-    numFlowCompletions = 0;
     enableBuffer = 1;
     enablePfc = 0;
     pfcEgress = 0;
@@ -41,7 +33,6 @@ void Sim::resetNetworkState()
     cachedNextDrainTime = timerInactiveSentinel();
     cachedDrainPortID = -1;
     cachedNextFinishTime = timerInactiveSentinel();
-    numLastDirtyPortIDs = 0;
     nextDT = 0.0;
     systemLogStep = 0;
 
@@ -59,22 +50,10 @@ void Sim::resetNetworkState()
     }
 
     for (int32_t i = 0; i < MAX_FLOWS; i++) {
-        flowDefSlotLookup[i] = -1;
-        flowRouteSlotLookup[i] = -1;
-        flowCompletionSlotLookup[i] = -1;
-        sourceTagSlotLookup[i] = -1;
+        flowMetaEntityLookup[i] = Entity::none();
+        flowMetaEntities[i] = Entity::none();
     }
 
-    for (int32_t i = 0; i < TAG_LOOKUP_CAPACITY; i++) {
-        tagLookup[i] = TagLookupEntry {};
-    }
-
-    for (int32_t i = 0; i < MAX_TOPO_PORTS; i++) {
-        ingressTagLists[i] = IngressTagList {};
-        backlogDrainTimers[i] = timerInactiveSentinel();
-        pfcPauseTimers[i] = timerInactiveSentinel();
-        pfcResumeTimers[i] = timerInactiveSentinel();
-    }
 }
 
 }

@@ -8,140 +8,132 @@ using namespace madrona::math;
 
 namespace madsimple {
 
-MADRONA_NO_INLINE int32_t Sim::countActiveBacklogDrainTimers() const
+MADRONA_NO_INLINE int32_t Sim::countActiveBacklogDrainTimers(
+    Context &ctx) const
 {
     int32_t count = 0;
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (timerIsActive(backlogDrainTimers[port_id])) {
+        Entity port_e = portEntities[port_id];
+        if (port_e != Entity::none() &&
+            timerIsActive(ctx.get<PortTimers>(port_e).backlog_drain)) {
             count += 1;
         }
     }
     return count;
 }
 
-MADRONA_NO_INLINE int32_t Sim::countActivePfcPauseTimers() const
+MADRONA_NO_INLINE int32_t Sim::countActivePfcPauseTimers(Context &ctx) const
 {
     int32_t count = 0;
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (timerIsActive(pfcPauseTimers[port_id])) {
+        Entity port_e = portEntities[port_id];
+        if (port_e != Entity::none() &&
+            timerIsActive(ctx.get<PortTimers>(port_e).pfc_pause)) {
             count += 1;
         }
     }
     return count;
 }
 
-MADRONA_NO_INLINE int32_t Sim::countActivePfcResumeTimers() const
+MADRONA_NO_INLINE int32_t Sim::countActivePfcResumeTimers(Context &ctx) const
 {
     int32_t count = 0;
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (timerIsActive(pfcResumeTimers[port_id])) {
+        Entity port_e = portEntities[port_id];
+        if (port_e != Entity::none() &&
+            timerIsActive(ctx.get<PortTimers>(port_e).pfc_resume)) {
             count += 1;
         }
     }
     return count;
 }
 
-MADRONA_NO_INLINE bool Sim::hasActiveBacklogDrainTimers() const
+MADRONA_NO_INLINE bool Sim::hasActiveBacklogDrainTimers(Context &ctx) const
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (timerIsActive(backlogDrainTimers[port_id])) {
+        Entity port_e = portEntities[port_id];
+        if (port_e != Entity::none() &&
+            timerIsActive(ctx.get<PortTimers>(port_e).backlog_drain)) {
             return true;
         }
     }
     return false;
 }
 
-MADRONA_NO_INLINE bool Sim::hasActivePfcPauseTimers() const
+MADRONA_NO_INLINE bool Sim::hasActivePfcPauseTimers(Context &ctx) const
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (timerIsActive(pfcPauseTimers[port_id])) {
+        Entity port_e = portEntities[port_id];
+        if (port_e != Entity::none() &&
+            timerIsActive(ctx.get<PortTimers>(port_e).pfc_pause)) {
             return true;
         }
     }
     return false;
 }
 
-MADRONA_NO_INLINE bool Sim::hasActivePfcResumeTimers() const
+MADRONA_NO_INLINE bool Sim::hasActivePfcResumeTimers(Context &ctx) const
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-        if (timerIsActive(pfcResumeTimers[port_id])) {
+        Entity port_e = portEntities[port_id];
+        if (port_e != Entity::none() &&
+            timerIsActive(ctx.get<PortTimers>(port_e).pfc_resume)) {
             return true;
         }
     }
     return false;
 }
 
-MADRONA_NO_INLINE void Sim::setBacklogDrainTimer(int32_t port_id, Time t)
+MADRONA_NO_INLINE void Sim::setBacklogDrainTimer(PortTimers &timers, Time t)
 {
-    if (port_id < 0 || port_id >= numPorts) {
-        return;
-    }
-
-    if (!timerIsActive(backlogDrainTimers[port_id]) ||
-        t < backlogDrainTimers[port_id]) {
-        backlogDrainTimers[port_id] = t;
+    if (!timerIsActive(timers.backlog_drain) ||
+        t < timers.backlog_drain) {
+        timers.backlog_drain = t;
     }
 }
 
-MADRONA_NO_INLINE void Sim::setPfcPauseTimer(
-    int32_t ingress_port_id, Time t)
+MADRONA_NO_INLINE void Sim::setPfcPauseTimer(PortTimers &timers, Time t)
 {
-    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
-        return;
-    }
-
-    if (!timerIsActive(pfcPauseTimers[ingress_port_id]) ||
-        t < pfcPauseTimers[ingress_port_id]) {
-        pfcPauseTimers[ingress_port_id] = t;
+    if (!timerIsActive(timers.pfc_pause) ||
+        t < timers.pfc_pause) {
+        timers.pfc_pause = t;
     }
 }
 
-MADRONA_NO_INLINE void Sim::setPfcResumeTimer(
-    int32_t ingress_port_id, Time t)
+MADRONA_NO_INLINE void Sim::setPfcResumeTimer(PortTimers &timers, Time t)
 {
-    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
-        return;
-    }
-
-    if (!timerIsActive(pfcResumeTimers[ingress_port_id]) ||
-        t < pfcResumeTimers[ingress_port_id]) {
-        pfcResumeTimers[ingress_port_id] = t;
+    if (!timerIsActive(timers.pfc_resume) ||
+        t < timers.pfc_resume) {
+        timers.pfc_resume = t;
     }
 }
 
-MADRONA_NO_INLINE void Sim::clearBacklogDrainTimer(int32_t port_id)
+MADRONA_NO_INLINE void Sim::clearBacklogDrainTimer(PortTimers &timers)
 {
-    if (port_id < 0 || port_id >= numPorts) {
-        return;
-    }
-    backlogDrainTimers[port_id] = timerInactiveSentinel();
+    timers.backlog_drain = timerInactiveSentinel();
 }
 
-MADRONA_NO_INLINE void Sim::clearPfcPauseTimer(int32_t ingress_port_id)
+MADRONA_NO_INLINE void Sim::clearPfcPauseTimer(PortTimers &timers)
 {
-    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
-        return;
-    }
-    pfcPauseTimers[ingress_port_id] = timerInactiveSentinel();
+    timers.pfc_pause = timerInactiveSentinel();
 }
 
-MADRONA_NO_INLINE void Sim::clearPfcResumeTimer(int32_t ingress_port_id)
+MADRONA_NO_INLINE void Sim::clearPfcResumeTimer(PortTimers &timers)
 {
-    if (ingress_port_id < 0 || ingress_port_id >= numPorts) {
-        return;
-    }
-    pfcResumeTimers[ingress_port_id] = timerInactiveSentinel();
+    timers.pfc_resume = timerInactiveSentinel();
 }
 
 MADRONA_NO_INLINE void Sim::applyDrainHintOnePort(
     int32_t port_id,
-    PortDrainHint &hint)
+    PortDrainHint &hint,
+    PortTimers &timers)
 {
+    (void)port_id;
     if (hint.want_clear != 0) {
-        clearBacklogDrainTimer(port_id);
+        clearBacklogDrainTimer(timers);
     }
     if (hint.want_set != 0) {
-        setBacklogDrainTimer(port_id, hint.set_t);
+        setBacklogDrainTimer(timers, hint.set_t);
     }
 
     hint.want_clear = 0;
@@ -151,19 +143,21 @@ MADRONA_NO_INLINE void Sim::applyDrainHintOnePort(
 
 MADRONA_NO_INLINE void Sim::applyPfcTimerOnePort(
     int32_t ingress_port_id,
-    PortPfcState &state)
+    PortPfcState &state,
+    PortTimers &timers)
 {
+    (void)ingress_port_id;
     if (state.want_clear_pause != 0) {
-        clearPfcPauseTimer(ingress_port_id);
+        clearPfcPauseTimer(timers);
     }
     if (state.want_clear_resume != 0) {
-        clearPfcResumeTimer(ingress_port_id);
+        clearPfcResumeTimer(timers);
     }
     if (state.want_set_pause != 0) {
-        setPfcPauseTimer(ingress_port_id, state.set_pause_t);
+        setPfcPauseTimer(timers, state.set_pause_t);
     }
     if (state.want_set_resume != 0) {
-        setPfcResumeTimer(ingress_port_id, state.set_resume_t);
+        setPfcResumeTimer(timers, state.set_resume_t);
     }
 
     state.want_clear_pause = 0;
@@ -198,7 +192,8 @@ void Sim::pfcDetectOnePort(
     PortPfcState &state,
     PortOutbox &outbox,
     PortTraceLast &trace,
-    PortTagList &tag_list)
+    PortTagList &tag_list,
+    IngressTagList &ingress_list)
 {
     // Reset per-frame scratch for this port.
     outbox.num_events = 0;
@@ -222,7 +217,8 @@ void Sim::pfcDetectOnePort(
         pfcDetectOnePortEgress(ctx, port_id, dirty, cfg, state,
             outbox, trace, tag_list);
     } else {
-        pfcDetectOnePortIngress(ctx, port_id, cfg, state, outbox, trace);
+        pfcDetectOnePortIngress(ctx, port_id, cfg, state, outbox, trace,
+            ingress_list);
     }
 }
 
@@ -361,60 +357,32 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     PortPfcConfig &cfg,
     PortPfcState &state,
     PortOutbox &outbox,
-    PortTraceLast &trace)
+    PortTraceLast &trace,
+    IngressTagList &ingress_list)
 {
     // -------- ingress mode: this port is the ingress port --------
     // Decide if this port is the ingress for any tag whose egress port is
     // dirty this frame. This mirrors the legacy "ingress_check" set built
     // by scanning all dirty egress ports' tags.
-    bool use_ingress_list =
-        port_id >= 0 && port_id < numPorts &&
-        ingressTagLists[port_id].overflow == 0;
     bool is_ingress_check_target = false;
-    if (use_ingress_list) {
-        const IngressTagList &itl = ingressTagLists[port_id];
-        for (int32_t i = 0; i < itl.count; i++) {
-            Entity te = itl.tags[i];
-            if (te == Entity::none()) {
-                continue;
-            }
-
-            FlowTagState &tag = ctx.get<FlowTagState>(te);
-            int32_t egress_port = tag.port_id;
-            if (egress_port < 0 || egress_port >= numPorts) {
-                continue;
-            }
-            Entity eg_e = portEntities[egress_port];
-            if (eg_e == Entity::none()) {
-                continue;
-            }
-            if (portDirtyStates[egress_port].isDirty != 0) {
-                is_ingress_check_target = true;
-                break;
-            }
+    for (int32_t i = 0; i < ingress_list.count; i++) {
+        Entity te = ingress_list.tags[i];
+        if (te == Entity::none()) {
+            continue;
         }
-    } else {
-        for (int32_t j = 0; j < numIngressTags; j++) {
-            if (ingressTags[j].ingress_port_id != port_id) {
-                continue;
-            }
-            Entity te = ingressTags[j].entity;
-            if (te == Entity::none()) {
-                continue;
-            }
-            FlowTagState &tag = ctx.get<FlowTagState>(te);
-            int32_t egress_port = tag.port_id;
-            if (egress_port < 0 || egress_port >= numPorts) {
-                continue;
-            }
-            Entity eg_e = portEntities[egress_port];
-            if (eg_e == Entity::none()) {
-                continue;
-            }
-            if (portDirtyStates[egress_port].isDirty != 0) {
-                is_ingress_check_target = true;
-                break;
-            }
+
+        FlowTagState &tag = ctx.get<FlowTagState>(te);
+        int32_t egress_port = tag.port_id;
+        if (egress_port < 0 || egress_port >= numPorts) {
+            continue;
+        }
+        Entity eg_e = portEntities[egress_port];
+        if (eg_e == Entity::none()) {
+            continue;
+        }
+        if (ctx.get<DirtyPort>(eg_e).isDirty != 0) {
+            is_ingress_check_target = true;
+            break;
         }
     }
     if (!is_ingress_check_target) {
@@ -429,40 +397,19 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
 
     double buf_by_pri[PFC_MAX_PRIORITY] {};
     double net_rate_by_pri[PFC_MAX_PRIORITY] {};
-    if (use_ingress_list) {
-        const IngressTagList &itl = ingressTagLists[port_id];
-        for (int32_t i = 0; i < itl.count; i++) {
-            Entity te = itl.tags[i];
-            if (te == Entity::none()) {
-                continue;
-            }
-            FlowTagState &tag = ctx.get<FlowTagState>(te);
-            if (tag.is_source != 0) {
-                continue;
-            }
-            materializeBacklog(tag, now);
-            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-            buf_by_pri[pri] += tag.backlog;
-            net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
+    for (int32_t i = 0; i < ingress_list.count; i++) {
+        Entity te = ingress_list.tags[i];
+        if (te == Entity::none()) {
+            continue;
         }
-    } else {
-        for (int32_t j = 0; j < numIngressTags; j++) {
-            if (ingressTags[j].ingress_port_id != port_id) {
-                continue;
-            }
-            Entity te = ingressTags[j].entity;
-            if (te == Entity::none()) {
-                continue;
-            }
-            FlowTagState &tag = ctx.get<FlowTagState>(te);
-            if (tag.is_source != 0) {
-                continue;
-            }
-            materializeBacklog(tag, now);
-            int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
-            buf_by_pri[pri] += tag.backlog;
-            net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
+        FlowTagState &tag = ctx.get<FlowTagState>(te);
+        if (tag.is_source != 0) {
+            continue;
         }
+        materializeBacklog(tag, now);
+        int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+        buf_by_pri[pri] += tag.backlog;
+        net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
     }
 
     int32_t upstream_port = -1;
@@ -558,30 +505,14 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             double effective_net = net_rate;
             if (effective_net >= -1e-15) {
                 double out_total = 0.0;
-                if (use_ingress_list) {
-                    const IngressTagList &itl = ingressTagLists[port_id];
-                    for (int32_t i = 0; i < itl.count; i++) {
-                        Entity te = itl.tags[i];
-                        if (te == Entity::none()) {
-                            continue;
-                        }
-                        FlowTagState &t = ctx.get<FlowTagState>(te);
-                        if (t.priority == pri) {
-                            out_total += t.out_bw;
-                        }
+                for (int32_t i = 0; i < ingress_list.count; i++) {
+                    Entity te = ingress_list.tags[i];
+                    if (te == Entity::none()) {
+                        continue;
                     }
-                } else {
-                    for (int32_t j = 0; j < numIngressTags; j++) {
-                        if (ingressTags[j].ingress_port_id != port_id) {
-                            continue;
-                        }
-                        Entity te = ingressTags[j].entity;
-                        if (te != Entity::none()) {
-                            FlowTagState &t = ctx.get<FlowTagState>(te);
-                            if (t.priority == pri) {
-                                out_total += t.out_bw;
-                            }
-                        }
+                    FlowTagState &t = ctx.get<FlowTagState>(te);
+                    if (t.priority == pri) {
+                        out_total += t.out_bw;
                     }
                 }
                 if (out_total > 1e-15) {

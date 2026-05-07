@@ -54,6 +54,7 @@ public:
     MGR_EXPORT int32_t numSourceTags();
     MGR_EXPORT int32_t numFlowCompletions();
     MGR_EXPORT FlowCompletionRecord flowCompletion(int32_t idx);
+    MGR_EXPORT StepPhaseTimes lastStepPhaseTimes();
 
 private:
     struct Impl;

@@ -346,6 +346,27 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
         .def("num_active_tags", &Manager::numActiveTags)
         .def("num_source_tags", &Manager::numSourceTags)
         .def("num_flow_completions", &Manager::numFlowCompletions)
+        .def("last_step_phase_times", [](Manager &mgr) {
+            StepPhaseTimes times = mgr.lastStepPhaseTimes();
+            nb::dict result;
+            result["step"] = nb::int_(times.step);
+            result["total_wall_time_s"] = nb::float_(times.totalWallTimeS);
+            result["schedule_wall_time_s"] =
+                nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::Schedule]);
+            result["deliver_wall_time_s"] =
+                nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::Deliver]);
+            result["ingress_wall_time_s"] =
+                nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::Ingress]);
+            result["alloc_wall_time_s"] =
+                nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::Alloc]);
+            result["pfc_emit_wall_time_s"] =
+                nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::PfcEmit]);
+            result["clear_dt_wall_time_s"] =
+                nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::ClearDT]);
+            result["buffer_progress_wall_time_s"] =
+                nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::BufferProgress]);
+            return result;
+        })
         .def("flow_completion", [](Manager &mgr, int64_t idx) {
             FlowCompletionRecord record = mgr.flowCompletion((int32_t)idx);
             nb::dict result;

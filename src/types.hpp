@@ -21,6 +21,7 @@ enum class ExportID : uint32_t {
     // so the export layout stays identical between backends.
     SimStats,
     FlowCompletionBuf,
+    StepPhaseTimes,
     NumExports,
 };
 
@@ -121,6 +122,37 @@ struct SimStats {
     int32_t lastTick = 0;
 };
 
+// Flow-lifecycle singleton state. This keeps the mutable "how many flows are
+// still pending / routed / completed" bookkeeping in ECS-owned storage rather
+// than on the Sim world object, which makes later fan-out over FlowMeta
+// entities easier to reason about.
+struct FlowCounters {
+    int32_t numFlowDefs = 0;
+    int32_t numPendingFlows = 0;
+    int32_t pendingFlowCursor = 0;
+    int32_t numFlowRoutes = 0;
+    int32_t numFlowCompletions = 0;
+};
+
+enum class StepPhaseID : uint32_t {
+    Schedule = 0,
+    Deliver,
+    Ingress,
+    Alloc,
+    PfcEmit,
+    ClearDT,
+    BufferProgress,
+    NumPhases,
+};
+
+struct StepPhaseTimes {
+    int32_t step = 0;
+    double totalWallTimeS = 0.0;
+    double phaseWallTimeS[(uint32_t)StepPhaseID::NumPhases] {};
+    double _stepStartWallTimeS = 0.0;
+    double _lastBoundaryWallTimeS = 0.0;
+};
+
 // Singleton mirror of Sim::flowCompletions[].record for GPU export. Same
 // fixed capacity as MAX_FLOW_COMPLETIONS; entries past numFlowCompletions
 // are zero-initialised and should not be read.
@@ -219,6 +251,13 @@ struct FlowTagState {
     madrona::Entity port_entity = madrona::Entity::none();
 };
 
+// Per-tag scratch used by the parallel progress scan. The owning Port worker
+// marks finished source tags here and the singleton cleanup pass later
+// destroys only the tags queued by each port.
+struct FlowTagProgress {
+    int32_t pending_source_destroy = 0;
+};
+
 struct FlowWeight {
     FlowId flow_id = -1;
     double weight = 0.0;
@@ -278,14 +317,22 @@ struct PortPfcState {
 struct PortCachedHints {
     int32_t has_drain_hint = 0;
     int32_t has_finish_hint = 0;
+    int32_t has_active_finish = 0;
     double drain_hint_t = 0.0;
     double finish_hint_t = 0.0;
+    double active_finish_t = 0.0;
 };
 
 struct PortDrainHint {
     int32_t want_clear = 0;
     int32_t want_set = 0;
     double set_t = 0.0;
+};
+
+struct PortTimers {
+    Time backlog_drain = 0.0;
+    Time pfc_pause = 0.0;
+    Time pfc_resume = 0.0;
 };
 
 // leafspine1024 d64 all-to-all drives 63 flows into each destination host
@@ -297,6 +344,11 @@ struct PortCleanup {
     int32_t num = 0;
     madrona::Entity tags[MAX_PORT_CLEANUP] {};
     int32_t propagate[MAX_PORT_CLEANUP] {};
+};
+
+struct PortFinishedSourceList {
+    int32_t num = 0;
+    madrona::Entity tags[MAX_PORT_CLEANUP] {};
 };
 
 struct PortTraceLast {
@@ -322,13 +374,19 @@ struct PortTraceLast {
     // body (i.e. participated in the emit_pfc summary "checked_port_count").
     int32_t pfc_detect_checked = 0;
     int32_t pfc_detect_emitted = 0;
+    int32_t deliver_arrival_count = 0;
+    int32_t deliver_bwupdate_count = 0;
+    int32_t deliver_pfc_count = 0;
+    int32_t progress_source_scan_count = 0;
+    int32_t progress_finished_source_count = 0;
+    int32_t progress_emitted_cleanup_count = 0;
     // Snapshot of DirtyPort captured at alloc time (before emit/clear run);
     // consumed by the cachedNextDrainTime reduction singleton. Populated by
     // allocOnePort once phase B.2 lands.
     int32_t was_dirty_at_alloc = 0;
-    // Snapshot of DirtyPort captured by clearDirtyOnePort (after emit);
-    // consumed by snapshotDirtyPorts to rebuild lastDirtyPortIDs in a
-    // deterministic port_id ascending order.
+    // Snapshot of DirtyPort captured by clearDirtyOnePort (after emit).
+    // advanceOnePortBuffer consumes this directly on the owning Port entity
+    // instead of folding it back into a Sim-global dirty-port list.
     int32_t was_dirty_at_clear = 0;
     // Phase E: ingress_chain per-Port summary counters. The per-Port
     // arrival/bwUpdate/pfcPropagate workers increment these; the
@@ -366,12 +424,32 @@ struct PortOutbox {
     DelayedEvent events[MAX_PORT_OUTBOX] {};
 };
 
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
+
+struct PortTagLookupEntry {
+    FlowId flow_id = -1;
+    madrona::Entity entity = madrona::Entity::none();
+};
+
+struct PortTagLookup {
+    PortTagLookupEntry entries[MAX_PORT_TAG_LOOKUP] {};
+};
+
+// Per-target-port future event queue. Events stay time-sorted inside each
+// port-local queue so delivery can fan out over Port entities instead of
+// serially scanning a single global delayedEvents[] array.
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 128;
+
+struct PortDelayedQueue {
+    int32_t head = 0;
+    int32_t count = 0;
+    DelayedEvent events[MAX_PORT_DELAYED_EVENTS] {};
+};
+
 // Phase D: per-Port list of tag entities owned by this port (i.e. tags
 // whose FlowTagState.port_id == this port). Replaces the legacy
 // "for (i = 0; i < numTagIndexEntries; i++) if (tagIndex[i].port_id !=
 // port_id) continue;" O(N_tags * N_ports) scan in per-Port workers.
-// The Sim-level tagIndex[] is kept as a read-only mirror for findTag()
-// fallback lookups until phase F.
 constexpr int32_t MAX_TAGS_PER_PORT = 256;
 
 struct PortTagList {
@@ -379,12 +457,20 @@ struct PortTagList {
     madrona::Entity tags[MAX_TAGS_PER_PORT] {};
 };
 
-// Per-ingress-port mirror of the non-source ingressTags[] subset. Most
-// ingress-scoped systems only care about one ingress port at a time; this
-// list lets them avoid rescanning the full global ingressTags[] array on the
-// common path. If a port ever exceeds the fixed local capacity, overflow is
-// latched and callers fall back to the authoritative global ingressTags[].
-constexpr int32_t MAX_TAGS_PER_INGRESS = 256;
+// Source-only mirror for the same port-owned tag set. progressFinishedSources
+// uses this to skip the per-tag is_source filter on the hot path. If a port
+// ever exceeds the fixed local capacity, overflow latches and the caller
+// falls back to PortTagList to preserve correctness.
+struct PortSourceTagList {
+    int32_t count = 0;
+    int32_t overflow = 0;
+    madrona::Entity tags[MAX_TAGS_PER_PORT] {};
+};
+
+// Authoritative per-ingress-port tag list used by ingress-scoped systems.
+// This is kept on the Port entity so ingress-side work can stay entity-local
+// instead of bouncing through a shared global mirror.
+constexpr int32_t MAX_TAGS_PER_INGRESS = 512;
 
 struct IngressTagList {
     int32_t count = 0;
@@ -448,11 +534,30 @@ struct PortCompletionList {
 
 struct Port : public madrona::Archetype<
     PortState,
-    PortBuffer
+    PortBuffer,
+    DirtyPort,
+    PortCleanup,
+    PortFinishedSourceList,
+    PortOutbox,
+    PortTagLookup,
+    PortDelayedQueue,
+    PortTagList,
+    PortSourceTagList,
+    PortInbox,
+    PortCreateList,
+    PortCompletionList,
+    PortPfcConfig,
+    PortPfcState,
+    PortCachedHints,
+    PortDrainHint,
+    PortTimers,
+    PortTraceLast,
+    IngressTagList
 > {};
 
 struct FlowTag : public madrona::Archetype<
-    FlowTagState
+    FlowTagState,
+    FlowTagProgress
 > {};
 
 }

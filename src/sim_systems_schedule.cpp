@@ -41,9 +41,12 @@ MADRONA_NO_INLINE bool Sim::buildFlowArrivalEvent(int32_t src_port_id,
     return true;
 }
 
-MADRONA_NO_INLINE bool Sim::injectFlowDef(const FlowDef &flow,
+MADRONA_NO_INLINE bool Sim::injectFlowDef(Context &ctx,
+                                          Entity flow_entity,
                                           DelayedEvent &out_ev)
 {
+    const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
     NodeId path[MAX_PATH_NODES] {};
     int32_t path_len = getPath(flow.src_node, flow.dst_node, flow.id,
         path, MAX_PATH_NODES);
@@ -79,20 +82,20 @@ MADRONA_NO_INLINE bool Sim::injectFlowDef(const FlowDef &flow,
     }
     port_path[port_path_len++] = -1;
 
-    // schedulePendingFlows consumes each FlowDef at most once, so route
-    // insertion is append-only during startup and does not need an O(N)
-    // duplicate scan per flow on the GPU path.
-    if (numFlowRoutes < MAX_FLOWS) {
-        FlowRouteState &route = flowRoutes[numFlowRoutes++];
+    if (counters.numFlowRoutes < MAX_FLOWS) {
+        FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
+        FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(flow_entity);
+        if (route.num_steps <= 0) {
+            counters.numFlowRoutes += 1;
+        }
+        route = FlowRouteState {};
         route.flow_id = flow.id;
         route.num_steps = port_path_len - 1;
         for (int32_t i = 0; i + 1 < port_path_len; i++) {
             route.steps[i].port_id = port_path[i];
             route.steps[i].next_port_id = port_path[i + 1];
         }
-        if (flowLookupSpan > 0) {
-            flowRouteSlotLookup[flow.id - flowLookupBase] = numFlowRoutes - 1;
-        }
+        runtime.route_active = 1;
     }
 
     int32_t src_port_id =
@@ -100,25 +103,39 @@ MADRONA_NO_INLINE bool Sim::injectFlowDef(const FlowDef &flow,
     return buildFlowArrivalEvent(src_port_id, flow, out_ev);
 }
 
-MADRONA_NO_INLINE void Sim::schedulePendingFlows()
+MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
 {
-    int32_t ready_count = 0;
-    while (ready_count < numPendingFlows &&
-           pendingFlows[ready_count].start_time <= now + 1e-15) {
-        ready_count += 1;
-    }
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
+    int32_t pending_end =
+        counters.pendingFlowCursor + counters.numPendingFlows;
+    int32_t ready_begin = counters.pendingFlowCursor;
+    int32_t ready_end = ready_begin;
+    while (ready_end < pending_end) {
+        Entity flow_entity = flowMetaEntities[ready_end];
+        if (flow_entity == Entity::none()) {
+            ready_end += 1;
+            continue;
+        }
 
-    int32_t available = MAX_DELAYED_EVENTS - numDelayedEvents;
-    if (available < 0) {
-        available = 0;
+        FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(flow_entity);
+        if (runtime.pending == 0) {
+            ready_end += 1;
+            continue;
+        }
+
+        if (ctx.get<FlowDef>(flow_entity).start_time > now + 1e-15) {
+            break;
+        }
+
+        ready_end += 1;
     }
-    int32_t batch_count = 0;
+    int32_t ready_count = ready_end - ready_begin;
 
     if constexpr (system_log_compiled_in) {
         if (traceModeEnabled()) {
-            int32_t pending_before = numPendingFlows;
+            int32_t pending_before = counters.numPendingFlows;
             int32_t delayed_before = numDelayedEvents;
-            int32_t flow_routes_before = numFlowRoutes;
+            int32_t flow_routes_before = counters.numFlowRoutes;
             constexpr const char *scope = "ingress_chain";
             uint64_t step = systemLogStep;
             bool log_enabled = compiledSystemLogEnabled(scope, step);
@@ -129,24 +146,37 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
                 printSystemBegin(step, now, scope, "schedule_pending_flows");
             }
 
-            for (int32_t i = 0; i < ready_count; i++) {
-                FlowDef flow = pendingFlows[i];
+            for (int32_t i = ready_begin; i < ready_end; i++) {
+                Entity flow_entity = flowMetaEntities[i];
+                if (flow_entity == Entity::none()) {
+                    continue;
+                }
+                const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
+                FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(
+                    flow_entity);
+                if (runtime.pending == 0) {
+                    continue;
+                }
                 if (log_enabled && num_logged_flows < MAX_FLOWS) {
                     logged_flows[num_logged_flows++] = flow;
                 }
                 DelayedEvent ev {};
-                if (injectFlowDef(flow, ev) && batch_count < available) {
-                    delayedEventScratch[batch_count++] = ev;
+                if (injectFlowDef(ctx, flow_entity, ev) &&
+                    numDelayedEvents < MAX_DELAYED_EVENTS) {
+                    pushDelayedEvent(ctx, ev);
                 }
+                runtime.pending = 0;
+                runtime.active = 1;
             }
 
-            pushDelayedEventsBatch(delayedEventScratch, batch_count);
-
             if (ready_count > 0) {
-                for (int32_t i = ready_count; i < numPendingFlows; i++) {
-                    pendingFlows[i - ready_count] = pendingFlows[i];
+                counters.pendingFlowCursor = ready_end;
+                int32_t remaining =
+                    pending_end - counters.pendingFlowCursor;
+                if (remaining < 0) {
+                    remaining = 0;
                 }
-                numPendingFlows -= ready_count;
+                counters.numPendingFlows = remaining;
             }
 
             if (log_enabled) {
@@ -165,31 +195,42 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows()
                 printSystemScheduleSummary(step, now,
                     ready_count,
                     pending_before,
-                    numPendingFlows,
+                    counters.numPendingFlows,
                     delayed_before,
                     numDelayedEvents,
                     flow_routes_before,
-                    numFlowRoutes);
+                    counters.numFlowRoutes);
                 printSystemEnd(step, now, scope, "schedule_pending_flows");
             }
             return;
         }
     }
 
-    for (int32_t i = 0; i < ready_count; i++) {
-        DelayedEvent ev {};
-        if (injectFlowDef(pendingFlows[i], ev) && batch_count < available) {
-            delayedEventScratch[batch_count++] = ev;
+    for (int32_t i = ready_begin; i < ready_end; i++) {
+        Entity flow_entity = flowMetaEntities[i];
+        if (flow_entity == Entity::none()) {
+            continue;
         }
+        FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(flow_entity);
+        if (runtime.pending == 0) {
+            continue;
+        }
+        DelayedEvent ev {};
+        if (injectFlowDef(ctx, flow_entity, ev) &&
+            numDelayedEvents < MAX_DELAYED_EVENTS) {
+            pushDelayedEvent(ctx, ev);
+        }
+        runtime.pending = 0;
+        runtime.active = 1;
     }
 
-    pushDelayedEventsBatch(delayedEventScratch, batch_count);
-
     if (ready_count > 0) {
-        for (int32_t i = ready_count; i < numPendingFlows; i++) {
-            pendingFlows[i - ready_count] = pendingFlows[i];
+        counters.pendingFlowCursor = ready_end;
+        int32_t remaining = pending_end - counters.pendingFlowCursor;
+        if (remaining < 0) {
+            remaining = 0;
         }
-        numPendingFlows -= ready_count;
+        counters.numPendingFlows = remaining;
     }
 }
 

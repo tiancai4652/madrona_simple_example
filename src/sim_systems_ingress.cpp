@@ -29,6 +29,20 @@ inline Entity findTagInPortList(Context &ctx,
     return Entity::none();
 }
 
+inline void appendPortSourceTag(PortSourceTagList &source_list,
+                                Entity tag_entity)
+{
+    if (source_list.overflow != 0) {
+        return;
+    }
+
+    if (source_list.count < MAX_TAGS_PER_PORT) {
+        source_list.tags[source_list.count++] = tag_entity;
+    } else {
+        source_list.overflow = 1;
+    }
+}
+
 } // namespace
 
 void Sim::pfcPropagateOnePort(Context &ctx,
@@ -85,6 +99,7 @@ void Sim::flowArrivalOnePort(Context &ctx,
                              DirtyPort &dirty,
                              PortInbox &inbox,
                              PortTagList &tag_list,
+                             PortSourceTagList &source_tag_list,
                              PortCreateList &create_list,
                              PortTraceLast &trace)
 {
@@ -113,6 +128,9 @@ void Sim::flowArrivalOnePort(Context &ctx,
             FlowTagState &tag = ctx.get<FlowTagState>(existing);
             tag.in_bw = ev.in_bw;
             if (ev.is_source != 0) {
+                if (tag.is_source == 0) {
+                    appendPortSourceTag(source_tag_list, existing);
+                }
                 tag.is_source = 1;
                 tag.remaining = ev.size;
             }
@@ -235,7 +253,7 @@ void Sim::bwUpdateOnePort(Context &ctx,
 
             if (has_cleanup) {
                 int32_t next_port =
-                    lookupFlowRouteNext(ev.flow_id, ev.port_id);
+                    lookupFlowRouteNext(ctx, ev.flow_id, ev.port_id);
                 if (next_port >= 0) {
                     DelayedEvent cleanup_ev {};
                     cleanup_ev.t = computePropagationTimeForPort(
@@ -272,7 +290,7 @@ void Sim::bwUpdateOnePort(Context &ctx,
 
             if (create_list.num < MAX_PORT_CREATE) {
                 int32_t pri = 0;
-                const FlowDef *flow_def = getFlowDef(ev.flow_id);
+                const FlowDef *flow_def = getFlowDef(ctx, ev.flow_id);
                 if (flow_def != nullptr) {
                     pri = flow_def->priority;
                 }
@@ -323,12 +341,12 @@ void Sim::flushTagCreate(Context &ctx)
             continue;
         }
 
-        PortCreateList &cl = portCreateLists[port_id];
+        PortCreateList &cl = ctx.get<PortCreateList>(port_e);
         if (cl.num == 0) {
             continue;
         }
 
-        PortTraceLast &trace = portTraceLasts[port_id];
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
         for (int32_t i = 0; i < cl.num; i++) {
             const PortCreateReq &req = cl.reqs[i];
             Entity created = createTagOnPort(ctx, port_id, req.flow_id,
@@ -354,7 +372,7 @@ void Sim::flushTagCreate(Context &ctx)
 
             if (log_enabled && req.log_enabled != 0) {
                 const FlowTagState &tag = ctx.get<FlowTagState>(created);
-                int32_t dirty_flag = portDirtyStates[port_id].isDirty;
+                int32_t dirty_flag = ctx.get<DirtyPort>(port_e).isDirty;
                 if (req.from_arrival != 0) {
                     printSystemArrivalTag(step, now, req.log_label,
                         tag, dirty_flag);
@@ -377,9 +395,9 @@ void Sim::flushFlowCompletion(Context &ctx)
             continue;
         }
 
-        PortCompletionList &cl = portCompletionLists[port_id];
+        PortCompletionList &cl = ctx.get<PortCompletionList>(port_e);
         for (int32_t i = 0; i < cl.num; i++) {
-            recordFlowCompletion(cl.flow_ids[i], now);
+            recordFlowCompletion(ctx, cl.flow_ids[i], now);
         }
         cl.num = 0;
     }
@@ -402,7 +420,7 @@ void Sim::logIngressChain(Context &ctx)
                 continue;
             }
 
-            PortTraceLast &tr = portTraceLasts[port_id];
+            PortTraceLast &tr = ctx.get<PortTraceLast>(port_e);
             tr.arrival_created = 0;
             tr.arrival_updated = 0;
             tr.arrival_skipped = 0;
@@ -438,7 +456,7 @@ void Sim::logIngressChain(Context &ctx)
             continue;
         }
 
-        PortTraceLast &tr = portTraceLasts[port_id];
+        PortTraceLast &tr = ctx.get<PortTraceLast>(port_e);
         arr_c += tr.arrival_created;
         arr_u += tr.arrival_updated;
         arr_s += tr.arrival_skipped;

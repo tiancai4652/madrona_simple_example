@@ -13,18 +13,17 @@ namespace {
 
 inline int32_t tagLookupMask()
 {
-    return TAG_LOOKUP_CAPACITY - 1;
+    return MAX_PORT_TAG_LOOKUP - 1;
 }
 
 inline int32_t probeDistance(int32_t home_slot, int32_t slot)
 {
-    return (slot - home_slot + TAG_LOOKUP_CAPACITY) & tagLookupMask();
+    return (slot - home_slot + MAX_PORT_TAG_LOOKUP) & tagLookupMask();
 }
 
-inline int32_t hashTagLookupKey(int32_t port_id, FlowId flow_id)
+inline int32_t hashTagLookupKey(FlowId flow_id)
 {
-    uint64_t key =
-        (((uint64_t)(uint32_t)port_id) << 32) ^ (uint64_t)flow_id;
+    uint64_t key = (uint64_t)flow_id;
     key ^= key >> 33;
     key *= 0xff51afd7ed558ccdULL;
     key ^= key >> 33;
@@ -33,11 +32,36 @@ inline int32_t hashTagLookupKey(int32_t port_id, FlowId flow_id)
     return (int32_t)(key & (uint64_t)tagLookupMask());
 }
 
-inline bool tagLookupMatches(const TagLookupEntry &entry,
-                             int32_t port_id,
-                             FlowId flow_id)
+inline bool tagLookupMatches(const PortTagLookupEntry &entry, FlowId flow_id)
 {
-    return entry.port_id == port_id && entry.flow_id == flow_id;
+    return entry.flow_id == flow_id;
+}
+
+MADRONA_NO_INLINE void retireFlowMeta(Context &ctx,
+                                      Sim &sim,
+                                      FlowId,
+                                      Entity flow_entity)
+{
+    if (flow_entity == Entity::none()) {
+        return;
+    }
+
+    FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(flow_entity);
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
+    if (runtime.completed != 0) {
+        return;
+    }
+    if (runtime.route_active != 0 && counters.numFlowRoutes > 0) {
+        counters.numFlowRoutes -= 1;
+    }
+    if (counters.numFlowDefs > 0) {
+        counters.numFlowDefs -= 1;
+    }
+    runtime.source_tag_entity = Entity::none();
+    runtime.pending = 0;
+    runtime.active = 0;
+    runtime.completed = 1;
+    runtime.route_active = 0;
 }
 
 }
@@ -56,115 +80,53 @@ MADRONA_NO_INLINE int32_t Sim::flowLookupIndex(FlowId flow_id) const
     return (int32_t)lookup_idx;
 }
 
-MADRONA_NO_INLINE int32_t Sim::findSourceTagIndex(FlowId flow_id) const
+MADRONA_NO_INLINE Entity Sim::findFlowMetaEntity(Context &ctx,
+                                                 FlowId flow_id) const
 {
     int32_t lookup_idx = flowLookupIndex(flow_id);
     if (lookup_idx >= 0) {
-        int32_t slot = sourceTagSlotLookup[lookup_idx];
-        if (slot >= 0 && slot < numSourceTags &&
-            sourceTags[slot].flow_id == flow_id) {
-            return slot;
+        return flowMetaEntityLookup[lookup_idx];
+    }
+
+    if (network == nullptr) {
+        return Entity::none();
+    }
+
+    for (int32_t i = 0; i < network->numFlows; i++) {
+        Entity flow_entity = flowMetaEntities[i];
+        if (flow_entity == Entity::none()) {
+            continue;
+        }
+
+        const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
+        if (flow.id == flow_id) {
+            return flow_entity;
         }
     }
 
-    for (int32_t i = 0; i < numSourceTags; i++) {
-        if (sourceTags[i].flow_id == flow_id) {
-            return i;
-        }
-    }
-    return -1;
+    return Entity::none();
 }
 
-MADRONA_NO_INLINE int32_t Sim::findIngressTagIndex(
-    int32_t ingress_port_id, FlowId flow_id) const
+MADRONA_NO_INLINE const FlowDef *Sim::getFlowDef(Context &ctx,
+                                                 FlowId flow_id) const
 {
-    for (int32_t i = 0; i < numIngressTags; i++) {
-        if (ingressTags[i].ingress_port_id == ingress_port_id &&
-            ingressTags[i].flow_id == flow_id) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-MADRONA_NO_INLINE int32_t Sim::findFlowDefSlot(FlowId flow_id) const
-{
-    int32_t lookup_idx = flowLookupIndex(flow_id);
-    if (lookup_idx >= 0) {
-        int32_t slot = flowDefSlotLookup[lookup_idx];
-        if (slot >= 0 && slot < numFlowDefs &&
-            flowDefs[slot].id == flow_id) {
-            return slot;
-        }
-    }
-
-    for (int32_t i = 0; i < numFlowDefs; i++) {
-        if (flowDefs[i].id == flow_id) {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-MADRONA_NO_INLINE int32_t Sim::findFlowRouteSlot(FlowId flow_id) const
-{
-    int32_t lookup_idx = flowLookupIndex(flow_id);
-    if (lookup_idx >= 0) {
-        int32_t slot = flowRouteSlotLookup[lookup_idx];
-        if (slot >= 0 && slot < numFlowRoutes &&
-            flowRoutes[slot].flow_id == flow_id) {
-            return slot;
-        }
-    }
-
-    for (int32_t i = 0; i < numFlowRoutes; i++) {
-        if (flowRoutes[i].flow_id == flow_id) {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-MADRONA_NO_INLINE int32_t Sim::findFlowCompletionSlot(FlowId flow_id) const
-{
-    int32_t lookup_idx = flowLookupIndex(flow_id);
-    if (lookup_idx >= 0) {
-        int32_t slot = flowCompletionSlotLookup[lookup_idx];
-        if (slot >= 0 && slot < numFlowCompletions &&
-            flowCompletions[slot].flow_id == flow_id) {
-            return slot;
-        }
-    }
-
-    for (int32_t i = 0; i < numFlowCompletions; i++) {
-        if (flowCompletions[i].flow_id == flow_id) {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-MADRONA_NO_INLINE const FlowDef *Sim::getFlowDef(FlowId flow_id) const
-{
-    int32_t slot = findFlowDefSlot(flow_id);
-    if (slot < 0 || slot >= numFlowDefs) {
+    Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
+    if (flow_entity == Entity::none()) {
         return nullptr;
     }
 
-    return &flowDefs[slot];
+    return &ctx.get<FlowDef>(flow_entity);
 }
 
 MADRONA_NO_INLINE int32_t Sim::findTagLookupSlot(
-    int32_t port_id, FlowId flow_id) const
+    const PortTagLookup &lookup,
+    FlowId flow_id) const
 {
-    int32_t slot = hashTagLookupKey(port_id, flow_id);
+    int32_t slot = hashTagLookupKey(flow_id);
     int32_t start_slot = slot;
 
-    while (tagLookup[slot].port_id != -1) {
-        if (tagLookupMatches(tagLookup[slot], port_id, flow_id)) {
+    while (lookup.entries[slot].flow_id != -1) {
+        if (tagLookupMatches(lookup.entries[slot], flow_id)) {
             return slot;
         }
 
@@ -178,25 +140,25 @@ MADRONA_NO_INLINE int32_t Sim::findTagLookupSlot(
 }
 
 MADRONA_NO_INLINE void Sim::insertTagLookup(
-    int32_t port_id,
+    PortTagLookup &lookup,
     FlowId flow_id,
     Entity entity)
 {
-    int32_t slot = hashTagLookupKey(port_id, flow_id);
+    int32_t slot = hashTagLookupKey(flow_id);
 
-    while (tagLookup[slot].port_id != -1 &&
-           !tagLookupMatches(tagLookup[slot], port_id, flow_id)) {
+    while (lookup.entries[slot].flow_id != -1 &&
+           !tagLookupMatches(lookup.entries[slot], flow_id)) {
         slot = (slot + 1) & tagLookupMask();
     }
 
-    tagLookup[slot].port_id = port_id;
-    tagLookup[slot].flow_id = flow_id;
-    tagLookup[slot].entity = entity;
+    lookup.entries[slot].flow_id = flow_id;
+    lookup.entries[slot].entity = entity;
 }
 
-MADRONA_NO_INLINE void Sim::removeTagLookup(int32_t port_id, FlowId flow_id)
+MADRONA_NO_INLINE void Sim::removeTagLookup(PortTagLookup &lookup,
+                                            FlowId flow_id)
 {
-    int32_t slot = findTagLookupSlot(port_id, flow_id);
+    int32_t slot = findTagLookupSlot(lookup, flow_id);
     if (slot < 0) {
         return;
     }
@@ -204,17 +166,16 @@ MADRONA_NO_INLINE void Sim::removeTagLookup(int32_t port_id, FlowId flow_id)
     int32_t hole = slot;
     int32_t next = (hole + 1) & tagLookupMask();
 
-    while (tagLookup[next].port_id != -1) {
-        int32_t home =
-            hashTagLookupKey(tagLookup[next].port_id, tagLookup[next].flow_id);
+    while (lookup.entries[next].flow_id != -1) {
+        int32_t home = hashTagLookupKey(lookup.entries[next].flow_id);
         if (probeDistance(home, next) > probeDistance(home, hole)) {
-            tagLookup[hole] = tagLookup[next];
+            lookup.entries[hole] = lookup.entries[next];
             hole = next;
         }
         next = (next + 1) & tagLookupMask();
     }
 
-    tagLookup[hole] = TagLookupEntry {};
+    lookup.entries[hole] = PortTagLookupEntry {};
 }
 
 MADRONA_NO_INLINE Entity Sim::findTag(
@@ -224,9 +185,15 @@ MADRONA_NO_INLINE Entity Sim::findTag(
         return Entity::none();
     }
 
-    int32_t slot = findTagLookupSlot(port_id, flow_id);
+    Entity port_e = portEntities[port_id];
+    if (port_e == Entity::none()) {
+        return Entity::none();
+    }
+
+    const PortTagLookup &lookup = ctx.get<PortTagLookup>(port_e);
+    int32_t slot = findTagLookupSlot(lookup, flow_id);
     if (slot >= 0) {
-        Entity tag_e = tagLookup[slot].entity;
+        Entity tag_e = lookup.entries[slot].entity;
         if (tag_e != Entity::none()) {
             const FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
             if (tag.port_id == port_id && tag.flow_id == flow_id) {
@@ -235,7 +202,7 @@ MADRONA_NO_INLINE Entity Sim::findTag(
         }
     }
 
-    const PortTagList &ptl = portTagLists[port_id];
+    const PortTagList &ptl = ctx.get<PortTagList>(port_e);
     for (int32_t i = 0; i < ptl.count; i++) {
         Entity tag_e = ptl.tags[i];
         if (tag_e == Entity::none()) {
@@ -251,97 +218,43 @@ MADRONA_NO_INLINE Entity Sim::findTag(
     return Entity::none();
 }
 
-MADRONA_NO_INLINE void Sim::removeFlowDef(FlowId flow_id)
-{
-    int32_t slot = findFlowDefSlot(flow_id);
-    if (slot < 0 || slot >= numFlowDefs) {
-        return;
-    }
-
-    int32_t lookup_idx = flowLookupIndex(flow_id);
-    if (lookup_idx >= 0) {
-        flowDefSlotLookup[lookup_idx] = -1;
-    }
-
-    int32_t last_slot = numFlowDefs - 1;
-    if (slot != last_slot) {
-        flowDefs[slot] = flowDefs[last_slot];
-        int32_t moved_lookup_idx = flowLookupIndex(flowDefs[slot].id);
-        if (moved_lookup_idx >= 0) {
-            flowDefSlotLookup[moved_lookup_idx] = slot;
-        }
-    }
-    numFlowDefs = last_slot;
-    flowDefs[last_slot] = FlowDef {};
-}
-
-MADRONA_NO_INLINE void Sim::removeFlowRoute(FlowId flow_id)
-{
-    int32_t slot = findFlowRouteSlot(flow_id);
-    if (slot < 0 || slot >= numFlowRoutes) {
-        return;
-    }
-
-    int32_t lookup_idx = flowLookupIndex(flow_id);
-    if (lookup_idx >= 0) {
-        flowRouteSlotLookup[lookup_idx] = -1;
-    }
-
-    int32_t last_slot = numFlowRoutes - 1;
-    if (slot != last_slot) {
-        flowRoutes[slot] = flowRoutes[last_slot];
-        int32_t moved_lookup_idx = flowLookupIndex(flowRoutes[slot].flow_id);
-        if (moved_lookup_idx >= 0) {
-            flowRouteSlotLookup[moved_lookup_idx] = slot;
-        }
-    }
-    numFlowRoutes = last_slot;
-    flowRoutes[last_slot] = FlowRouteState {};
-}
-
 MADRONA_NO_INLINE void Sim::recordFlowCompletion(
-    FlowId flow_id, Time end_time)
+    Context &ctx, FlowId flow_id, Time end_time)
 {
-    int32_t slot = findFlowCompletionSlot(flow_id);
-    if (slot >= 0 && slot < numFlowCompletions) {
-        if (end_time > flowCompletions[slot].record.end_time) {
-            flowCompletions[slot].record.end_time = end_time;
+    Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
+    if (flow_entity == Entity::none()) {
+        return;
+    }
+
+    const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
+    FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(flow_entity);
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
+
+    if (runtime.completed != 0) {
+        if (end_time > runtime.completion_record.end_time) {
+            runtime.completion_record.end_time = end_time;
         }
-        removeFlowRoute(flow_id);
-        removeFlowDef(flow_id);
         return;
     }
 
-    if (numFlowCompletions >= MAX_FLOW_COMPLETIONS) {
-        removeFlowRoute(flow_id);
-        removeFlowDef(flow_id);
+    if (counters.numFlowCompletions < MAX_FLOW_COMPLETIONS) {
+        counters.numFlowCompletions += 1;
+    } else {
+        retireFlowMeta(ctx, *this, flow_id, flow_entity);
         return;
     }
 
-    const FlowDef *flow = getFlowDef(flow_id);
-    if (flow != nullptr) {
-        slot = numFlowCompletions++;
-        FlowCompletionEntry &entry = flowCompletions[slot];
-        entry.flow_id = flow_id;
-        entry.record = FlowCompletionRecord {
-            .flow_id = flow_id,
-            .src_node = flow->src_node,
-            .dst_node = flow->dst_node,
-            .size = flow->size,
-            .start_time = flow->start_time,
-            .end_time = end_time,
-            .priority = flow->priority,
-        };
-        int32_t lookup_idx = flowLookupIndex(flow_id);
-        if (lookup_idx >= 0) {
-            flowCompletionSlotLookup[lookup_idx] = slot;
-        }
-        removeFlowRoute(flow_id);
-        removeFlowDef(flow_id);
-        return;
-    }
+    runtime.completion_record = FlowCompletionRecord {
+        .flow_id = flow_id,
+        .src_node = flow.src_node,
+        .dst_node = flow.dst_node,
+        .size = flow.size,
+        .start_time = flow.start_time,
+        .end_time = end_time,
+        .priority = flow.priority,
+    };
 
-    removeFlowRoute(flow_id);
+    retireFlowMeta(ctx, *this, flow_id, flow_entity);
 }
 
 }
