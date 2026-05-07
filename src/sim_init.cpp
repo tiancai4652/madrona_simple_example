@@ -53,6 +53,20 @@ void Sim::loadFlow(Engine &ctx)
         .numFlowCompletions = 0,
     };
 
+    ctx.singleton<SimRuntimeState>() = SimRuntimeState {
+        .numDelayedEvents = 0,
+        .numActiveTags = 0,
+        .numSourceTags = 0,
+        .cachedDrainPortID = -1,
+        .cachedNextDelayedGap = timerInactiveSentinel(),
+        .cachedNextBacklogGap = timerInactiveSentinel(),
+        .cachedNextPfcPauseGap = timerInactiveSentinel(),
+        .cachedNextPfcResumeGap = timerInactiveSentinel(),
+        .cachedNextDrainTime = timerInactiveSentinel(),
+        .cachedNextFinishTime = timerInactiveSentinel(),
+        .nextDT = 0.0,
+    };
+
     for (int32_t i = 0; i < flow_count; i++) {
         const FlowDef &flow = network->flows[i];
         if (i > 0 && flow.start_time < network->flows[i - 1].start_time) {

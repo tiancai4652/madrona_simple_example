@@ -354,10 +354,11 @@ MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
     (void)driver;
     closeHostStepPhase(ctx, StepPhaseID::PfcEmit);
     Sim &sim = ctx.data();
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.snapshotDirtyPorts(ctx);
-    sim.nextDT = sim.chooseDT(ctx);
-    if (sim.nextDT < 1e-9) {
-        sim.nextDT = 0.001;
+    runtime.nextDT = sim.chooseDT(ctx);
+    if (runtime.nextDT < 1e-9) {
+        runtime.nextDT = 0.001;
     }
 }
 
@@ -378,7 +379,8 @@ MADRONA_NO_INLINE void advanceOnePortBufferStepSystem(
     PortTagList &tag_list)
 {
     Sim &sim = ctx.data();
-    sim.advanceOnePortBuffer(ctx, port_state.port_id, sim.nextDT,
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    sim.advanceOnePortBuffer(ctx, port_state.port_id, runtime.nextDT,
         port_state, port_buf, dirty, pfc_state, timers, cleanup, trace,
         tag_list);
 }
@@ -394,7 +396,9 @@ MADRONA_NO_INLINE void progressFinishedSourcesOnePortStepSystem(
     PortOutbox &outbox)
 {
     Sim &sim = ctx.data();
-    sim.progressFinishedSourcesOnePort(ctx, sim.nextDT, sim.now + sim.nextDT,
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    sim.progressFinishedSourcesOnePort(ctx, runtime.nextDT,
+        sim.now + runtime.nextDT,
         port_state.port_id, port_state, tag_list, source_tag_list, hints,
         finished_list, trace, outbox);
 }
@@ -403,21 +407,22 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
 {
     closeHostStepPhase(ctx, StepPhaseID::ClearDT);
     Sim &sim = ctx.data();
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.flushBufferTagCleanup(ctx);
     if (sim.traceModeEnabled()) {
         sim.logBufferTraces(ctx);
     }
-    sim.flowProgressAndCleanupSystem(ctx, sim.nextDT);
-    sim.now += sim.nextDT;
+    sim.flowProgressAndCleanupSystem(ctx, runtime.nextDT);
+    sim.now += runtime.nextDT;
     SimStats &stats = ctx.singleton<SimStats>();
     const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
     FlowCompletionBuf &buf = ctx.singleton<FlowCompletionBuf>();
     stats.simulationTime = sim.now;
     stats.numFlowDefs = flow_counters.numFlowDefs;
     stats.numPendingFlows = flow_counters.numPendingFlows;
-    stats.numDelayedEvents = sim.numDelayedEvents;
-    stats.numActiveTags = sim.numTagIndexEntries;
-    stats.numSourceTags = sim.numSourceTags;
+    stats.numDelayedEvents = runtime.numDelayedEvents;
+    stats.numActiveTags = runtime.numActiveTags;
+    stats.numSourceTags = runtime.numSourceTags;
     stats.numFlowCompletions = flow_counters.numFlowCompletions;
     stats.lastTick = driver.tick;
 
@@ -433,12 +438,12 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
             if (flow_entity == Entity::none()) {
                 continue;
             }
-            const FlowRuntimeState &runtime =
+            const FlowRuntimeState &flow_runtime =
                 ctx.get<FlowRuntimeState>(flow_entity);
-            if (runtime.completed == 0) {
+            if (flow_runtime.completed == 0) {
                 continue;
             }
-            buf.records[out_idx++] = runtime.completion_record;
+            buf.records[out_idx++] = flow_runtime.completion_record;
         }
     }
     for (int32_t i = out_idx; i < MAX_FLOW_COMPLETIONS; i++) {

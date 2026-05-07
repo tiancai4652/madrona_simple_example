@@ -321,6 +321,7 @@ inline void compactPortDelayedQueue(PortDelayedQueue &queue)
 MADRONA_NO_INLINE void Sim::pushDelayedEvent(Context &ctx,
                                              const DelayedEvent &ev)
 {
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     int32_t target_port = delayedEventTargetPort(ev);
     if (target_port < 0 || target_port >= numPorts) {
         return;
@@ -352,7 +353,7 @@ MADRONA_NO_INLINE void Sim::pushDelayedEvent(Context &ctx,
         idx -= 1;
     }
 
-    numDelayedEvents += 1;
+    runtime.numDelayedEvents += 1;
 }
 
 MADRONA_NO_INLINE void Sim::pushDelayedEventsBatch(
@@ -417,24 +418,13 @@ Time Sim::chooseDT(Context &ctx) const
     double backlog_gap = std::numeric_limits<double>::max();
     double pfc_pause_gap = std::numeric_limits<double>::max();
     double pfc_resume_gap = std::numeric_limits<double>::max();
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
 
-    if (numDelayedEvents > 0) {
-        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            Entity port_e = portEntities[port_id];
-            if (port_e == Entity::none()) {
-                continue;
-            }
-            const PortDelayedQueue &queue = ctx.get<PortDelayedQueue>(port_e);
-            if (queue.count <= 0) {
-                continue;
-            }
-
-            Time gap = queue.events[queue.head].t - now;
-            if (gap > 1e-15) {
-                delayed_gap = std::min(delayed_gap, (double)gap);
-                dt_event = std::min(dt_event, gap);
-            }
-        }
+    if (runtime.numDelayedEvents > 0 &&
+        runtime.cachedNextDelayedGap > 1e-15 &&
+        runtime.cachedNextDelayedGap < timerInactiveSentinel()) {
+        delayed_gap = runtime.cachedNextDelayedGap;
+        dt_event = std::min(dt_event, runtime.cachedNextDelayedGap);
     }
 
     const FlowCounters &counters = ctx.singleton<FlowCounters>();
@@ -454,60 +444,35 @@ Time Sim::chooseDT(Context &ctx) const
         }
     }
 
-    if (cachedNextFinishTime > 1e-15 &&
-        cachedNextFinishTime < timerInactiveSentinel()) {
-        finish_gap = cachedNextFinishTime;
-        dt_event = std::min(dt_event, cachedNextFinishTime);
+    if (runtime.cachedNextFinishTime > 1e-15 &&
+        runtime.cachedNextFinishTime < timerInactiveSentinel()) {
+        finish_gap = runtime.cachedNextFinishTime;
+        dt_event = std::min(dt_event, runtime.cachedNextFinishTime);
     }
 
-    if (enableBuffer != 0 && cachedNextDrainTime > 1e-15 &&
-        cachedNextDrainTime < timerInactiveSentinel()) {
-        drain_gap = cachedNextDrainTime;
-        dt_event = std::min(dt_event, cachedNextDrainTime);
+    if (enableBuffer != 0 && runtime.cachedNextDrainTime > 1e-15 &&
+        runtime.cachedNextDrainTime < timerInactiveSentinel()) {
+        drain_gap = runtime.cachedNextDrainTime;
+        dt_event = std::min(dt_event, runtime.cachedNextDrainTime);
     }
 
-    if (enableBuffer != 0) {
-        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            Entity port_e = portEntities[port_id];
-            if (port_e == Entity::none()) {
-                continue;
-            }
-            Time backlog_drain = ctx.get<PortTimers>(port_e).backlog_drain;
-            if (backlog_drain > 1e-15 &&
-                timerIsActive(backlog_drain)) {
-                backlog_gap = std::min(backlog_gap,
-                    (double)backlog_drain);
-                dt_event = std::min(dt_event, backlog_drain);
-            }
-        }
+    if (enableBuffer != 0 &&
+        runtime.cachedNextBacklogGap > 1e-15 &&
+        runtime.cachedNextBacklogGap < timerInactiveSentinel()) {
+        backlog_gap = runtime.cachedNextBacklogGap;
+        dt_event = std::min(dt_event, runtime.cachedNextBacklogGap);
     }
 
     if (enablePfc != 0) {
-        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            Entity port_e = portEntities[port_id];
-            if (port_e == Entity::none()) {
-                continue;
-            }
-            Time pfc_pause = ctx.get<PortTimers>(port_e).pfc_pause;
-            if (pfc_pause > 1e-9 &&
-                timerIsActive(pfc_pause)) {
-                pfc_pause_gap = std::min(pfc_pause_gap,
-                    (double)pfc_pause);
-                dt_event = std::min(dt_event, pfc_pause);
-            }
+        if (runtime.cachedNextPfcPauseGap > 1e-9 &&
+            runtime.cachedNextPfcPauseGap < timerInactiveSentinel()) {
+            pfc_pause_gap = runtime.cachedNextPfcPauseGap;
+            dt_event = std::min(dt_event, runtime.cachedNextPfcPauseGap);
         }
-        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-            Entity port_e = portEntities[port_id];
-            if (port_e == Entity::none()) {
-                continue;
-            }
-            Time pfc_resume = ctx.get<PortTimers>(port_e).pfc_resume;
-            if (pfc_resume > 1e-9 &&
-                timerIsActive(pfc_resume)) {
-                pfc_resume_gap = std::min(pfc_resume_gap,
-                    (double)pfc_resume);
-                dt_event = std::min(dt_event, pfc_resume);
-            }
+        if (runtime.cachedNextPfcResumeGap > 1e-9 &&
+            runtime.cachedNextPfcResumeGap < timerInactiveSentinel()) {
+            pfc_resume_gap = runtime.cachedNextPfcResumeGap;
+            dt_event = std::min(dt_event, runtime.cachedNextPfcResumeGap);
         }
     }
 

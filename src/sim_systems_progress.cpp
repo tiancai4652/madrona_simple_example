@@ -400,6 +400,7 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
 
     flushPortOutbox(ctx);
     const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
 
     Time next_finish = timerInactiveSentinel();
     for (int32_t i = 0; i < numPorts; i++) {
@@ -440,15 +441,15 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
             next_finish = hints.active_finish_t;
         }
     }
-    cachedNextFinishTime = next_finish;
+    runtime.cachedNextFinishTime = next_finish;
 
     progressBacklogDrainTimers(ctx, dt);
     progressPfcTimers(ctx, dt);
 
     bool all_exhausted =
-        cachedNextDrainTime >= timerInactiveSentinel() &&
-        cachedNextFinishTime >= timerInactiveSentinel() &&
-        numDelayedEvents == 0 &&
+        runtime.cachedNextDrainTime >= timerInactiveSentinel() &&
+        runtime.cachedNextFinishTime >= timerInactiveSentinel() &&
+        runtime.numDelayedEvents == 0 &&
         flow_counters.numPendingFlows == 0 &&
         !hasActiveBacklogDrainTimers(ctx) &&
         !hasActivePfcPauseTimers(ctx) &&
@@ -474,8 +475,8 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
             source_scan_count += trace.progress_source_scan_count;
         }
         double next_finish_gap =
-            cachedNextFinishTime < timerInactiveSentinel() ?
-            cachedNextFinishTime :
+            runtime.cachedNextFinishTime < timerInactiveSentinel() ?
+            runtime.cachedNextFinishTime :
             std::numeric_limits<double>::max();
         printSystemProgressSummary(step, now, dt, finished_source_count,
             emitted_cleanup_count, source_scan_count, source_destroy_count,

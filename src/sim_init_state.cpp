@@ -18,9 +18,6 @@ void Sim::resetNetworkState()
     numPorts = 0;
     flowLookupBase = 0;
     flowLookupSpan = 0;
-    numDelayedEvents = 0;
-    numTagIndexEntries = 0;
-    numSourceTags = 0;
     enableBuffer = 1;
     enablePfc = 0;
     pfcEgress = 0;
@@ -30,10 +27,6 @@ void Sim::resetNetworkState()
     pfcXonThreshold = 0.5e9;
     dtMin = 0.0;
     qosMode = 0;
-    cachedNextDrainTime = timerInactiveSentinel();
-    cachedDrainPortID = -1;
-    cachedNextFinishTime = timerInactiveSentinel();
-    nextDT = 0.0;
     systemLogStep = 0;
 
     for (int32_t i = 0; i < PFC_MAX_PRIORITY; i++) {

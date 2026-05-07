@@ -134,6 +134,24 @@ struct FlowCounters {
     int32_t numFlowCompletions = 0;
 };
 
+// Step-level mutable scheduler/cache state and entity counters that were
+// previously stored directly on Sim. Keeping them in an ECS singleton makes
+// the remaining world-global writes explicit and prepares later fan-out of
+// schedule / buffer / progress logic away from the Sim object itself.
+struct SimRuntimeState {
+    int32_t numDelayedEvents = 0;
+    int32_t numActiveTags = 0;
+    int32_t numSourceTags = 0;
+    int32_t cachedDrainPortID = -1;
+    double cachedNextDelayedGap = 0.0;
+    double cachedNextBacklogGap = 0.0;
+    double cachedNextPfcPauseGap = 0.0;
+    double cachedNextPfcResumeGap = 0.0;
+    double cachedNextDrainTime = 0.0;
+    double cachedNextFinishTime = 0.0;
+    double nextDT = 0.0;
+};
+
 enum class StepPhaseID : uint32_t {
     Schedule = 0,
     Deliver,

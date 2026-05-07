@@ -110,8 +110,9 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
         }
     }
 
-    if (numTagIndexEntries > 0) {
-        numTagIndexEntries -= 1;
+    SimRuntimeState &runtime_state = ctx.singleton<SimRuntimeState>();
+    if (runtime_state.numActiveTags > 0) {
+        runtime_state.numActiveTags -= 1;
     }
 
     if (tag.port_entity != Entity::none()) {
@@ -166,8 +167,8 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
                 runtime.source_tag_entity = Entity::none();
             }
         }
-        if (numSourceTags > 0) {
-            numSourceTags -= 1;
+        if (runtime_state.numSourceTags > 0) {
+            runtime_state.numSourceTags -= 1;
         }
     }
 
@@ -239,7 +240,8 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
     ctx.get<FlowTagProgress>(tag_entity) = FlowTagProgress {};
     insertTagLookup(ctx.get<PortTagLookup>(port_entity), flow_id, tag_entity);
 
-    numTagIndexEntries += 1;
+    SimRuntimeState &runtime_state = ctx.singleton<SimRuntimeState>();
+    runtime_state.numActiveTags += 1;
 
     {
         PortTagList &ptl = ctx.get<PortTagList>(port_entity);
@@ -266,7 +268,7 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
     }
 
     if (is_source) {
-        numSourceTags += 1;
+        runtime_state.numSourceTags += 1;
         Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
         if (flow_entity != Entity::none()) {
             ctx.get<FlowRuntimeState>(flow_entity).source_tag_entity =

@@ -148,6 +148,7 @@ void Sim::advanceOnePortBuffer(
     PortTraceLast &trace,
     PortTagList &tag_list)
 {
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     cleanup.num = 0;
     bool keep_trace = traceModeEnabled();
     if (keep_trace) {
@@ -164,9 +165,9 @@ void Sim::advanceOnePortBuffer(
 
     bool should_process = trace.was_dirty_at_clear != 0;
     if (!should_process
-        && cachedDrainPortID == port_id
-        && cachedNextDrainTime < timerInactiveSentinel()
-        && cachedNextDrainTime <= dt + 1e-12) {
+        && runtime.cachedDrainPortID == port_id
+        && runtime.cachedNextDrainTime < timerInactiveSentinel()
+        && runtime.cachedNextDrainTime <= dt + 1e-12) {
         should_process = true;
     }
     if (!should_process
@@ -518,7 +519,8 @@ void Sim::advanceOnePortBuffer(
 // reconstruct the same timestamp here.
 void Sim::flushBufferTagCleanup(Context &ctx)
 {
-    Time frame_end = now + nextDT;
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    Time frame_end = now + runtime.nextDT;
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];

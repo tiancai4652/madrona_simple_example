@@ -96,11 +96,12 @@ void Sim::deliverEventsOnePort(Context &ctx,
 void Sim::finishDeliverEvents(Context &ctx)
 {
     (void)ctx;
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
     bool log_enabled =
         traceModeEnabled() && compiledSystemLogEnabled(scope, step);
-    int32_t delayed_before = numDelayedEvents;
+    int32_t delayed_before = runtime.numDelayedEvents;
     int32_t delayed_after = 0;
     int32_t inbox_arrival_count = 0;
     int32_t inbox_bwupdate_count = 0;
@@ -119,7 +120,7 @@ void Sim::finishDeliverEvents(Context &ctx)
         inbox_pfc_count += trace.deliver_pfc_count;
     }
 
-    numDelayedEvents = delayed_after;
+    runtime.numDelayedEvents = delayed_after;
 
     if (log_enabled) {
         printSystemDeliverSummary(step, now,
@@ -134,11 +135,16 @@ void Sim::finishDeliverEvents(Context &ctx)
 
 void Sim::snapshotDirtyPorts(Context &ctx)
 {
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     constexpr const char *scope = "emit_pfc";
     uint64_t step = systemLogStep;
     bool log_enabled =
         traceModeEnabled() && compiledSystemLogEnabled(scope, step);
     int32_t cleared_port_count = 0;
+    runtime.cachedNextDelayedGap = timerInactiveSentinel();
+    runtime.cachedNextBacklogGap = timerInactiveSentinel();
+    runtime.cachedNextPfcPauseGap = timerInactiveSentinel();
+    runtime.cachedNextPfcResumeGap = timerInactiveSentinel();
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
@@ -149,6 +155,35 @@ void Sim::snapshotDirtyPorts(Context &ctx)
         if (trace.was_dirty_at_clear != 0) {
             cleared_port_count += 1;
         }
+
+        const PortDelayedQueue &queue = ctx.get<PortDelayedQueue>(port_e);
+        if (queue.count > 0) {
+            Time gap = queue.events[queue.head].t - now;
+            if (gap > 1e-15 && gap < runtime.cachedNextDelayedGap) {
+                runtime.cachedNextDelayedGap = gap;
+            }
+        }
+
+        const PortTimers &timers = ctx.get<PortTimers>(port_e);
+        if (timers.backlog_drain > 1e-15 &&
+            timerIsActive(timers.backlog_drain) &&
+            timers.backlog_drain < runtime.cachedNextBacklogGap) {
+            runtime.cachedNextBacklogGap = timers.backlog_drain;
+        }
+
+        if (enablePfc != 0) {
+            if (timers.pfc_pause > 1e-9 &&
+                timerIsActive(timers.pfc_pause) &&
+                timers.pfc_pause < runtime.cachedNextPfcPauseGap) {
+                runtime.cachedNextPfcPauseGap = timers.pfc_pause;
+            }
+
+            if (timers.pfc_resume > 1e-9 &&
+                timerIsActive(timers.pfc_resume) &&
+                timers.pfc_resume < runtime.cachedNextPfcResumeGap) {
+                runtime.cachedNextPfcResumeGap = timers.pfc_resume;
+            }
+        }
     }
 
     if (log_enabled) {
@@ -158,10 +193,11 @@ void Sim::snapshotDirtyPorts(Context &ctx)
 
 void Sim::reducePortCachedHints(Context &ctx)
 {
-    (void)ctx;
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     bool reset_drain = false;
-    if (cachedDrainPortID >= 0 && cachedDrainPortID < numPorts) {
-        Entity cached_port_e = portEntities[cachedDrainPortID];
+    if (runtime.cachedDrainPortID >= 0 &&
+        runtime.cachedDrainPortID < numPorts) {
+        Entity cached_port_e = portEntities[runtime.cachedDrainPortID];
         if (cached_port_e != Entity::none()) {
             if (ctx.get<PortTraceLast>(
                     cached_port_e).was_dirty_at_alloc != 0) {
@@ -170,11 +206,11 @@ void Sim::reducePortCachedHints(Context &ctx)
         }
     }
     if (reset_drain) {
-        cachedNextDrainTime = std::numeric_limits<Time>::max();
-        cachedDrainPortID = -1;
+        runtime.cachedNextDrainTime = std::numeric_limits<Time>::max();
+        runtime.cachedDrainPortID = -1;
     }
 
-    cachedNextFinishTime = timerInactiveSentinel();
+    runtime.cachedNextFinishTime = timerInactiveSentinel();
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
@@ -193,14 +229,14 @@ void Sim::reducePortCachedHints(Context &ctx)
             }
         }
         if (hints.has_drain_hint != 0) {
-            if (hints.drain_hint_t < cachedNextDrainTime) {
-                cachedNextDrainTime = hints.drain_hint_t;
-                cachedDrainPortID = port_id;
+            if (hints.drain_hint_t < runtime.cachedNextDrainTime) {
+                runtime.cachedNextDrainTime = hints.drain_hint_t;
+                runtime.cachedDrainPortID = port_id;
             }
         }
         if (hints.has_active_finish != 0) {
-            if (hints.active_finish_t < cachedNextFinishTime) {
-                cachedNextFinishTime = hints.active_finish_t;
+            if (hints.active_finish_t < runtime.cachedNextFinishTime) {
+                runtime.cachedNextFinishTime = hints.active_finish_t;
             }
         }
     }

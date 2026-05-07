@@ -60,6 +60,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
 
     registry.registerSingleton<SimStats>();
     registry.registerSingleton<FlowCounters>();
+    registry.registerSingleton<SimRuntimeState>();
     registry.registerSingleton<FlowCompletionBuf>();
     registry.registerSingleton<StepPhaseTimes>();
 
@@ -139,12 +140,13 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     // identical initial state.
     SimStats &init_stats = ctx.singleton<SimStats>();
     const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
+    const SimRuntimeState &runtime_state = ctx.singleton<SimRuntimeState>();
     init_stats.simulationTime = now;
     init_stats.numFlowDefs = flow_counters.numFlowDefs;
     init_stats.numPendingFlows = flow_counters.numPendingFlows;
-    init_stats.numDelayedEvents = numDelayedEvents;
-    init_stats.numActiveTags = numTagIndexEntries;
-    init_stats.numSourceTags = numSourceTags;
+    init_stats.numDelayedEvents = runtime_state.numDelayedEvents;
+    init_stats.numActiveTags = runtime_state.numActiveTags;
+    init_stats.numSourceTags = runtime_state.numSourceTags;
     init_stats.numFlowCompletions = flow_counters.numFlowCompletions;
 
     FlowCompletionBuf &init_buf = ctx.singleton<FlowCompletionBuf>();

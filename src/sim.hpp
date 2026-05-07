@@ -494,9 +494,6 @@ struct Sim : public madrona::WorldBase {
     madrona::Entity flowMetaEntityLookup[MAX_FLOWS];
     madrona::Entity flowMetaEntities[MAX_FLOWS];
 
-    int32_t numDelayedEvents;
-    int32_t numTagIndexEntries;
-    int32_t numSourceTags;
     int32_t enableBuffer;
     int32_t enablePfc;
     int32_t pfcEgress;
@@ -508,10 +505,6 @@ struct Sim : public madrona::WorldBase {
     double dtMin;
     int32_t qosMode;
     double priorWeights[PFC_MAX_PRIORITY];
-    Time cachedNextDrainTime;
-    int32_t cachedDrainPortID;
-    Time cachedNextFinishTime;
-    Time nextDT;
     uint64_t systemLogStep;
 };
 
