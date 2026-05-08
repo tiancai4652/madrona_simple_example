@@ -133,6 +133,50 @@ void Sim::finishDeliverEvents(Context &ctx)
     }
 }
 
+MADRONA_NO_INLINE void Sim::snapshotDirtyOnePort(
+    int32_t,
+    const PortDelayedQueue &queue,
+    const PortTimers &timers,
+    PortTraceLast &trace) const
+{
+    trace.clear_has_delayed_gap = 0;
+    trace.clear_delayed_gap = 0.0;
+    trace.clear_has_backlog_gap = 0;
+    trace.clear_backlog_gap = 0.0;
+    trace.clear_has_pfc_pause_gap = 0;
+    trace.clear_pfc_pause_gap = 0.0;
+    trace.clear_has_pfc_resume_gap = 0;
+    trace.clear_pfc_resume_gap = 0.0;
+
+    if (queue.count > 0) {
+        Time gap = queue.events[queue.head].t - now;
+        if (gap > 1e-15) {
+            trace.clear_has_delayed_gap = 1;
+            trace.clear_delayed_gap = gap;
+        }
+    }
+
+    if (timers.backlog_drain > 1e-15 &&
+        timerIsActive(timers.backlog_drain)) {
+        trace.clear_has_backlog_gap = 1;
+        trace.clear_backlog_gap = timers.backlog_drain;
+    }
+
+    if (enablePfc != 0) {
+        if (timers.pfc_pause > 1e-9 &&
+            timerIsActive(timers.pfc_pause)) {
+            trace.clear_has_pfc_pause_gap = 1;
+            trace.clear_pfc_pause_gap = timers.pfc_pause;
+        }
+
+        if (timers.pfc_resume > 1e-9 &&
+            timerIsActive(timers.pfc_resume)) {
+            trace.clear_has_pfc_resume_gap = 1;
+            trace.clear_pfc_resume_gap = timers.pfc_resume;
+        }
+    }
+}
+
 void Sim::snapshotDirtyPorts(Context &ctx)
 {
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
@@ -156,32 +200,26 @@ void Sim::snapshotDirtyPorts(Context &ctx)
             cleared_port_count += 1;
         }
 
-        const PortDelayedQueue &queue = ctx.get<PortDelayedQueue>(port_e);
-        if (queue.count > 0) {
-            Time gap = queue.events[queue.head].t - now;
-            if (gap > 1e-15 && gap < runtime.cachedNextDelayedGap) {
-                runtime.cachedNextDelayedGap = gap;
-            }
+        if (trace.clear_has_delayed_gap != 0 &&
+            trace.clear_delayed_gap < runtime.cachedNextDelayedGap) {
+            runtime.cachedNextDelayedGap = trace.clear_delayed_gap;
         }
 
-        const PortTimers &timers = ctx.get<PortTimers>(port_e);
-        if (timers.backlog_drain > 1e-15 &&
-            timerIsActive(timers.backlog_drain) &&
-            timers.backlog_drain < runtime.cachedNextBacklogGap) {
-            runtime.cachedNextBacklogGap = timers.backlog_drain;
+        if (trace.clear_has_backlog_gap != 0 &&
+            trace.clear_backlog_gap < runtime.cachedNextBacklogGap) {
+            runtime.cachedNextBacklogGap = trace.clear_backlog_gap;
         }
 
         if (enablePfc != 0) {
-            if (timers.pfc_pause > 1e-9 &&
-                timerIsActive(timers.pfc_pause) &&
-                timers.pfc_pause < runtime.cachedNextPfcPauseGap) {
-                runtime.cachedNextPfcPauseGap = timers.pfc_pause;
+            if (trace.clear_has_pfc_pause_gap != 0 &&
+                trace.clear_pfc_pause_gap < runtime.cachedNextPfcPauseGap) {
+                runtime.cachedNextPfcPauseGap = trace.clear_pfc_pause_gap;
             }
 
-            if (timers.pfc_resume > 1e-9 &&
-                timerIsActive(timers.pfc_resume) &&
-                timers.pfc_resume < runtime.cachedNextPfcResumeGap) {
-                runtime.cachedNextPfcResumeGap = timers.pfc_resume;
+            if (trace.clear_has_pfc_resume_gap != 0 &&
+                trace.clear_pfc_resume_gap < runtime.cachedNextPfcResumeGap) {
+                runtime.cachedNextPfcResumeGap =
+                    trace.clear_pfc_resume_gap;
             }
         }
     }

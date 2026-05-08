@@ -110,11 +110,6 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
         }
     }
 
-    SimRuntimeState &runtime_state = ctx.singleton<SimRuntimeState>();
-    if (runtime_state.numActiveTags > 0) {
-        runtime_state.numActiveTags -= 1;
-    }
-
     if (tag.port_entity != Entity::none()) {
         int32_t port_id = tag.port_id;
         if (port_id >= 0 && port_id < numPorts) {
@@ -139,6 +134,13 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
                 ctx.get<PortCachedHints>(tag.port_entity).active_finish_t =
                     timerInactiveSentinel();
             }
+
+            PortTagPool &pool = ctx.get<PortTagPool>(tag.port_entity);
+            if (pool.free_count < MAX_TAGS_PER_PORT) {
+                ctx.get<FlowTagState>(tag_entity) = FlowTagState {};
+                ctx.get<FlowTagProgress>(tag_entity) = FlowTagProgress {};
+                pool.free_tags[pool.free_count++] = tag_entity;
+            }
         }
     }
 
@@ -158,20 +160,6 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
         }
     }
 
-    if (tag.is_source != 0) {
-        Entity flow_entity = findFlowMetaEntity(ctx, tag.flow_id);
-        if (flow_entity != Entity::none()) {
-            FlowRuntimeState &runtime =
-                ctx.get<FlowRuntimeState>(flow_entity);
-            if (runtime.source_tag_entity == tag_entity) {
-                runtime.source_tag_entity = Entity::none();
-            }
-        }
-        if (runtime_state.numSourceTags > 0) {
-            runtime_state.numSourceTags -= 1;
-        }
-    }
-
     if (tag.port_id >= 0 && tag.port_id < numPorts) {
         Entity port_entity = portEntities[tag.port_id];
         if (port_entity != Entity::none()) {
@@ -181,7 +169,6 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
 
     ctx.get<FlowTagProgress>(tag_entity).pending_source_destroy = 0;
 
-    ctx.destroyEntity(tag_entity);
     return has_cleanup_ev;
 }
 
@@ -203,7 +190,8 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
                                               Bw in_bw,
                                               Bytes size,
                                               bool is_source,
-                                              int32_t priority)
+                                              int32_t priority,
+                                              bool link_ingress)
 {
     if (port_id < 0 || port_id >= numPorts) {
         return Entity::none();
@@ -214,7 +202,12 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
         return Entity::none();
     }
 
-    Entity tag_entity = ctx.makeEntity<FlowTag>();
+    PortTagPool &pool = ctx.get<PortTagPool>(port_entity);
+    if (pool.free_count <= 0) {
+        return Entity::none();
+    }
+    Entity tag_entity = pool.free_tags[--pool.free_count];
+    pool.free_tags[pool.free_count] = Entity::none();
     FlowTagState tag {};
     tag.port_id = port_id;
     tag.flow_id = flow_id;
@@ -240,9 +233,6 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
     ctx.get<FlowTagProgress>(tag_entity) = FlowTagProgress {};
     insertTagLookup(ctx.get<PortTagLookup>(port_entity), flow_id, tag_entity);
 
-    SimRuntimeState &runtime_state = ctx.singleton<SimRuntimeState>();
-    runtime_state.numActiveTags += 1;
-
     {
         PortTagList &ptl = ctx.get<PortTagList>(port_entity);
         if (ptl.count < MAX_TAGS_PER_PORT) {
@@ -255,7 +245,7 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
             tag_entity);
     }
 
-    if (tag.ingress_port_id >= 0) {
+    if (link_ingress && tag.ingress_port_id >= 0) {
         Entity ingress_entity = portEntities[tag.ingress_port_id];
         if (ingress_entity != Entity::none()) {
             IngressTagList &itl = ctx.get<IngressTagList>(ingress_entity);
@@ -264,15 +254,6 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
             } else {
                 FATAL("IngressTagList overflow");
             }
-        }
-    }
-
-    if (is_source) {
-        runtime_state.numSourceTags += 1;
-        Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
-        if (flow_entity != Entity::none()) {
-            ctx.get<FlowRuntimeState>(flow_entity).source_tag_entity =
-                tag_entity;
         }
     }
 

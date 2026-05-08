@@ -82,7 +82,6 @@ struct FlowRouteState {
 };
 
 struct FlowRuntimeState {
-    madrona::Entity source_tag_entity = madrona::Entity::none();
     int32_t pending = 1;
     int32_t active = 0;
     int32_t completed = 0;
@@ -90,10 +89,25 @@ struct FlowRuntimeState {
     FlowCompletionRecord completion_record {};
 };
 
+// Per-flow scratch for the schedule split. The FlowMeta worker fills this
+// with a precomputed port path and first delayed event for flows that are
+// both inside the current pending window and ready at sim.now; the singleton
+// schedule flush then commits the scratch in input order so delayed-event
+// insertion order and counters stay deterministic.
+struct FlowScheduleState {
+    int32_t flow_order = -1;
+    int32_t ready_now = 0;
+    int32_t prepared = 0;
+    int32_t port_path_len = 0;
+    int32_t port_path[MAX_FLOW_ROUTE_STEPS + 1] {};
+    DelayedEvent prepared_event {};
+};
+
 struct FlowMeta : public madrona::Archetype<
     FlowDef,
     FlowRouteState,
-    FlowRuntimeState
+    FlowRuntimeState,
+    FlowScheduleState
 > {};
 
 // FlowArrivalEv / BwUpdateEv / PfcControlEv / DelayedEvent were moved to
@@ -159,9 +173,17 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE bool injectFlowDef(madrona::Context &ctx,
                                          madrona::Entity flow_entity,
                                          DelayedEvent &out_ev);
+    MADRONA_NO_INLINE bool prepareFlowScheduleState(
+        const FlowDef &flow,
+        FlowScheduleState &schedule_state) const;
     MADRONA_NO_INLINE bool buildFlowArrivalEvent(int32_t src_port_id,
                                                  const FlowDef &flow,
                                                  DelayedEvent &out_ev) const;
+    MADRONA_NO_INLINE void preparePendingFlowMeta(
+        madrona::Context &ctx,
+        const FlowDef &flow,
+        const FlowRuntimeState &runtime,
+        FlowScheduleState &schedule_state) const;
     MADRONA_NO_INLINE void schedulePendingFlows(madrona::Context &ctx);
     MADRONA_NO_INLINE void deliverEvents(madrona::Context &ctx);
     MADRONA_NO_INLINE void deliverEventsOnePort(
@@ -186,9 +208,40 @@ struct Sim : public madrona::WorldBase {
         PortFinishedSourceList &finished_list,
         PortTraceLast &trace,
         PortOutbox &outbox);
+    MADRONA_NO_INLINE void cleanupFinishedSourcesOnePort(
+        madrona::Context &ctx,
+        Time next_now,
+        int32_t port_id,
+        PortCachedHints &hints,
+        PortFinishedSourceList &finished_list);
     MADRONA_NO_INLINE void progressBacklogDrainTimers(
         madrona::Context &ctx,
         Time dt);
+    MADRONA_NO_INLINE void progressBacklogDrainTimerOnePort(
+        PortTimers &timers,
+        DirtyPort &dirty,
+        Time dt);
+    MADRONA_NO_INLINE void progressPfcTimerOnePort(
+        madrona::Context &ctx,
+        int32_t ingress_port_id,
+        PortTimers &timers,
+        const IngressTagList &ingress_list,
+        PortDirtyMarkList &dirty_marks,
+        Time dt);
+    MADRONA_NO_INLINE void flushDirtyPortMarks(madrona::Context &ctx);
+    MADRONA_NO_INLINE void prepareProgressState(madrona::Context &ctx);
+    MADRONA_NO_INLINE void markBufferedPortDirtyOnePort(
+        PortBuffer &port_buf,
+        DirtyPort &dirty,
+        PortTraceLast &trace) const;
+    MADRONA_NO_INLINE void finishProgressState(
+        madrona::Context &ctx,
+        Time dt);
+    MADRONA_NO_INLINE void snapshotDirtyOnePort(
+        int32_t port_id,
+        const PortDelayedQueue &queue,
+        const PortTimers &timers,
+        PortTraceLast &trace) const;
     MADRONA_NO_INLINE void markIngressTagsDirty(
         madrona::Context &ctx,
         int32_t ingress_port);
@@ -378,12 +431,21 @@ struct Sim : public madrona::WorldBase {
     // PortInbox before deliverEvents writes into it; dispatchEvents (the
     // new deliverEvents variant that owns ctx) walks delayedEvents in
     // arrival order and writes each due event into the target port's
-    // PortInbox. flushTagCreate / flushFlowCompletion materialise the
-    // deferred per-Port requests in port_id ascending order.
+    // PortInbox. Per-Port tag creation is now split into a local
+    // materialize worker plus a tiny singleton that replays only the
+    // deferred ingress-list links in port_id ascending order.
     void dispatchEvents(madrona::Context &ctx);
-    MADRONA_NO_INLINE void flushTagCreate(madrona::Context &ctx);
+    MADRONA_NO_INLINE void materializeTagCreateOnePort(
+        madrona::Context &ctx,
+        int32_t port_id,
+        DirtyPort &dirty,
+        PortCreateList &create_list,
+        PortIngressLinkList &ingress_links,
+        PortTraceLast &trace);
+    MADRONA_NO_INLINE void flushIngressTagLinks(madrona::Context &ctx);
     MADRONA_NO_INLINE void flushFlowCompletion(madrona::Context &ctx);
     MADRONA_NO_INLINE void logIngressChain(madrona::Context &ctx);
+    MADRONA_NO_INLINE void refreshTagCounters(madrona::Context &ctx);
 
     MADRONA_NO_INLINE int32_t lookupFlowRouteNext(
         madrona::Context &ctx,
@@ -402,7 +464,8 @@ struct Sim : public madrona::WorldBase {
         Bw in_bw,
         Bytes size,
         bool is_source,
-        int32_t priority);
+        int32_t priority,
+        bool link_ingress = true);
     MADRONA_NO_INLINE void destroyTag(madrona::Context &ctx,
                                       madrona::Entity tag_entity,
                                       bool propagate_cleanup,

@@ -46,7 +46,40 @@ MADRONA_NO_INLINE bool Sim::injectFlowDef(Context &ctx,
                                           DelayedEvent &out_ev)
 {
     const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
+    FlowScheduleState schedule_state = FlowScheduleState {};
+    if (!prepareFlowScheduleState(flow, schedule_state)) {
+        return false;
+    }
+
     FlowCounters &counters = ctx.singleton<FlowCounters>();
+    FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
+    FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(flow_entity);
+    if (schedule_state.port_path_len < 2) {
+        return false;
+    }
+
+    if (counters.numFlowRoutes < MAX_FLOWS) {
+        if (route.num_steps <= 0) {
+            counters.numFlowRoutes += 1;
+        }
+        route = FlowRouteState {};
+        route.flow_id = flow.id;
+        route.num_steps = schedule_state.port_path_len - 1;
+        for (int32_t i = 0; i + 1 < schedule_state.port_path_len; i++) {
+            route.steps[i].port_id = schedule_state.port_path[i];
+            route.steps[i].next_port_id = schedule_state.port_path[i + 1];
+        }
+        runtime.route_active = 1;
+    }
+
+    out_ev = schedule_state.prepared_event;
+    return true;
+}
+
+MADRONA_NO_INLINE bool Sim::prepareFlowScheduleState(
+    const FlowDef &flow,
+    FlowScheduleState &schedule_state) const
+{
     NodeId path[MAX_PATH_NODES] {};
     int32_t path_len = getPath(flow.src_node, flow.dst_node, flow.id,
         path, MAX_PATH_NODES);
@@ -65,8 +98,10 @@ MADRONA_NO_INLINE bool Sim::injectFlowDef(Context &ctx,
         return false;
     }
 
-    int32_t port_path[MAX_FLOW_ROUTE_STEPS + 1] {};
-    int32_t port_path_len = 0;
+    schedule_state.port_path_len = 0;
+    for (int32_t i = 0; i < MAX_FLOW_ROUTE_STEPS + 1; i++) {
+        schedule_state.port_path[i] = -1;
+    }
 
     for (int32_t i = 0; i + 1 < path_len; i++) {
         int32_t node_slot = findNodeSlot(path[i]);
@@ -77,30 +112,48 @@ MADRONA_NO_INLINE bool Sim::injectFlowDef(Context &ctx,
         if (neighbor_idx < 0) {
             return false;
         }
-        port_path[port_path_len++] =
+        schedule_state.port_path[schedule_state.port_path_len++] =
             topoNodes[node_slot].neighbors[neighbor_idx].port_id;
     }
-    port_path[port_path_len++] = -1;
-
-    if (counters.numFlowRoutes < MAX_FLOWS) {
-        FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
-        FlowRuntimeState &runtime = ctx.get<FlowRuntimeState>(flow_entity);
-        if (route.num_steps <= 0) {
-            counters.numFlowRoutes += 1;
-        }
-        route = FlowRouteState {};
-        route.flow_id = flow.id;
-        route.num_steps = port_path_len - 1;
-        for (int32_t i = 0; i + 1 < port_path_len; i++) {
-            route.steps[i].port_id = port_path[i];
-            route.steps[i].next_port_id = port_path[i + 1];
-        }
-        runtime.route_active = 1;
-    }
+    schedule_state.port_path[schedule_state.port_path_len++] = -1;
 
     int32_t src_port_id =
         topoNodes[src_slot].neighbors[first_neighbor_idx].port_id;
-    return buildFlowArrivalEvent(src_port_id, flow, out_ev);
+    return buildFlowArrivalEvent(src_port_id, flow,
+        schedule_state.prepared_event);
+}
+
+MADRONA_NO_INLINE void Sim::preparePendingFlowMeta(
+    Context &ctx,
+    const FlowDef &flow,
+    const FlowRuntimeState &runtime,
+    FlowScheduleState &schedule_state) const
+{
+    schedule_state.ready_now = 0;
+    schedule_state.prepared = 0;
+    schedule_state.port_path_len = 0;
+    schedule_state.prepared_event = DelayedEvent {};
+
+    if (runtime.pending == 0) {
+        return;
+    }
+
+    const FlowCounters &counters = ctx.singleton<FlowCounters>();
+    int32_t ready_begin = counters.pendingFlowCursor;
+    int32_t pending_end = ready_begin + counters.numPendingFlows;
+    if (schedule_state.flow_order < ready_begin ||
+        schedule_state.flow_order >= pending_end) {
+        return;
+    }
+
+    if (flow.start_time > now + 1e-15) {
+        return;
+    }
+
+    schedule_state.ready_now = 1;
+    schedule_state.prepared = prepareFlowScheduleState(flow, schedule_state)
+        ? 1
+        : 0;
 }
 
 MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
@@ -124,7 +177,9 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
             continue;
         }
 
-        if (ctx.get<FlowDef>(flow_entity).start_time > now + 1e-15) {
+        const FlowScheduleState &schedule_state =
+            ctx.get<FlowScheduleState>(flow_entity);
+        if (schedule_state.ready_now == 0) {
             break;
         }
 
@@ -155,16 +210,36 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
                 const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
                 FlowRuntimeState &flow_runtime = ctx.get<FlowRuntimeState>(
                     flow_entity);
+                const FlowScheduleState &schedule_state =
+                    ctx.get<FlowScheduleState>(flow_entity);
                 if (flow_runtime.pending == 0) {
                     continue;
                 }
                 if (log_enabled && num_logged_flows < MAX_FLOWS) {
                     logged_flows[num_logged_flows++] = flow;
                 }
-                DelayedEvent ev {};
-                if (injectFlowDef(ctx, flow_entity, ev) &&
+                DelayedEvent ev = schedule_state.prepared_event;
+                if (schedule_state.prepared != 0 &&
                     sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
                     pushDelayedEvent(ctx, ev);
+                }
+                if (schedule_state.prepared != 0 &&
+                    counters.numFlowRoutes < MAX_FLOWS) {
+                    FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
+                    if (route.num_steps <= 0) {
+                        counters.numFlowRoutes += 1;
+                    }
+                    route = FlowRouteState {};
+                    route.flow_id = flow.id;
+                    route.num_steps = schedule_state.port_path_len - 1;
+                    for (int32_t j = 0;
+                         j + 1 < schedule_state.port_path_len;
+                         j++) {
+                        route.steps[j].port_id = schedule_state.port_path[j];
+                        route.steps[j].next_port_id =
+                            schedule_state.port_path[j + 1];
+                    }
+                    flow_runtime.route_active = 1;
                 }
                 flow_runtime.pending = 0;
                 flow_runtime.active = 1;
@@ -213,13 +288,31 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
             continue;
         }
         FlowRuntimeState &flow_runtime = ctx.get<FlowRuntimeState>(flow_entity);
+        const FlowScheduleState &schedule_state =
+            ctx.get<FlowScheduleState>(flow_entity);
         if (flow_runtime.pending == 0) {
             continue;
         }
-        DelayedEvent ev {};
-        if (injectFlowDef(ctx, flow_entity, ev) &&
+        if (schedule_state.prepared != 0 &&
             sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
-            pushDelayedEvent(ctx, ev);
+            pushDelayedEvent(ctx, schedule_state.prepared_event);
+        }
+        if (schedule_state.prepared != 0 &&
+            counters.numFlowRoutes < MAX_FLOWS) {
+            const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
+            FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
+            if (route.num_steps <= 0) {
+                counters.numFlowRoutes += 1;
+            }
+            route = FlowRouteState {};
+            route.flow_id = flow.id;
+            route.num_steps = schedule_state.port_path_len - 1;
+            for (int32_t j = 0; j + 1 < schedule_state.port_path_len; j++) {
+                route.steps[j].port_id = schedule_state.port_path[j];
+                route.steps[j].next_port_id =
+                    schedule_state.port_path[j + 1];
+            }
+            flow_runtime.route_active = 1;
         }
         flow_runtime.pending = 0;
         flow_runtime.active = 1;

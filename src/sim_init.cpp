@@ -77,12 +77,19 @@ void Sim::loadFlow(Engine &ctx)
         ctx.get<FlowDef>(flow_entity) = flow;
         ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};
         ctx.get<FlowRuntimeState>(flow_entity) = FlowRuntimeState {
-            .source_tag_entity = Entity::none(),
             .pending = 1,
             .active = 0,
             .completed = 0,
             .route_active = 0,
             .completion_record = FlowCompletionRecord {},
+        };
+        ctx.get<FlowScheduleState>(flow_entity) = FlowScheduleState {
+            .flow_order = i,
+            .ready_now = 0,
+            .prepared = 0,
+            .port_path_len = 0,
+            .port_path = {},
+            .prepared_event = DelayedEvent {},
         };
         flowMetaEntities[i] = flow_entity;
         if (flowLookupSpan > 0) {
