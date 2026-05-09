@@ -589,9 +589,26 @@ struct PortDirtyMarkList {
 // same 63-flow scale; a 32-entry queue silently drops completions.
 constexpr int32_t MAX_PORT_COMPLETE = 64;
 
+struct PortCompletionReq {
+    FlowId flow_id = -1;
+    Time end_time = 0.0;
+};
+
 struct PortCompletionList {
     int32_t num = 0;
-    FlowId flow_ids[MAX_PORT_COMPLETE] {};
+    PortCompletionReq reqs[MAX_PORT_COMPLETE] {};
+};
+
+constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
+
+struct PortIngressUnlinkReq {
+    int32_t ingress_port_id = -1;
+    madrona::Entity tag_entity = madrona::Entity::none();
+};
+
+struct PortIngressUnlinkList {
+    int32_t num = 0;
+    PortIngressUnlinkReq reqs[MAX_PORT_INGRESS_UNLINKS] {};
 };
 
 struct Port : public madrona::Archetype<
@@ -609,6 +626,7 @@ struct Port : public madrona::Archetype<
     PortCreateList,
     PortTagPool,
     PortIngressLinkList,
+    PortIngressUnlinkList,
     PortDirtyMarkList,
     PortCompletionList,
     PortPfcConfig,

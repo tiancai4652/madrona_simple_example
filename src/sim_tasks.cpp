@@ -229,10 +229,46 @@ MADRONA_NO_INLINE void flushIngressTagLinksStepSystem(
     sim.flushIngressTagLinks(ctx);
 }
 
+MADRONA_NO_INLINE void flushIngressTagUnlinksStepSystem(
+    Engine &ctx,
+    SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.flushIngressTagUnlinks(ctx);
+}
+
+MADRONA_NO_INLINE void materializeTagCleanupOnePortNowStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortCleanup &cleanup,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox)
+{
+    Sim &sim = ctx.data();
+    sim.materializeTagCleanupOnePort(ctx, port_state.port_id, cleanup,
+        ingress_unlinks, completions, outbox, sim.now);
+}
+
+MADRONA_NO_INLINE void materializeTagCleanupOnePortFrameEndStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortCleanup &cleanup,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox)
+{
+    Sim &sim = ctx.data();
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    sim.materializeTagCleanupOnePort(ctx, port_state.port_id, cleanup,
+        ingress_unlinks, completions, outbox, sim.now + runtime.nextDT);
+}
+
 MADRONA_NO_INLINE void postIngressStepSystem(Engine &ctx, SimDriver &)
 {
     closeHostStepPhase(ctx, StepPhaseID::Deliver);
     Sim &sim = ctx.data();
+    sim.flushIngressTagUnlinks(ctx);
     sim.flushFlowCompletion(ctx);
     sim.flushPortOutbox(ctx);
     if (sim.traceModeEnabled()) {
@@ -290,7 +326,9 @@ MADRONA_NO_INLINE void postAllocStepSystem(Engine &ctx, SimDriver &)
 {
     closeHostStepPhase(ctx, StepPhaseID::Ingress);
     Sim &sim = ctx.data();
-    sim.flushPortTagCleanup(ctx);
+    sim.flushIngressTagUnlinks(ctx);
+    sim.flushFlowCompletion(ctx);
+    sim.flushPortOutbox(ctx);
     if (sim.traceModeEnabled()) {
         sim.logAllocTraces(ctx);
     }
@@ -523,7 +561,9 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     closeHostStepPhase(ctx, StepPhaseID::ClearDT);
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
-    sim.flushBufferTagCleanup(ctx);
+    sim.flushIngressTagUnlinks(ctx);
+    sim.flushFlowCompletion(ctx);
+    sim.flushPortOutbox(ctx);
     if (sim.traceModeEnabled()) {
         sim.logBufferTraces(ctx);
     }
@@ -629,8 +669,12 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         PortTraceLast>>({n2bw});
     auto n2createB = builder.addToGraph<ParallelForNode<Engine,
         flushIngressTagLinksStepSystem, SimDriver>>({n2createB_local});
+    auto n2cleanup_local = builder.addToGraph<ParallelForNode<Engine,
+        materializeTagCleanupOnePortNowStepSystem,
+        PortState, PortCleanup, PortIngressUnlinkList,
+        PortCompletionList, PortOutbox>>({n2createB});
     auto n2cleanup = builder.addToGraph<ParallelForNode<Engine,
-        flushTagCleanupStepSystem, SimDriver>>({n2createB});
+        flushIngressTagUnlinksStepSystem, SimDriver>>({n2cleanup_local});
     auto n4 = builder.addToGraph<ParallelForNode<Engine,
         postIngressStepSystem, SimDriver>>({n2cleanup});
     TaskGraphNodeID final_node = n4;
@@ -650,8 +694,12 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     auto n5drain = builder.addToGraph<ParallelForNode<Engine,
         applyDrainHintOnePortStepSystem,
         PortState, PortDrainHint, PortTimers>>({n5reduce});
+    auto n5cleanup = builder.addToGraph<ParallelForNode<Engine,
+        materializeTagCleanupOnePortNowStepSystem,
+        PortState, PortCleanup, PortIngressUnlinkList,
+        PortCompletionList, PortOutbox>>({n5drain});
     auto n5 = builder.addToGraph<ParallelForNode<Engine,
-        postAllocStepSystem, SimDriver>>({n5drain});
+        postAllocStepSystem, SimDriver>>({n5cleanup});
     final_node = n5;
     // Phase C: per-Port pfcDetect fan-out, followed by a per-Port timer
     // apply pass, then the singleton outbox flush / summary log. PFC
@@ -727,9 +775,13 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         PortBuffer, DirtyPort, PortTraceLast>>({n11prepare});
     auto n11finish = builder.addToGraph<ParallelForNode<Engine,
         finishProgressStepSystem, SimDriver>>({n11bufferdirty});
+    auto n11bufcleanup = builder.addToGraph<ParallelForNode<Engine,
+        materializeTagCleanupOnePortFrameEndStepSystem,
+        PortState, PortCleanup, PortIngressUnlinkList,
+        PortCompletionList, PortOutbox>>({n11finish});
     auto n12 = builder.addToGraph<ParallelForNode<Engine,
         postBufferStepSystem,
-        SimDriver>>({n11finish});
+        SimDriver>>({n11bufcleanup});
     final_node = n12;
     }
     }

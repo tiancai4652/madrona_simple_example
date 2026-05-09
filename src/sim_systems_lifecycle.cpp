@@ -172,6 +172,126 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
     return has_cleanup_ev;
 }
 
+MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
+    Context &ctx,
+    Entity tag_entity,
+    bool propagate_cleanup,
+    Time logical_now,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox)
+{
+    if (tag_entity == Entity::none()) {
+        return false;
+    }
+
+    FlowTagState tag = ctx.get<FlowTagState>(tag_entity);
+    Time effective_now = logical_now >= 0.0 ? logical_now : now;
+
+    if (tag.next_port_id < 0) {
+        if (completions.num < MAX_PORT_COMPLETE) {
+            completions.reqs[completions.num++] = PortCompletionReq {
+                .flow_id = tag.flow_id,
+                .end_time = effective_now,
+            };
+        }
+    }
+
+    if (propagate_cleanup && tag.next_port_id >= 0) {
+        if (tag.downstream_created != 0) {
+            int32_t src_node_slot = findNodeSlot(portToNode[tag.port_id]);
+            int32_t dst_node_slot = findNodeSlot(portToNode[tag.next_port_id]);
+            Time delay = 0.0;
+            if (src_node_slot >= 0 && dst_node_slot >= 0) {
+                delay = linkDelays[src_node_slot][dst_node_slot];
+                if (delay < 0.0) {
+                    delay = 0.0;
+                }
+            }
+
+            if (outbox.num_events < MAX_PORT_OUTBOX) {
+                DelayedEvent &ev = outbox.events[outbox.num_events++];
+                ev = DelayedEvent {};
+                ev.t = effective_now + delay;
+                ev.type = DelayedEvent::Type::BwUpdate;
+                ev.bwupd = BwUpdateEv {
+                    .port_id = tag.next_port_id,
+                    .flow_id = tag.flow_id,
+                    .in_bw = 0.0,
+                };
+            }
+        } else {
+            int32_t cur = tag.port_id;
+            int32_t nxt = lookupFlowRouteNext(ctx, tag.flow_id, cur);
+            while (nxt >= 0) {
+                cur = nxt;
+                nxt = lookupFlowRouteNext(ctx, tag.flow_id, cur);
+            }
+            if (cur != tag.port_id) {
+                if (completions.num < MAX_PORT_COMPLETE) {
+                    completions.reqs[completions.num++] = PortCompletionReq {
+                        .flow_id = tag.flow_id,
+                        .end_time = effective_now,
+                    };
+                }
+            }
+        }
+    }
+
+    if (tag.port_entity != Entity::none()) {
+        int32_t port_id = tag.port_id;
+        if (port_id >= 0 && port_id < numPorts) {
+            removeTagLookup(ctx.get<PortTagLookup>(tag.port_entity),
+                tag.flow_id);
+            PortTagList &ptl = ctx.get<PortTagList>(tag.port_entity);
+            for (int32_t i = 0; i < ptl.count; i++) {
+                if (ptl.tags[i] == tag_entity) {
+                    ptl.tags[i] = ptl.tags[ptl.count - 1];
+                    ptl.tags[ptl.count - 1] = Entity::none();
+                    ptl.count -= 1;
+                    break;
+                }
+            }
+
+            if (tag.is_source != 0) {
+                removePortSourceTag(
+                    ctx.get<PortSourceTagList>(tag.port_entity), tag_entity);
+                removePortFinishedSource(
+                    ctx.get<PortFinishedSourceList>(tag.port_entity),
+                    tag_entity);
+                ctx.get<PortCachedHints>(tag.port_entity).active_finish_t =
+                    timerInactiveSentinel();
+            }
+
+            PortTagPool &pool = ctx.get<PortTagPool>(tag.port_entity);
+            if (pool.free_count < MAX_TAGS_PER_PORT) {
+                ctx.get<FlowTagState>(tag_entity) = FlowTagState {};
+                ctx.get<FlowTagProgress>(tag_entity) = FlowTagProgress {};
+                pool.free_tags[pool.free_count++] = tag_entity;
+            }
+        }
+    }
+
+    if (tag.ingress_port_id >= 0 && tag.ingress_port_id < numPorts) {
+        if (ingress_unlinks.num < MAX_PORT_INGRESS_UNLINKS) {
+            ingress_unlinks.reqs[ingress_unlinks.num++] = PortIngressUnlinkReq {
+                .ingress_port_id = tag.ingress_port_id,
+                .tag_entity = tag_entity,
+            };
+        }
+    }
+
+    if (tag.port_id >= 0 && tag.port_id < numPorts) {
+        Entity port_entity = portEntities[tag.port_id];
+        if (port_entity != Entity::none()) {
+            ctx.get<DirtyPort>(port_entity).isDirty = 1;
+        }
+    }
+
+    ctx.get<FlowTagProgress>(tag_entity).pending_source_destroy = 0;
+    return true;
+}
+
 MADRONA_NO_INLINE void Sim::destroyTag(Context &ctx,
                                        Entity tag_entity,
                                        bool propagate_cleanup,

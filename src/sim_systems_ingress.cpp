@@ -276,7 +276,11 @@ void Sim::bwUpdateOnePort(Context &ctx,
                     }
                 } else {
                     if (completions.num < MAX_PORT_COMPLETE) {
-                        completions.flow_ids[completions.num++] = ev.flow_id;
+                        completions.reqs[completions.num++] =
+                            PortCompletionReq {
+                                .flow_id = ev.flow_id,
+                                .end_time = now,
+                            };
                     }
                     if (keep_trace) {
                         trace.bwupd_completed += 1;
@@ -423,6 +427,46 @@ void Sim::flushIngressTagLinks(Context &ctx)
     }
 }
 
+void Sim::flushIngressTagUnlinks(Context &ctx)
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+
+        PortIngressUnlinkList &unlinks =
+            ctx.get<PortIngressUnlinkList>(port_e);
+        for (int32_t i = 0; i < unlinks.num; i++) {
+            const PortIngressUnlinkReq &req = unlinks.reqs[i];
+            if (req.tag_entity == Entity::none() ||
+                req.ingress_port_id < 0 ||
+                req.ingress_port_id >= numPorts) {
+                continue;
+            }
+
+            Entity ingress_entity = portEntities[req.ingress_port_id];
+            if (ingress_entity == Entity::none()) {
+                continue;
+            }
+
+            IngressTagList &itl = ctx.get<IngressTagList>(ingress_entity);
+            for (int32_t j = 0; j < itl.count; j++) {
+                if (itl.tags[j] != req.tag_entity) {
+                    continue;
+                }
+
+                itl.tags[j] = itl.tags[itl.count - 1];
+                itl.tags[itl.count - 1] = Entity::none();
+                itl.count -= 1;
+                break;
+            }
+        }
+
+        unlinks.num = 0;
+    }
+}
+
 void Sim::flushFlowCompletion(Context &ctx)
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
@@ -433,7 +477,8 @@ void Sim::flushFlowCompletion(Context &ctx)
 
         PortCompletionList &cl = ctx.get<PortCompletionList>(port_e);
         for (int32_t i = 0; i < cl.num; i++) {
-            recordFlowCompletion(ctx, cl.flow_ids[i], now);
+            const PortCompletionReq &req = cl.reqs[i];
+            recordFlowCompletion(ctx, req.flow_id, req.end_time);
         }
         cl.num = 0;
     }

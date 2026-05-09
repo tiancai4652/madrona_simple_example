@@ -83,6 +83,7 @@ MADRONA_NO_INLINE void initPortQueues(
     }
     ctx.get<PortTagPool>(port_entity) = pool;
     ctx.get<PortIngressLinkList>(port_entity) = PortIngressLinkList {};
+    ctx.get<PortIngressUnlinkList>(port_entity) = PortIngressUnlinkList {};
     ctx.get<PortDirtyMarkList>(port_entity) = PortDirtyMarkList {};
     ctx.get<PortCompletionList>(port_entity) = PortCompletionList {};
     ctx.get<IngressTagList>(port_entity) = IngressTagList {};

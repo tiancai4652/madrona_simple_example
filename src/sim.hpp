@@ -442,7 +442,16 @@ struct Sim : public madrona::WorldBase {
         PortCreateList &create_list,
         PortIngressLinkList &ingress_links,
         PortTraceLast &trace);
+    MADRONA_NO_INLINE void materializeTagCleanupOnePort(
+        madrona::Context &ctx,
+        int32_t port_id,
+        PortCleanup &cleanup,
+        PortIngressUnlinkList &ingress_unlinks,
+        PortCompletionList &completions,
+        PortOutbox &outbox,
+        Time logical_now);
     MADRONA_NO_INLINE void flushIngressTagLinks(madrona::Context &ctx);
+    MADRONA_NO_INLINE void flushIngressTagUnlinks(madrona::Context &ctx);
     MADRONA_NO_INLINE void flushFlowCompletion(madrona::Context &ctx);
     MADRONA_NO_INLINE void logIngressChain(madrona::Context &ctx);
     MADRONA_NO_INLINE void refreshTagCounters(madrona::Context &ctx);
@@ -476,6 +485,14 @@ struct Sim : public madrona::WorldBase {
         bool propagate_cleanup,
         Time logical_now,
         DelayedEvent &out_ev);
+    MADRONA_NO_INLINE bool destroyTagMaterializeOnePort(
+        madrona::Context &ctx,
+        madrona::Entity tag_entity,
+        bool propagate_cleanup,
+        Time logical_now,
+        PortIngressUnlinkList &ingress_unlinks,
+        PortCompletionList &completions,
+        PortOutbox &outbox);
     MADRONA_NO_INLINE void recordFlowCompletion(
         madrona::Context &ctx, FlowId flow_id, Time end_time);
     MADRONA_NO_INLINE void materializeBacklog(FlowTagState &tag, Time at_time);
