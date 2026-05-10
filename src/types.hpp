@@ -142,6 +142,7 @@ struct SimRuntimeState {
     int32_t numDelayedEvents = 0;
     int32_t numActiveTags = 0;
     int32_t numSourceTags = 0;
+    int32_t progressAllExhausted = 0;
     int32_t cachedDrainPortID = -1;
     double cachedNextDelayedGap = 0.0;
     double cachedNextBacklogGap = 0.0;
@@ -398,6 +399,7 @@ struct PortTraceLast {
     int32_t progress_source_scan_count = 0;
     int32_t progress_finished_source_count = 0;
     int32_t progress_emitted_cleanup_count = 0;
+    int32_t progress_buffered_dirty_marked = 0;
     // Snapshot of DirtyPort captured at alloc time (before emit/clear run);
     // consumed by the cachedNextDrainTime reduction singleton. Populated by
     // allocOnePort once phase B.2 lands.
@@ -406,6 +408,15 @@ struct PortTraceLast {
     // advanceOnePortBuffer consumes this directly on the owning Port entity
     // instead of folding it back into a Sim-global dirty-port list.
     int32_t was_dirty_at_clear = 0;
+    // Phase B.1 per-port runtime-scan scratch, reduced by snapshotDirtyPorts.
+    int32_t clear_has_delayed_gap = 0;
+    double clear_delayed_gap = 0.0;
+    int32_t clear_has_backlog_gap = 0;
+    double clear_backlog_gap = 0.0;
+    int32_t clear_has_pfc_pause_gap = 0;
+    double clear_pfc_pause_gap = 0.0;
+    int32_t clear_has_pfc_resume_gap = 0;
+    double clear_pfc_resume_gap = 0.0;
     // Phase E: ingress_chain per-Port summary counters. The per-Port
     // arrival/bwUpdate/pfcPropagate workers increment these; the
     // logIngressChainSystem singleton emits the single summary line
@@ -515,10 +526,9 @@ struct PortInbox {
 };
 
 // Phase E: deferred tag-create requests. Per-Port arrival/bwUpdate
-// workers must not call ctx.makeEntity<FlowTag>() directly (entity-id
-// assignment would be non-deterministic under parallel execution), so
-// they push requests here and flushTagCreateSystem (singleton) walks
-// port_id ascending and actually creates the tags via createTagOnPort.
+// workers push local create requests here; a later per-Port materialize
+// pass consumes them via createTagOnPort without directly touching any
+// other port's state.
 struct PortCreateReq {
     int32_t from_arrival = 0;
     FlowId flow_id = -1;
@@ -535,6 +545,40 @@ constexpr int32_t MAX_PORT_CREATE = 64;
 struct PortCreateList {
     int32_t num = 0;
     PortCreateReq reqs[MAX_PORT_CREATE] {};
+};
+
+// Per-port free list of preallocated FlowTag entities. This removes
+// runtime ctx.makeEntity/destroyEntity traffic from the hot path and is the
+// prerequisite for later making tag creation/destruction fully per-port.
+struct PortTagPool {
+    int32_t free_count = 0;
+    madrona::Entity free_tags[MAX_TAGS_PER_PORT] {};
+};
+
+constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
+
+// Cross-port ingress-list links deferred out of createTagOnPort. The
+// per-Port tag-create materialize worker records "append this new tag to
+// ingress port X", and a tiny singleton later replays those appends in
+// port_id order so IngressTagList remains deterministic and race-free.
+struct PortIngressLinkReq {
+    int32_t ingress_port_id = -1;
+    madrona::Entity tag_entity = madrona::Entity::none();
+};
+
+struct PortIngressLinkList {
+    int32_t num = 0;
+    PortIngressLinkReq reqs[MAX_PORT_INGRESS_LINKS] {};
+};
+
+constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
+
+// Deferred dirty-port fanout. Per-port workers that discover "these
+// owning ports must become dirty" append target port ids here; a tiny
+// singleton later replays the writes to DirtyPort in port_id order.
+struct PortDirtyMarkList {
+    int32_t num = 0;
+    int32_t port_ids[MAX_PORT_DIRTY_MARKS] {};
 };
 
 // Phase E: deferred recordFlowCompletion requests. bwUpdate on a
@@ -563,6 +607,9 @@ struct Port : public madrona::Archetype<
     PortSourceTagList,
     PortInbox,
     PortCreateList,
+    PortTagPool,
+    PortIngressLinkList,
+    PortDirtyMarkList,
     PortCompletionList,
     PortPfcConfig,
     PortPfcState,

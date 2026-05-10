@@ -21,6 +21,16 @@ inline bool hasActivePause(const PortPfcState &pfc)
     return false;
 }
 
+inline void appendDirtyPortMark(PortDirtyMarkList &dirty_marks,
+                                int32_t port_id)
+{
+    if (dirty_marks.num >= MAX_PORT_DIRTY_MARKS) {
+        return;
+    }
+
+    dirty_marks.port_ids[dirty_marks.num++] = port_id;
+}
+
 } // namespace
 
 MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
@@ -137,6 +147,37 @@ MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
     }
 }
 
+MADRONA_NO_INLINE void Sim::cleanupFinishedSourcesOnePort(
+    Context &ctx,
+    Time next_now,
+    int32_t,
+    PortCachedHints &hints,
+    PortFinishedSourceList &finished_list)
+{
+    int32_t local_num = finished_list.num;
+    Entity local_finished[MAX_PORT_CLEANUP] {};
+    for (int32_t i = 0; i < local_num && i < MAX_PORT_CLEANUP; i++) {
+        local_finished[i] = finished_list.tags[i];
+        finished_list.tags[i] = Entity::none();
+    }
+    finished_list.num = 0;
+
+    for (int32_t i = 0; i < local_num; i++) {
+        Entity tag_e = local_finished[i];
+        if (tag_e == Entity::none()) {
+            continue;
+        }
+
+        FlowTagProgress &progress = ctx.get<FlowTagProgress>(tag_e);
+        if (progress.pending_source_destroy == 0) {
+            continue;
+        }
+
+        progress.pending_source_destroy = 0;
+        destroyTag(ctx, tag_e, false, next_now);
+    }
+}
+
 void Sim::progressBacklogDrainTimers(Context &ctx, Time dt)
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
@@ -145,16 +186,26 @@ void Sim::progressBacklogDrainTimers(Context &ctx, Time dt)
             continue;
         }
 
-        PortTimers &timers = ctx.get<PortTimers>(port_e);
-        if (!timerIsActive(timers.backlog_drain)) {
-            continue;
-        }
+        progressBacklogDrainTimerOnePort(
+            ctx.get<PortTimers>(port_e),
+            ctx.get<DirtyPort>(port_e),
+            dt);
+    }
+}
 
-        timers.backlog_drain -= dt;
-        if (timers.backlog_drain < 1e-15) {
-            ctx.get<DirtyPort>(port_e).isDirty = 1;
-            clearBacklogDrainTimer(timers);
-        }
+MADRONA_NO_INLINE void Sim::progressBacklogDrainTimerOnePort(
+    PortTimers &timers,
+    DirtyPort &dirty,
+    Time dt)
+{
+    if (!timerIsActive(timers.backlog_drain)) {
+        return;
+    }
+
+    timers.backlog_drain -= dt;
+    if (timers.backlog_drain < 1e-15) {
+        dirty.isDirty = 1;
+        clearBacklogDrainTimer(timers);
     }
 }
 
@@ -227,6 +278,74 @@ void Sim::progressPfcTimers(Context &ctx, Time dt)
     }
 }
 
+MADRONA_NO_INLINE void Sim::progressPfcTimerOnePort(
+    Context &ctx,
+    int32_t,
+    PortTimers &timers,
+    const IngressTagList &ingress_list,
+    PortDirtyMarkList &dirty_marks,
+    Time dt)
+{
+    dirty_marks.num = 0;
+
+    auto queue_ingress_dirty_marks = [&]() {
+        for (int32_t i = 0; i < ingress_list.count; i++) {
+            Entity tag_e = ingress_list.tags[i];
+            if (tag_e == Entity::none()) {
+                continue;
+            }
+
+            const FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+            if (tag.port_id < 0 || tag.port_id >= numPorts) {
+                continue;
+            }
+
+            appendDirtyPortMark(dirty_marks, tag.port_id);
+        }
+    };
+
+    if (timerIsActive(timers.pfc_pause)) {
+        timers.pfc_pause -= dt;
+        if (timers.pfc_pause < 1e-9) {
+            queue_ingress_dirty_marks();
+            clearPfcPauseTimer(timers);
+        }
+    }
+
+    if (timerIsActive(timers.pfc_resume)) {
+        timers.pfc_resume -= dt;
+        if (timers.pfc_resume < 1e-9) {
+            queue_ingress_dirty_marks();
+            clearPfcResumeTimer(timers);
+        }
+    }
+}
+
+MADRONA_NO_INLINE void Sim::flushDirtyPortMarks(Context &ctx)
+{
+    for (int32_t ingress_port = 0; ingress_port < numPorts; ingress_port++) {
+        Entity ingress_e = portEntities[ingress_port];
+        if (ingress_e == Entity::none()) {
+            continue;
+        }
+
+        PortDirtyMarkList &dirty_marks = ctx.get<PortDirtyMarkList>(ingress_e);
+        for (int32_t i = 0; i < dirty_marks.num; i++) {
+            int32_t port_id = dirty_marks.port_ids[i];
+            if (port_id < 0 || port_id >= numPorts) {
+                continue;
+            }
+
+            Entity port_e = portEntities[port_id];
+            if (port_e != Entity::none()) {
+                ctx.get<DirtyPort>(port_e).isDirty = 1;
+            }
+        }
+
+        dirty_marks.num = 0;
+    }
+}
+
 void Sim::markBufferedPortsDirty(Context &ctx)
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
@@ -242,6 +361,23 @@ void Sim::markBufferedPortsDirty(Context &ctx)
                 ctx.get<DirtyPort>(port_e).isDirty = 1;
                 break;
             }
+        }
+    }
+}
+
+MADRONA_NO_INLINE void Sim::markBufferedPortDirtyOnePort(
+    PortBuffer &port_buf,
+    DirtyPort &dirty,
+    PortTraceLast &trace) const
+{
+    trace.progress_buffered_dirty_marked = 0;
+
+    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+        PriorityBuffer &pb = port_buf.prior_bufs[pri];
+        if (pb.buf_cnt > 1e-15 && pb.num_chunks > 0) {
+            dirty.isDirty = 1;
+            trace.progress_buffered_dirty_marked = 1;
+            break;
         }
     }
 }
@@ -385,7 +521,35 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
     }
 }
 
-void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
+MADRONA_NO_INLINE void Sim::prepareProgressState(Context &ctx)
+{
+    const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    Time next_finish = timerInactiveSentinel();
+    for (int32_t i = 0; i < numPorts; i++) {
+        Entity port_e = portEntities[i];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+
+        const PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
+        if (hints.has_active_finish != 0 &&
+            hints.active_finish_t < next_finish) {
+            next_finish = hints.active_finish_t;
+        }
+    }
+    runtime.cachedNextFinishTime = next_finish;
+    runtime.progressAllExhausted =
+        runtime.cachedNextDrainTime >= timerInactiveSentinel() &&
+        runtime.cachedNextFinishTime >= timerInactiveSentinel() &&
+        runtime.numDelayedEvents == 0 &&
+        flow_counters.numPendingFlows == 0 &&
+        !hasActiveBacklogDrainTimers(ctx) &&
+        !hasActivePfcPauseTimers(ctx) &&
+        !hasActivePfcResumeTimers(ctx);
+}
+
+MADRONA_NO_INLINE void Sim::finishProgressState(Context &ctx, Time dt)
 {
     constexpr const char *scope = "progress";
     uint64_t step = systemLogStep;
@@ -397,67 +561,9 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
     int32_t source_scan_count = 0;
     int32_t source_destroy_count = 0;
     int32_t buffered_dirty_port_count = 0;
-
-    flushPortOutbox(ctx);
-    const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
 
-    Time next_finish = timerInactiveSentinel();
-    for (int32_t i = 0; i < numPorts; i++) {
-        Entity port_e = portEntities[i];
-        if (port_e == Entity::none()) {
-            continue;
-        }
-
-        PortFinishedSourceList &finished_list =
-            ctx.get<PortFinishedSourceList>(port_e);
-        int32_t local_num = finished_list.num;
-        Entity local_finished[MAX_PORT_CLEANUP] {};
-        for (int32_t j = 0; j < local_num && j < MAX_PORT_CLEANUP; j++) {
-            local_finished[j] = finished_list.tags[j];
-            finished_list.tags[j] = Entity::none();
-        }
-        finished_list.num = 0;
-
-        for (int32_t j = 0; j < local_num; j++) {
-            Entity tag_e = local_finished[j];
-            if (tag_e == Entity::none()) {
-                continue;
-            }
-
-            FlowTagProgress &progress = ctx.get<FlowTagProgress>(tag_e);
-            if (progress.pending_source_destroy == 0) {
-                continue;
-            }
-
-            progress.pending_source_destroy = 0;
-            destroyTag(ctx, tag_e, false, next_now);
-            source_destroy_count += 1;
-        }
-
-        PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
-        if (hints.has_active_finish != 0 &&
-            hints.active_finish_t < next_finish) {
-            next_finish = hints.active_finish_t;
-        }
-    }
-    runtime.cachedNextFinishTime = next_finish;
-
-    progressBacklogDrainTimers(ctx, dt);
-    progressPfcTimers(ctx, dt);
-
-    bool all_exhausted =
-        runtime.cachedNextDrainTime >= timerInactiveSentinel() &&
-        runtime.cachedNextFinishTime >= timerInactiveSentinel() &&
-        runtime.numDelayedEvents == 0 &&
-        flow_counters.numPendingFlows == 0 &&
-        !hasActiveBacklogDrainTimers(ctx) &&
-        !hasActivePfcPauseTimers(ctx) &&
-        !hasActivePfcResumeTimers(ctx);
-
-    if (all_exhausted) {
-        markBufferedPortsDirty(ctx);
-        buffered_dirty_port_count = countBufferedPortsMarkedDirty(*this, ctx);
+    if (runtime.progressAllExhausted != 0) {
         if (enablePfc != 0) {
             progressExhaustedPfcState(ctx, dt);
         }
@@ -473,6 +579,9 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
             finished_source_count += trace.progress_finished_source_count;
             emitted_cleanup_count += trace.progress_emitted_cleanup_count;
             source_scan_count += trace.progress_source_scan_count;
+            source_destroy_count += trace.progress_finished_source_count;
+            buffered_dirty_port_count +=
+                trace.progress_buffered_dirty_marked;
         }
         double next_finish_gap =
             runtime.cachedNextFinishTime < timerInactiveSentinel() ?
@@ -482,6 +591,19 @@ void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
             emitted_cleanup_count, source_scan_count, source_destroy_count,
             buffered_dirty_port_count, next_now, next_finish_gap);
     }
+}
+
+void Sim::flowProgressAndCleanupSystem(Context &ctx, Time dt)
+{
+    flushPortOutbox(ctx);
+    progressPfcTimers(ctx, dt);
+    prepareProgressState(ctx);
+
+    if (ctx.singleton<SimRuntimeState>().progressAllExhausted != 0) {
+        markBufferedPortsDirty(ctx);
+    }
+
+    finishProgressState(ctx, dt);
 }
 
 }

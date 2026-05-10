@@ -57,7 +57,6 @@ MADRONA_NO_INLINE void retireFlowMeta(Context &ctx,
     if (counters.numFlowDefs > 0) {
         counters.numFlowDefs -= 1;
     }
-    runtime.source_tag_entity = Entity::none();
     runtime.pending = 0;
     runtime.active = 0;
     runtime.completed = 1;
@@ -255,6 +254,26 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
     };
 
     retireFlowMeta(ctx, *this, flow_id, flow_entity);
+}
+
+MADRONA_NO_INLINE void Sim::refreshTagCounters(Context &ctx)
+{
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    int32_t active_tags = 0;
+    int32_t source_tags = 0;
+
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+
+        active_tags += ctx.get<PortTagList>(port_e).count;
+        source_tags += ctx.get<PortSourceTagList>(port_e).count;
+    }
+
+    runtime.numActiveTags = active_tags;
+    runtime.numSourceTags = source_tags;
 }
 
 }

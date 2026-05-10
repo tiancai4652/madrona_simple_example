@@ -1,5 +1,6 @@
 import argparse
 import csv
+import importlib.util
 import json
 import os
 import sys
@@ -10,10 +11,48 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "madrona_simple_example" / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+PKG_DIR = SRC_DIR / "madrona_simple_example"
+BUILD_DIR = ROOT / "madrona_simple_example" / "build"
 
-from madrona_simple_example import GridWorld, load_network_inputs_from_files
+
+def _load_local_package():
+    pkg_name = "madrona_simple_example"
+    ext_name = f"{pkg_name}._madrona_simple_example_cpp"
+    ext_candidates = sorted(BUILD_DIR.glob("_madrona_simple_example_cpp*.so"))
+    if not ext_candidates:
+        raise ImportError(
+            f"missing built extension under {BUILD_DIR}; "
+            "run `cmake --build madrona_simple_example/build -j4` first"
+        )
+
+    for mod_name in list(sys.modules.keys()):
+        if mod_name == pkg_name or mod_name.startswith(pkg_name + "."):
+            del sys.modules[mod_name]
+
+    ext_spec = importlib.util.spec_from_file_location(ext_name, ext_candidates[0])
+    if ext_spec is None or ext_spec.loader is None:
+        raise ImportError(f"failed to load extension spec from {ext_candidates[0]}")
+    ext_mod = importlib.util.module_from_spec(ext_spec)
+    sys.modules[ext_name] = ext_mod
+    ext_spec.loader.exec_module(ext_mod)
+
+    init_py = PKG_DIR / "__init__.py"
+    pkg_spec = importlib.util.spec_from_file_location(
+        pkg_name,
+        init_py,
+        submodule_search_locations=[str(PKG_DIR)],
+    )
+    if pkg_spec is None or pkg_spec.loader is None:
+        raise ImportError(f"failed to load package spec from {init_py}")
+    pkg_mod = importlib.util.module_from_spec(pkg_spec)
+    sys.modules[pkg_name] = pkg_mod
+    pkg_spec.loader.exec_module(pkg_mod)
+    return pkg_mod
+
+
+_pkg = _load_local_package()
+GridWorld = _pkg.GridWorld
+load_network_inputs_from_files = _pkg.load_network_inputs_from_files
 
 
 def build_grid_inputs():

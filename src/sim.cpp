@@ -36,6 +36,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<FlowDef>();
     registry.registerComponent<FlowRouteState>();
     registry.registerComponent<FlowRuntimeState>();
+    registry.registerComponent<FlowScheduleState>();
     registry.registerComponent<FlowTagState>();
     registry.registerComponent<FlowTagProgress>();
     registry.registerComponent<PortBuffer>();
@@ -49,6 +50,9 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortSourceTagList>();
     registry.registerComponent<PortInbox>();
     registry.registerComponent<PortCreateList>();
+    registry.registerComponent<PortTagPool>();
+    registry.registerComponent<PortIngressLinkList>();
+    registry.registerComponent<PortDirtyMarkList>();
     registry.registerComponent<PortCompletionList>();
     registry.registerComponent<PortPfcConfig>();
     registry.registerComponent<PortPfcState>();

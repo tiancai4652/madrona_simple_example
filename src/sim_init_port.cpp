@@ -73,6 +73,17 @@ MADRONA_NO_INLINE void initPortQueues(
     ctx.get<PortSourceTagList>(port_entity) = PortSourceTagList {};
     ctx.get<PortInbox>(port_entity) = PortInbox {};
     ctx.get<PortCreateList>(port_entity) = PortCreateList {};
+    PortTagPool pool {};
+    pool.free_count = MAX_TAGS_PER_PORT;
+    for (int32_t i = 0; i < MAX_TAGS_PER_PORT; i++) {
+        Entity tag_entity = ctx.makeEntity<FlowTag>();
+        ctx.get<FlowTagState>(tag_entity) = FlowTagState {};
+        ctx.get<FlowTagProgress>(tag_entity) = FlowTagProgress {};
+        pool.free_tags[i] = tag_entity;
+    }
+    ctx.get<PortTagPool>(port_entity) = pool;
+    ctx.get<PortIngressLinkList>(port_entity) = PortIngressLinkList {};
+    ctx.get<PortDirtyMarkList>(port_entity) = PortDirtyMarkList {};
     ctx.get<PortCompletionList>(port_entity) = PortCompletionList {};
     ctx.get<IngressTagList>(port_entity) = IngressTagList {};
 }

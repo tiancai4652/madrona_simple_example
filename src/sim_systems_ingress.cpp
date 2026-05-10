@@ -328,62 +328,98 @@ void Sim::bwUpdateOnePort(Context &ctx,
     inbox.num_bwupd = 0;
 }
 
-void Sim::flushTagCreate(Context &ctx)
+void Sim::materializeTagCreateOnePort(Context &ctx,
+                                      int32_t port_id,
+                                      DirtyPort &dirty,
+                                      PortCreateList &create_list,
+                                      PortIngressLinkList &ingress_links,
+                                      PortTraceLast &trace)
 {
     bool keep_trace = traceModeEnabled();
     constexpr const char *scope = "ingress_chain";
     uint64_t step = systemLogStep;
     bool log_enabled = keep_trace && compiledSystemLogEnabled(scope, step);
 
+    for (int32_t i = 0; i < create_list.num; i++) {
+        const PortCreateReq &req = create_list.reqs[i];
+        Entity created = createTagOnPort(ctx, port_id, req.flow_id,
+            req.in_bw, req.size, req.is_source != 0, req.priority, false);
+        if (created == Entity::none()) {
+            if (keep_trace) {
+                if (req.from_arrival != 0) {
+                    trace.arrival_skipped += 1;
+                } else {
+                    trace.bwupd_skipped += 1;
+                }
+            }
+            continue;
+        }
+
+        const FlowTagState &tag = ctx.get<FlowTagState>(created);
+        if (tag.ingress_port_id >= 0) {
+            if (ingress_links.num >= MAX_PORT_INGRESS_LINKS) {
+                FATAL("PortIngressLinkList overflow");
+            }
+
+            ingress_links.reqs[ingress_links.num++] = PortIngressLinkReq {
+                .ingress_port_id = tag.ingress_port_id,
+                .tag_entity = created,
+            };
+        }
+
+        if (keep_trace) {
+            if (req.from_arrival != 0) {
+                trace.arrival_created += 1;
+            } else {
+                trace.bwupd_created += 1;
+            }
+        }
+
+        if (log_enabled && req.log_enabled != 0) {
+            if (req.from_arrival != 0) {
+                printSystemArrivalTag(step, now, req.log_label,
+                    tag, dirty.isDirty);
+            } else {
+                printSystemBwUpdateTag(step, now, req.log_label,
+                    tag, dirty.isDirty);
+            }
+        }
+    }
+
+    create_list.num = 0;
+}
+
+void Sim::flushIngressTagLinks(Context &ctx)
+{
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
             continue;
         }
 
-        PortCreateList &cl = ctx.get<PortCreateList>(port_e);
-        if (cl.num == 0) {
-            continue;
-        }
-
-        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
-        for (int32_t i = 0; i < cl.num; i++) {
-            const PortCreateReq &req = cl.reqs[i];
-            Entity created = createTagOnPort(ctx, port_id, req.flow_id,
-                req.in_bw, req.size, req.is_source != 0, req.priority);
-            if (created == Entity::none()) {
-                if (keep_trace) {
-                    if (req.from_arrival != 0) {
-                        trace.arrival_skipped += 1;
-                    } else {
-                        trace.bwupd_skipped += 1;
-                    }
-                }
+        PortIngressLinkList &links = ctx.get<PortIngressLinkList>(port_e);
+        for (int32_t i = 0; i < links.num; i++) {
+            const PortIngressLinkReq &req = links.reqs[i];
+            if (req.tag_entity == Entity::none() ||
+                req.ingress_port_id < 0 ||
+                req.ingress_port_id >= numPorts) {
                 continue;
             }
 
-            if (keep_trace) {
-                if (req.from_arrival != 0) {
-                    trace.arrival_created += 1;
-                } else {
-                    trace.bwupd_created += 1;
-                }
+            Entity ingress_entity = portEntities[req.ingress_port_id];
+            if (ingress_entity == Entity::none()) {
+                continue;
             }
 
-            if (log_enabled && req.log_enabled != 0) {
-                const FlowTagState &tag = ctx.get<FlowTagState>(created);
-                int32_t dirty_flag = ctx.get<DirtyPort>(port_e).isDirty;
-                if (req.from_arrival != 0) {
-                    printSystemArrivalTag(step, now, req.log_label,
-                        tag, dirty_flag);
-                } else {
-                    printSystemBwUpdateTag(step, now, req.log_label,
-                        tag, dirty_flag);
-                }
+            IngressTagList &itl = ctx.get<IngressTagList>(ingress_entity);
+            if (itl.count < MAX_TAGS_PER_INGRESS) {
+                itl.tags[itl.count++] = req.tag_entity;
+            } else {
+                FATAL("IngressTagList overflow");
             }
         }
 
-        cl.num = 0;
+        links.num = 0;
     }
 }
 
