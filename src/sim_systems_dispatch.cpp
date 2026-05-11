@@ -315,6 +315,28 @@ void Sim::flushPortTagCleanup(Context &ctx)
     }
 }
 
+MADRONA_NO_INLINE void Sim::materializeTagCleanupOnePort(
+    Context &ctx,
+    int32_t,
+    PortCleanup &cleanup,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox,
+    Time logical_now)
+{
+    for (int32_t i = 0; i < cleanup.num; i++) {
+        if (cleanup.tags[i] == Entity::none()) {
+            continue;
+        }
+
+        destroyTagMaterializeOnePort(ctx, cleanup.tags[i],
+            cleanup.propagate[i] != 0, logical_now,
+            ingress_unlinks, completions, outbox);
+    }
+
+    cleanup.num = 0;
+}
+
 void Sim::logAllocTraces(Context &ctx)
 {
     if (!traceModeEnabled()) {

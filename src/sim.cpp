@@ -52,6 +52,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortCreateList>();
     registry.registerComponent<PortTagPool>();
     registry.registerComponent<PortIngressLinkList>();
+    registry.registerComponent<PortIngressUnlinkList>();
     registry.registerComponent<PortDirtyMarkList>();
     registry.registerComponent<PortCompletionList>();
     registry.registerComponent<PortPfcConfig>();
