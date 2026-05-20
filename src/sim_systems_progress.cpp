@@ -37,7 +37,7 @@ MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
     Context &ctx,
     Time dt,
     Time next_now,
-    int32_t port_id,
+    int32_t,
     PortState &,
     PortTagList &tag_list,
     const PortSourceTagList &source_tag_list,
@@ -54,17 +54,13 @@ MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
     finished_list.num = 0;
     outbox.num_events = 0;
 
-    if (hints.has_active_finish == 0) {
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    bool need_check_finish =
+        runtime.cachedNextFinishTime < timerInactiveSentinel() &&
+        runtime.cachedNextFinishTime <= dt + 1e-12;
+    if (!need_check_finish) {
         return;
     }
-
-    hints.active_finish_t -= dt;
-    if (hints.active_finish_t > 1e-12) {
-        return;
-    }
-
-    hints.has_active_finish = 0;
-    hints.active_finish_t = 0.0;
 
     auto handle_source_tag = [&](Entity tag_e) {
         trace.progress_source_scan_count += 1;
@@ -151,7 +147,7 @@ MADRONA_NO_INLINE void Sim::cleanupFinishedSourcesOnePort(
     Context &ctx,
     Time next_now,
     int32_t,
-    PortCachedHints &hints,
+    PortCachedHints &,
     PortFinishedSourceList &finished_list)
 {
     int32_t local_num = finished_list.num;
@@ -525,20 +521,6 @@ MADRONA_NO_INLINE void Sim::prepareProgressState(Context &ctx)
 {
     const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
-    Time next_finish = timerInactiveSentinel();
-    for (int32_t i = 0; i < numPorts; i++) {
-        Entity port_e = portEntities[i];
-        if (port_e == Entity::none()) {
-            continue;
-        }
-
-        const PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
-        if (hints.has_active_finish != 0 &&
-            hints.active_finish_t < next_finish) {
-            next_finish = hints.active_finish_t;
-        }
-    }
-    runtime.cachedNextFinishTime = next_finish;
     runtime.progressAllExhausted =
         runtime.cachedNextDrainTime >= timerInactiveSentinel() &&
         runtime.cachedNextFinishTime >= timerInactiveSentinel() &&
@@ -566,6 +548,35 @@ MADRONA_NO_INLINE void Sim::finishProgressState(Context &ctx, Time dt)
     if (runtime.progressAllExhausted != 0) {
         if (enablePfc != 0) {
             progressExhaustedPfcState(ctx, dt);
+        }
+    } else if (runtime.cachedNextFinishTime < timerInactiveSentinel()) {
+        if (runtime.cachedNextFinishTime <= dt + 1e-12) {
+            Time next_finish = timerInactiveSentinel();
+            for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+                Entity port_e = portEntities[port_id];
+                if (port_e == Entity::none()) {
+                    continue;
+                }
+                PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
+                if (hints.has_finish_hint != 0 &&
+                    hints.finish_hint_t < next_finish) {
+                    next_finish = hints.finish_hint_t;
+                }
+            }
+            runtime.cachedNextFinishTime = next_finish;
+        } else {
+            runtime.cachedNextFinishTime -= dt;
+            if (runtime.cachedNextFinishTime < 1e-15) {
+                runtime.cachedNextFinishTime = 1e-15;
+            }
+        }
+    }
+
+    if (runtime.cachedNextDrainTime < timerInactiveSentinel()) {
+        runtime.cachedNextDrainTime -= dt;
+        if (runtime.cachedNextDrainTime < 1e-15) {
+            runtime.cachedNextDrainTime = timerInactiveSentinel();
+            runtime.cachedDrainPortID = -1;
         }
     }
 

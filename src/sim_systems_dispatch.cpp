@@ -248,8 +248,6 @@ void Sim::reducePortCachedHints(Context &ctx)
         runtime.cachedDrainPortID = -1;
     }
 
-    runtime.cachedNextFinishTime = timerInactiveSentinel();
-
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
@@ -259,22 +257,15 @@ void Sim::reducePortCachedHints(Context &ctx)
         PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
         if (trace.was_dirty_at_alloc != 0) {
             if (hints.has_finish_hint != 0) {
-                hints.has_active_finish = 1;
-                hints.active_finish_t = hints.finish_hint_t;
-            } else {
-                hints.has_active_finish = 0;
-                hints.active_finish_t = 0.0;
+                if (hints.finish_hint_t < runtime.cachedNextFinishTime) {
+                    runtime.cachedNextFinishTime = hints.finish_hint_t;
+                }
             }
         }
         if (hints.has_drain_hint != 0) {
             if (hints.drain_hint_t < runtime.cachedNextDrainTime) {
                 runtime.cachedNextDrainTime = hints.drain_hint_t;
                 runtime.cachedDrainPortID = port_id;
-            }
-        }
-        if (hints.has_active_finish != 0) {
-            if (hints.active_finish_t < runtime.cachedNextFinishTime) {
-                runtime.cachedNextFinishTime = hints.active_finish_t;
             }
         }
     }

@@ -94,18 +94,12 @@ MADRONA_NO_INLINE void Sim::setBacklogDrainTimer(PortTimers &timers, Time t)
 
 MADRONA_NO_INLINE void Sim::setPfcPauseTimer(PortTimers &timers, Time t)
 {
-    if (!timerIsActive(timers.pfc_pause) ||
-        t < timers.pfc_pause) {
-        timers.pfc_pause = t;
-    }
+    timers.pfc_pause = t;
 }
 
 MADRONA_NO_INLINE void Sim::setPfcResumeTimer(PortTimers &timers, Time t)
 {
-    if (!timerIsActive(timers.pfc_resume) ||
-        t < timers.pfc_resume) {
-        timers.pfc_resume = t;
-    }
+    timers.pfc_resume = t;
 }
 
 MADRONA_NO_INLINE void Sim::clearBacklogDrainTimer(PortTimers &timers)
