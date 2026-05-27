@@ -64,12 +64,6 @@ void Sim::loadTopo(Engine &ctx)
         }
     }
 
-    for (int32_t i = 0; i < numTopoNodes; i++) {
-        for (int32_t j = 0; j < numTopoNodes; j++) {
-            linkDelays[i][j] = -1.0;
-        }
-    }
-
     numTopoLinks = 0;
     for (int32_t i = 0; i < num_input_links; i++) {
         topoLinks[numTopoLinks++] = TopoLinkState {
@@ -85,12 +79,6 @@ void Sim::loadTopo(Engine &ctx)
             .bandwidth = input_links[i].bandwidth,
         };
 
-        int32_t src_slot = findNodeSlot(input_links[i].src);
-        int32_t dst_slot = findNodeSlot(input_links[i].dst);
-        if (src_slot >= 0 && dst_slot >= 0) {
-            linkDelays[src_slot][dst_slot] = input_links[i].delay;
-            linkDelays[dst_slot][src_slot] = input_links[i].delay;
-        }
     }
 
     for (int32_t i = 0; i < numTopoLinks; i++) {
@@ -116,6 +104,7 @@ void Sim::loadTopo(Engine &ctx)
         topoNodes[src_slot].neighbors[neighbor_idx].neighbor_slot = dst_slot;
         topoNodes[src_slot].neighbors[neighbor_idx].port_id = port_id;
         topoNodes[src_slot].neighbors[neighbor_idx].port_entity = portEntities[port_id];
+        topoNodes[src_slot].neighbors[neighbor_idx].delay = topoLinks[i].delay;
     }
 
     for (int32_t i = 0; i < numTopoLinks; i++) {

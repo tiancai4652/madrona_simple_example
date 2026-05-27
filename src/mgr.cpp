@@ -17,6 +17,7 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 using namespace madrona;
 using namespace madrona::py;
@@ -33,6 +34,18 @@ inline uint64_t alignOffset(uint64_t offset, uint64_t alignment)
     }
     return offset + (alignment - remainder);
 }
+
+#ifdef MADRONA_CUDA_SUPPORT
+inline uint32_t gpuWorldDataBytes()
+{
+    const uint64_t sim_bytes = sizeof(Sim);
+    if (sim_bytes > std::numeric_limits<uint32_t>::max()) {
+        FATAL("sizeof(Sim) exceeds CUDA executor's uint32_t world data limit");
+    }
+
+    return static_cast<uint32_t>(sim_bytes);
+}
+#endif
 
 struct NetworkLayout {
     uint64_t totalBytes;
@@ -280,7 +293,7 @@ struct Manager::GPUImpl final : Manager::Impl {
                   .numWorldInitBytes = sizeof(WorldInit),
                   .userConfigPtr = (void *)&sim_cfg,
                   .numUserConfigBytes = sizeof(Sim::Config),
-                  .numWorldDataBytes = sizeof(Sim),
+                  .numWorldDataBytes = gpuWorldDataBytes(),
                   .worldDataAlignment = alignof(Sim),
                   .numWorlds = mgr_cfg.numWorlds,
                   .numTaskGraphs = 1,

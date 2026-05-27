@@ -34,18 +34,18 @@ constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
 
 
-constexpr int32_t MAX_TOPO_NODES = 1152;
-constexpr int32_t MAX_TOPO_LINKS = 3200;
-constexpr int32_t MAX_TOPO_PORTS = 3200;
-constexpr int32_t MAX_NODE_NEIGHBORS = 56;
-constexpr int32_t MAX_FLOWS = 68608;
+constexpr int32_t MAX_TOPO_NODES = 10688;
+constexpr int32_t MAX_TOPO_LINKS = 41088;
+constexpr int32_t MAX_TOPO_PORTS = 41088;
+constexpr int32_t MAX_NODE_NEIGHBORS = 328;
+constexpr int32_t MAX_FLOWS = 677888;
 constexpr int32_t MAX_PATH_NODES = 6;
 constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
 constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
-constexpr int32_t MAX_DELAYED_EVENTS = 131072;
-constexpr int32_t MAX_EVENTS_PER_STEP = 1024;
-constexpr int32_t MAX_TAG_INDEX = 258048;
-constexpr int32_t MAX_SOURCE_TAGS = 64512;
+constexpr int32_t MAX_DELAYED_EVENTS = 2908160;
+constexpr int32_t MAX_EVENTS_PER_STEP = 328704;
+constexpr int32_t MAX_TAG_INDEX = 2580480;
+constexpr int32_t MAX_SOURCE_TAGS = 645120;
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {
@@ -53,6 +53,7 @@ struct TopoNeighbor {
     int32_t neighbor_slot = -1;
     madrona::Entity port_entity = madrona::Entity::none();
     int32_t port_id = -1;
+    Time delay = -1.0;
 };
 
 struct TopoNodeState {
@@ -155,6 +156,8 @@ struct Sim : public madrona::WorldBase {
                                          Bw port_bw);
     int32_t findNodeSlot(NodeId node_id) const;
     int32_t findNeighborSlot(int32_t node_slot, NodeId neighbor_id) const;
+    Time getLinkDelay(NodeId src, NodeId dst) const;
+    Time getPortLinkDelay(int32_t src_port_id, int32_t dst_port_id) const;
     int32_t flowLookupIndex(FlowId flow_id) const;
     int32_t findTagLookupSlot(const PortTagLookup &lookup,
                               FlowId flow_id) const;
@@ -559,16 +562,8 @@ struct Sim : public madrona::WorldBase {
     madrona::Entity portEntities[MAX_TOPO_PORTS];
     NodeId portToNode[MAX_TOPO_PORTS];
     int32_t peerPort[MAX_TOPO_PORTS];
-    Time linkDelays[MAX_TOPO_NODES][MAX_TOPO_NODES];
-    NodeId routeTable[MAX_TOPO_NODES][MAX_TOPO_NODES];
-    int32_t ecmpCount[MAX_TOPO_NODES][MAX_TOPO_NODES];
-    NodeId ecmpNextHops[MAX_TOPO_NODES][MAX_TOPO_NODES][MAX_ECMP_NEXT_HOPS];
-    // computeRoutes() reuses a single BFS frontier / distance buffer per
-    // destination to keep GPU world init O(numTopoNodes * (V + E)) instead of
-    // materializing and clearing a full MAX_TOPO_NODES x MAX_TOPO_NODES
-    // scratch matrix inside the device-side constructor.
-    int32_t bfsDist[MAX_TOPO_NODES];
-    int32_t bfsQueue[MAX_TOPO_NODES];
+    mutable int32_t bfsDist[MAX_TOPO_NODES];
+    mutable int32_t bfsQueue[MAX_TOPO_NODES];
     FlowId flowLookupBase = 0;
     int32_t flowLookupSpan = 0;
     madrona::Entity flowMetaEntityLookup[MAX_FLOWS];

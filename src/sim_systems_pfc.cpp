@@ -285,12 +285,7 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
             for (int32_t j = 0; j < num_upstream_ports && j < MAX_PAUSED_UPSTREAMS; j++) {
                 int32_t up = upstream_ports[j];
                 state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = up;
-                int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                Time pfc_delay = defaultLinkDelay;
-                if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                    pfc_delay = linkDelays[detect_slot][upstream_slot];
-                }
+                Time pfc_delay = getPortLinkDelay(port_id, up);
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};
@@ -313,12 +308,7 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
             state_changed = true;
             for (int32_t j = 0; j < state.paused_upstream_count[pri]; j++) {
                 int32_t up = state.paused_upstreams[pri][j];
-                int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                Time pfc_delay = defaultLinkDelay;
-                if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                    pfc_delay = linkDelays[detect_slot][upstream_slot];
-                }
+                Time pfc_delay = getPortLinkDelay(port_id, up);
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};
@@ -420,12 +410,7 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             state.paused_upstream_count[pri] = 0;
             if (upstream_port >= 0) {
                 state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = upstream_port;
-                int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                int32_t upstream_slot = findNodeSlot(portToNode[upstream_port]);
-                Time pfc_delay = defaultLinkDelay;
-                if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                    pfc_delay = linkDelays[detect_slot][upstream_slot];
-                }
+                Time pfc_delay = getPortLinkDelay(port_id, upstream_port);
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};
@@ -448,12 +433,7 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             state_changed = true;
             for (int32_t k = 0; k < state.paused_upstream_count[pri]; k++) {
                 int32_t up = state.paused_upstreams[pri][k];
-                int32_t detect_slot = findNodeSlot(portToNode[port_id]);
-                int32_t upstream_slot = findNodeSlot(portToNode[up]);
-                Time pfc_delay = defaultLinkDelay;
-                if (detect_slot >= 0 && upstream_slot >= 0 && linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                    pfc_delay = linkDelays[detect_slot][upstream_slot];
-                }
+                Time pfc_delay = getPortLinkDelay(port_id, up);
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};

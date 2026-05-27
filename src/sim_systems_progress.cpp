@@ -78,15 +78,8 @@ MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
             }
 
             if (tag.next_port_id >= 0) {
-                Time link_delay = defaultLinkDelay;
-                int32_t src_node_slot = findNodeSlot(portToNode[tag.port_id]);
-                int32_t dst_node_slot =
-                    findNodeSlot(portToNode[tag.next_port_id]);
-
-                if (src_node_slot >= 0 && dst_node_slot >= 0 &&
-                    linkDelays[src_node_slot][dst_node_slot] >= 0.0) {
-                    link_delay = linkDelays[src_node_slot][dst_node_slot];
-                }
+                Time link_delay =
+                    getPortLinkDelay(tag.port_id, tag.next_port_id);
 
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent ev {};
@@ -447,17 +440,8 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
                         continue;
                     }
 
-                    int32_t detect_slot =
-                        findNodeSlot(portToNode[ingress_port]);
-                    int32_t upstream_slot =
-                        findNodeSlot(portToNode[upstream_port]);
-                    Time pfc_delay = defaultLinkDelay;
-
-                    if (detect_slot >= 0 && upstream_slot >= 0 &&
-                        linkDelays[detect_slot][upstream_slot] >= 0.0) {
-                        pfc_delay =
-                            linkDelays[detect_slot][upstream_slot];
-                    }
+                    Time pfc_delay =
+                        getPortLinkDelay(ingress_port, upstream_port);
 
                     DelayedEvent ev {};
                     ev.t = now + dt + pfc_delay;

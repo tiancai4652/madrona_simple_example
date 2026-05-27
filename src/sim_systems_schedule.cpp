@@ -6,6 +6,12 @@ using namespace madrona::math;
 
 namespace madsimple {
 
+namespace {
+
+constexpr int32_t MAX_LOGGED_SCHEDULE_FLOWS = 4096;
+
+}
+
 MADRONA_NO_INLINE bool Sim::buildFlowArrivalEvent(int32_t src_port_id,
                                                   const FlowDef &flow,
                                                   DelayedEvent &out_ev) const
@@ -195,7 +201,7 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
             constexpr const char *scope = "ingress_chain";
             uint64_t step = systemLogStep;
             bool log_enabled = compiledSystemLogEnabled(scope, step);
-            FlowDef logged_flows[MAX_FLOWS] {};
+            FlowDef logged_flows[MAX_LOGGED_SCHEDULE_FLOWS] {};
             int32_t num_logged_flows = 0;
 
             if (log_enabled) {
@@ -215,7 +221,8 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
                 if (flow_runtime.pending == 0) {
                     continue;
                 }
-                if (log_enabled && num_logged_flows < MAX_FLOWS) {
+                if (log_enabled &&
+                    num_logged_flows < MAX_LOGGED_SCHEDULE_FLOWS) {
                     logged_flows[num_logged_flows++] = flow;
                 }
                 DelayedEvent ev = schedule_state.prepared_event;

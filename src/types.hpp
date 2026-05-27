@@ -79,7 +79,7 @@ using NodeId = int32_t;
 
 // Size of the flow-completion record history we export to the host.
 // Matches Sim::flowCompletions[] capacity in sim.hpp.
-constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
+constexpr int32_t MAX_FLOW_COMPLETIONS = 677888;
 
 // Matches the layout of the completion record snapshotted by
 // Sim::recordFlowCompletion(). Kept POD so it can be copied into the
@@ -479,7 +479,7 @@ struct PortDelayedQueue {
 // whose FlowTagState.port_id == this port). Replaces the legacy
 // "for (i = 0; i < numTagIndexEntries; i++) if (tagIndex[i].port_id !=
 // port_id) continue;" O(N_tags * N_ports) scan in per-Port workers.
-constexpr int32_t MAX_TAGS_PER_PORT = 256;
+constexpr int32_t MAX_TAGS_PER_PORT = 64;
 
 struct PortTagList {
     int32_t count = 0;

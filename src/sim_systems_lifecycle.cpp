@@ -79,15 +79,7 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
 
     if (propagate_cleanup && tag.next_port_id >= 0) {
         if (tag.downstream_created != 0) {
-            int32_t src_node_slot = findNodeSlot(portToNode[tag.port_id]);
-            int32_t dst_node_slot = findNodeSlot(portToNode[tag.next_port_id]);
-            Time delay = 0.0;
-            if (src_node_slot >= 0 && dst_node_slot >= 0) {
-                delay = linkDelays[src_node_slot][dst_node_slot];
-                if (delay < 0.0) {
-                    delay = 0.0;
-                }
-            }
+            Time delay = getPortLinkDelay(tag.port_id, tag.next_port_id);
             out_ev = DelayedEvent {};
             out_ev.t = effective_now + delay;
             out_ev.type = DelayedEvent::Type::BwUpdate;
@@ -199,15 +191,7 @@ MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
 
     if (propagate_cleanup && tag.next_port_id >= 0) {
         if (tag.downstream_created != 0) {
-            int32_t src_node_slot = findNodeSlot(portToNode[tag.port_id]);
-            int32_t dst_node_slot = findNodeSlot(portToNode[tag.next_port_id]);
-            Time delay = 0.0;
-            if (src_node_slot >= 0 && dst_node_slot >= 0) {
-                delay = linkDelays[src_node_slot][dst_node_slot];
-                if (delay < 0.0) {
-                    delay = 0.0;
-                }
-            }
+            Time delay = getPortLinkDelay(tag.port_id, tag.next_port_id);
 
             if (outbox.num_events < MAX_PORT_OUTBOX) {
                 DelayedEvent &ev = outbox.events[outbox.num_events++];
