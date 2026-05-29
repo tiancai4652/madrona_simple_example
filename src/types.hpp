@@ -77,9 +77,39 @@ using Bytes = double;
 using FlowId = int64_t;
 using NodeId = int32_t;
 
-// Size of the flow-completion record history we export to the host.
-// Matches Sim::flowCompletions[] capacity in sim.hpp.
+// =============================================================================
+// Capacity constants
+// =============================================================================
+//
+// Keep these together so scale changes such as d64 -> d256 can be adjusted in
+// one place. Topology / flow-global limits live in sim.hpp; these constants
+// cover exported buffers and per-port local queues/components declared below.
+
 constexpr int32_t MAX_FLOW_COMPLETIONS = 2742272;
+constexpr int32_t PFC_MAX_PRIORITY = 8;
+
+// Must be >= the maximum number of flows per port so buffer chunks can record
+// all active flow weights. For leafspine10240 d256, observed max_port_tags=255.
+constexpr int32_t MAX_CHUNK_WEIGHTS = 320;
+constexpr int32_t MAX_BUFFER_CHUNKS = 16;
+constexpr int32_t MAX_PAUSED_UPSTREAMS = 16;
+
+// Per-port cleanup / completion / event queues. These are local fixed-size
+// batches, so they must cover the largest same-port fan-in in one step.
+constexpr int32_t MAX_PORT_CLEANUP = 320;
+constexpr int32_t MAX_PORT_OUTBOX = 320;
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 320;
+constexpr int32_t MAX_TAGS_PER_PORT = 320;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 1024;
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 320;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 320;
+constexpr int32_t MAX_PORT_INBOX_PFC = 32;
+constexpr int32_t MAX_PORT_CREATE = 320;
+constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
+constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
+constexpr int32_t MAX_PORT_COMPLETE = 320;
+constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 
 // Matches the layout of the completion record snapshotted by
 // Sim::recordFlowCompletion(). Kept POD so it can be copied into the
@@ -226,16 +256,6 @@ enum class NodeType : int32_t {
     Switch,
 };
 
-constexpr int32_t PFC_MAX_PRIORITY = 8;
-// Must be >= the maximum number of flows per port so that buffer chunks can
-// record all active flows. leafspine1024 with d=64 has 64 flows per inter-
-// switch port; use 64 to cover this topology without silently capping chunk
-// weights.  If future topologies have more flows per port, raise this value
-// to avoid incorrect buffer bandwidth allocation.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 64;
-constexpr int32_t MAX_BUFFER_CHUNKS = 16;
-constexpr int32_t MAX_PAUSED_UPSTREAMS = 16;
-
 struct DirtyPort {
     int32_t isDirty = 0;
 };
@@ -354,11 +374,6 @@ struct PortTimers {
     Time pfc_resume = 0.0;
 };
 
-// leafspine1024 d64 all-to-all drives 63 flows into each destination host
-// port, so a single frame can queue >32 deferred destroyTag requests on one
-// port. Keep headroom above that to avoid silently stranding tags.
-constexpr int32_t MAX_PORT_CLEANUP = 64;
-
 struct PortCleanup {
     int32_t num = 0;
     madrona::Entity tags[MAX_PORT_CLEANUP] {};
@@ -440,20 +455,10 @@ struct PortTraceLast {
     int32_t pfc_skipped = 0;
 };
 
-// Phase C: per-Port outbox for DelayedEvents produced by pfcDetectOnePort
-// and emitOnePort. The per-Port worker fills `events[0..num_events)` on
-// the port's own component and the singleton `flushPortOutbox` appends
-// them to Sim::delayedEvents in port_id ascending order. Size is set so
-// one port can hold a full pause-all-priorities wave (PFC_MAX_PRIORITY *
-// MAX_PAUSED_UPSTREAMS = 128 events) plus a generous emit batch.
-constexpr int32_t MAX_PORT_OUTBOX = 256;
-
 struct PortOutbox {
     int32_t num_events = 0;
     DelayedEvent events[MAX_PORT_OUTBOX] {};
 };
-
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
 
 struct PortTagLookupEntry {
     FlowId flow_id = -1;
@@ -464,22 +469,11 @@ struct PortTagLookup {
     PortTagLookupEntry entries[MAX_PORT_TAG_LOOKUP] {};
 };
 
-// Per-target-port future event queue. Events stay time-sorted inside each
-// port-local queue so delivery can fan out over Port entities instead of
-// serially scanning a single global delayedEvents[] array.
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 128;
-
 struct PortDelayedQueue {
     int32_t head = 0;
     int32_t count = 0;
     DelayedEvent events[MAX_PORT_DELAYED_EVENTS] {};
 };
-
-// Phase D: per-Port list of tag entities owned by this port (i.e. tags
-// whose FlowTagState.port_id == this port). Replaces the legacy
-// "for (i = 0; i < numTagIndexEntries; i++) if (tagIndex[i].port_id !=
-// port_id) continue;" O(N_tags * N_ports) scan in per-Port workers.
-constexpr int32_t MAX_TAGS_PER_PORT = 320;
 
 struct PortTagList {
     int32_t count = 0;
@@ -499,22 +493,11 @@ struct PortSourceTagList {
 // Authoritative per-ingress-port tag list used by ingress-scoped systems.
 // This is kept on the Port entity so ingress-side work can stay entity-local
 // instead of bouncing through a shared global mirror.
-constexpr int32_t MAX_TAGS_PER_INGRESS = 1024;
-
 struct IngressTagList {
     int32_t count = 0;
     int32_t overflow = 0;
     madrona::Entity tags[MAX_TAGS_PER_INGRESS] {};
 };
-
-// Phase E: per-Port inbox. The deliverEvents singleton dispatches each
-// delayedEvent whose t <= now to the target port's inbox (arrival/bwupd
-// target ev.port_id, pfc target ev.target_port_id). Per-Port workers
-// arrival/bwUpdate/pfcPropagate then consume their local inbox without
-// scanning the global Sim::inbox* arrays.
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 64;
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 64;
-constexpr int32_t MAX_PORT_INBOX_PFC = 32;
 
 struct PortInbox {
     int32_t num_arrival = 0;
@@ -540,8 +523,6 @@ struct PortCreateReq {
     const char *log_label = nullptr;
 };
 
-constexpr int32_t MAX_PORT_CREATE = 64;
-
 struct PortCreateList {
     int32_t num = 0;
     PortCreateReq reqs[MAX_PORT_CREATE] {};
@@ -554,8 +535,6 @@ struct PortTagPool {
     int32_t free_count = 0;
     madrona::Entity free_tags[MAX_TAGS_PER_PORT] {};
 };
-
-constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 
 // Cross-port ingress-list links deferred out of createTagOnPort. The
 // per-Port tag-create materialize worker records "append this new tag to
@@ -571,8 +550,6 @@ struct PortIngressLinkList {
     PortIngressLinkReq reqs[MAX_PORT_INGRESS_LINKS] {};
 };
 
-constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
-
 // Deferred dirty-port fanout. Per-port workers that discover "these
 // owning ports must become dirty" append target port ids here; a tiny
 // singleton later replays the writes to DirtyPort in port_id order.
@@ -585,10 +562,6 @@ struct PortDirtyMarkList {
 // terminal port must not mutate Sim::flowCompletions / flowDefs /
 // flowRoutes directly; it pushes the flow_id here and
 // flushFlowCompletionSystem applies them in port_id ascending order.
-// Completion notifications can also fan in at destination host ports at the
-// same 63-flow scale; a 32-entry queue silently drops completions.
-constexpr int32_t MAX_PORT_COMPLETE = 64;
-
 struct PortCompletionReq {
     FlowId flow_id = -1;
     Time end_time = 0.0;
@@ -598,8 +571,6 @@ struct PortCompletionList {
     int32_t num = 0;
     PortCompletionReq reqs[MAX_PORT_COMPLETE] {};
 };
-
-constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 
 struct PortIngressUnlinkReq {
     int32_t ingress_port_id = -1;
