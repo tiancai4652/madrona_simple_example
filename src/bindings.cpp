@@ -267,13 +267,13 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                 setupFlowData(flow_ids, flow_src_nodes, flow_dst_nodes,
                               flow_sizes, flow_start_times, flow_priorities));
 
-            double prior_weights_arr[8] = {};
+            double prior_weights_arr[PFC_MAX_PRIORITY] = {};
             int64_t num_weights = (int64_t)prior_weights.shape(0);
-            for (int64_t i = 0; i < num_weights && i < 8; i++) {
+            for (int64_t i = 0; i < num_weights && i < PFC_MAX_PRIORITY; i++) {
                 prior_weights_arr[i] = prior_weights.data()[i];
             }
 
-            new (self) Manager(Manager::Config {
+            Manager::Config mgr_cfg {
                 .maxEpisodeLength = (uint32_t)max_episode_length,
                 .execMode = exec_mode,
                 .numWorlds = (uint32_t)num_worlds,
@@ -285,11 +285,13 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
                 .pfc_xon_threshold = pfc_xon_threshold,
                 .dt_min = dt_min,
                 .qos_mode = qos_mode,
-                .prior_weights = {prior_weights_arr[0], prior_weights_arr[1],
-                                  prior_weights_arr[2], prior_weights_arr[3],
-                                  prior_weights_arr[4], prior_weights_arr[5],
-                                  prior_weights_arr[6], prior_weights_arr[7]},
-            }, GridState {
+                .prior_weights = {},
+            };
+            for (int64_t i = 0; i < PFC_MAX_PRIORITY; i++) {
+                mgr_cfg.prior_weights[i] = prior_weights_arr[i];
+            }
+
+            new (self) Manager(mgr_cfg, GridState {
                 .cells = cells.get(),
                 .startX = (int32_t)start_x,
                 .startY = (int32_t)start_y,

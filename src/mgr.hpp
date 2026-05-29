@@ -29,7 +29,7 @@ public:
         double pfc_xon_threshold = 0.5e9;
         double dt_min = 0.0;
         int32_t qos_mode = 0;
-        double prior_weights[8] = {};
+        double prior_weights[PFC_MAX_PRIORITY] = {};
         int32_t perf_fct_only = 1;
     };
 

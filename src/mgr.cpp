@@ -443,7 +443,7 @@ Manager::Impl * Manager::Impl::init(const Config &cfg,
         .prior_weights = {},
         .perf_fct_only = perf_fct_only,
     };
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < PFC_MAX_PRIORITY; i++) {
         sim_cfg.prior_weights[i] = cfg.prior_weights[i];
     }
 

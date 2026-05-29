@@ -86,7 +86,7 @@ using NodeId = int32_t;
 // cover exported buffers and per-port local queues/components declared below.
 
 constexpr int32_t MAX_FLOW_COMPLETIONS = 2742272;
-constexpr int32_t PFC_MAX_PRIORITY = 8;
+constexpr int32_t PFC_MAX_PRIORITY = 1;
 
 // Must be >= the maximum number of flows per port so buffer chunks can record
 // all active flow weights. For leafspine10240 d256, observed max_port_tags=255.
@@ -104,7 +104,7 @@ constexpr int32_t MAX_TAGS_PER_PORT = 320;
 constexpr int32_t MAX_TAGS_PER_INGRESS = 1024;
 constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 320;
 constexpr int32_t MAX_PORT_INBOX_BWUPD = 320;
-constexpr int32_t MAX_PORT_INBOX_PFC = 32;
+constexpr int32_t MAX_PORT_INBOX_PFC = 1;
 constexpr int32_t MAX_PORT_CREATE = 320;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
