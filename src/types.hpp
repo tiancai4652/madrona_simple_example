@@ -92,7 +92,7 @@ constexpr int32_t PFC_MAX_PRIORITY = 1;
 // all active flow weights. For leafspine10240 d256, observed max_port_tags=255.
 constexpr int32_t MAX_CHUNK_WEIGHTS = 320;
 constexpr int32_t MAX_BUFFER_CHUNKS = 16;
-constexpr int32_t MAX_PAUSED_UPSTREAMS = 16;
+constexpr int32_t MAX_PAUSED_UPSTREAMS = 320;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
 // batches, so they must cover the largest same-port fan-in in one step.
@@ -104,7 +104,7 @@ constexpr int32_t MAX_TAGS_PER_PORT = 320;
 constexpr int32_t MAX_TAGS_PER_INGRESS = 1024;
 constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 320;
 constexpr int32_t MAX_PORT_INBOX_BWUPD = 320;
-constexpr int32_t MAX_PORT_INBOX_PFC = 1;
+constexpr int32_t MAX_PORT_INBOX_PFC = 320;
 constexpr int32_t MAX_PORT_CREATE = 320;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
