@@ -8,6 +8,19 @@
 using namespace madrona;
 using namespace madrona::math;
 
+namespace {
+
+inline bool isClose(double a, double b,
+                    double rel_eps = 0.05,
+                    double abs_eps = 1e-6)
+{
+    double diff = std::abs(a - b);
+    double max_val = std::max(std::abs(a), std::abs(b));
+    return diff < std::max(rel_eps * max_val, abs_eps);
+}
+
+}
+
 namespace madsimple {
 
 void Sim::materializeBacklog(FlowTagState &tag, Time at_time)
@@ -446,9 +459,10 @@ void Sim::advanceOnePortBuffer(
 
             for (int32_t i = 0; i < pri_counts[pri]; i++) {
                 FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
-                if (tag.in_bw != 0.0) {
+                if (!isClose(tag.in_bw, 0.0)) {
                     continue;
                 }
+
                 bool upstream_alive = false;
                 if (tag.is_source == 0) {
                     int32_t upstream_port = -1;
@@ -463,6 +477,7 @@ void Sim::advanceOnePortBuffer(
                         }
                     }
                 }
+
                 if (tag.backlog < 1e-15) {
                     if (!upstream_alive && cleanup.num < MAX_PORT_CLEANUP) {
                         cleanup.tags[cleanup.num] = pri_tags[pri][i];
@@ -471,19 +486,25 @@ void Sim::advanceOnePortBuffer(
                     }
                     continue;
                 }
-                if (tag.out_bw == 0.0) {
+
+                if (isClose(tag.out_bw, 0.0)) {
                     bool pfc_paused = false;
                     if (enablePfc != 0) {
-                        pfc_paused = pfc_state.paused[std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1)] != 0;
+                        pfc_paused = pfc_state.paused[
+                            std::clamp(tag.priority, 0,
+                                PFC_MAX_PRIORITY - 1)] != 0;
                     }
+
                     bool sp_starved = false;
                     if (qosMode != QOS_NONE) {
-                        int32_t tp = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+                        int32_t tp = std::clamp(tag.priority, 0,
+                            PFC_MAX_PRIORITY - 1);
                         PriorityBuffer &tpb = port_buf.prior_bufs[tp];
                         if (tpb.buf_cnt > 1e-15 || tpb.num_chunks > 0) {
                             sp_starved = true;
                         }
                     }
+
                     if (!pfc_paused && !upstream_alive && !sp_starved) {
                         tag.backlog = 0.0;
                         if (cleanup.num < MAX_PORT_CLEANUP) {

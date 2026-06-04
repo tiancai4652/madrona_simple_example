@@ -313,6 +313,12 @@ MADRONA_NO_INLINE int32_t Sim::lookupFlowRouteNext(
         return -1;
     }
 
+    const FlowRuntimeState &runtime =
+        ctx.get<FlowRuntimeState>(flow_entity);
+    if (runtime.route_active == 0 || runtime.completed != 0) {
+        return -1;
+    }
+
     const FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
     for (int32_t j = 0; j < route.num_steps; j++) {
         if (route.steps[j].port_id == port_id) {
@@ -330,6 +336,12 @@ MADRONA_NO_INLINE int32_t Sim::lookupFlowIngressPort(
 {
     Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
     if (flow_entity == Entity::none()) {
+        return -1;
+    }
+
+    const FlowRuntimeState &runtime =
+        ctx.get<FlowRuntimeState>(flow_entity);
+    if (runtime.route_active == 0 || runtime.completed != 0) {
         return -1;
     }
 

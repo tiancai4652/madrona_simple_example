@@ -114,6 +114,12 @@ MADRONA_NO_INLINE const FlowDef *Sim::getFlowDef(Context &ctx,
         return nullptr;
     }
 
+    const FlowRuntimeState &runtime =
+        ctx.get<FlowRuntimeState>(flow_entity);
+    if (runtime.completed != 0) {
+        return nullptr;
+    }
+
     return &ctx.get<FlowDef>(flow_entity);
 }
 
