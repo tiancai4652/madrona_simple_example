@@ -123,6 +123,7 @@ void Sim::loadTopo(Engine &ctx)
         int32_t src_port_id = topoNodes[src_slot].neighbors[src_neighbor_idx].port_id;
         int32_t dst_port_id = topoNodes[dst_slot].neighbors[dst_neighbor_idx].port_id;
         peerPort[dst_port_id] = src_port_id;
+        peerPort[src_port_id] = dst_port_id;
 
         Entity src_entity = portEntities[src_port_id];
         PortState &src_state = ctx.get<PortState>(src_entity);

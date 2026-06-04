@@ -38,6 +38,8 @@ bool systemLogEnabled(const char *, uint64_t)
 {
     return false;
 }
+bool flowWatchFlowEnabled(FlowId) { return false; }
+bool flowWatchNodeEnabled(const Sim &, int32_t) { return false; }
 
 void printInitTopoLog(const Sim &, Engine &) {}
 void printInitFlowLog(const Sim &) {}
@@ -71,12 +73,26 @@ void printSystemEmitBwUpdateTag(uint64_t, Time, int32_t, FlowId, double,
                                 double) {}
 void printSystemPfcDetectSummary(uint64_t, Time, int32_t, int32_t, int32_t,
                                  int32_t) {}
+void printSystemPfcDebugSummary(uint64_t, Time, int32_t, int32_t, int32_t,
+                                int32_t, int32_t, int32_t, int32_t, int32_t,
+                                int32_t, int32_t, int32_t) {}
 void printSystemClearSummary(uint64_t, Time, int32_t) {}
 void printSystemDTSummary(uint64_t, Time, double, double, double, double,
                           double, double, double, double) {}
 void printSystemBufferSummary(uint64_t, Time, int32_t, int32_t, double) {}
 void printSystemProgressSummary(uint64_t, Time, double, int32_t, int32_t,
                                 int32_t, int32_t, int32_t, double, double) {}
+void printFlowWatchPfcApply(uint64_t, Time, int32_t, NodeId,
+                            const PfcControlEv &, int32_t, int32_t) {}
+void printFlowWatchPfcEmit(uint64_t, Time, const char *, int32_t, NodeId,
+                           int32_t, NodeId, int32_t, int32_t, double,
+                           double) {}
+void printFlowWatchAlloc(uint64_t, Time, int32_t, NodeId,
+                         const FlowTagState &, int32_t) {}
+void printFlowWatchEmit(uint64_t, Time, const char *, int32_t, NodeId,
+                        const FlowTagState &) {}
+void printFlowWatchPfcMark(uint64_t, Time, int32_t, NodeId, int32_t, NodeId,
+                           int32_t, NodeId, const FlowTagState &) {}
 #else
 const bool init_log_print_enabled = envFlagEnabled("init_log_print_enabled");
 const bool system_log_print_enabled = envFlagEnabled("system_log_print_enabled");
@@ -113,6 +129,32 @@ bool systemLogEnabled(const char *scope, uint64_t step)
     }
 
     return true;
+}
+
+bool flowWatchFlowEnabled(FlowId flow_id)
+{
+    const char *env = std::getenv("flow_watch_flow_id");
+    if (env == nullptr || env[0] == '\0') {
+        return false;
+    }
+    char *end = nullptr;
+    long long want = std::strtoll(env, &end, 10);
+    return end != env && *end == '\0' && flow_id == (FlowId)want;
+}
+
+bool flowWatchNodeEnabled(const Sim &sim, int32_t port_id)
+{
+    const char *env = std::getenv("flow_watch_node_id");
+    if (env == nullptr || env[0] == '\0') {
+        return false;
+    }
+    if (port_id < 0 || port_id >= sim.numPorts) {
+        return false;
+    }
+    char *end = nullptr;
+    long want = std::strtol(env, &end, 10);
+    return end != env && *end == '\0' &&
+        sim.portToNode[port_id] == (NodeId)want;
 }
 
 void printInitTopoLog(const Sim &, Engine &) {}
@@ -289,6 +331,36 @@ void printSystemPfcDetectSummary(uint64_t step, Time now,
               << "\n";
 }
 
+void printSystemPfcDebugSummary(uint64_t step, Time now,
+                                int32_t detect_checked,
+                                int32_t detect_emitted,
+                                int32_t detect_dropped,
+                                int32_t delivered,
+                                int32_t deliver_dropped,
+                                int32_t applied,
+                                int32_t skipped,
+                                int32_t delayed_dropped,
+                                int32_t delayed_pfc_dropped,
+                                int32_t active_pause_ports,
+                                int32_t active_paused_ports)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[SYS][PFCDEBUG][SUMMARY] step=" << step
+              << " now=" << now
+              << " detect_checked=" << detect_checked
+              << " detect_emitted=" << detect_emitted
+              << " detect_dropped=" << detect_dropped
+              << " delivered=" << delivered
+              << " deliver_dropped=" << deliver_dropped
+              << " applied=" << applied
+              << " skipped=" << skipped
+              << " delayed_dropped=" << delayed_dropped
+              << " delayed_pfc_dropped=" << delayed_pfc_dropped
+              << " active_pause_ports=" << active_pause_ports
+              << " active_paused_ports=" << active_paused_ports
+              << "\n";
+}
+
 void printSystemClearSummary(uint64_t step, Time now,
                              int32_t cleared_port_count)
 {
@@ -358,6 +430,125 @@ void printSystemProgressSummary(uint64_t step, Time now,
               << " buffered_dirty_port_count=" << buffered_dirty_port_count
               << " next_now=" << next_now
               << " next_finish_gap=" << next_finish_gap
+              << "\n";
+}
+
+void printFlowWatchPfcApply(uint64_t step, Time now,
+                            int32_t port_id,
+                            NodeId node_id,
+                            const PfcControlEv &ev,
+                            int32_t applied_paused,
+                            int32_t dirty)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[FLOWWATCH][PFC_APPLY] step=" << step
+              << " now=" << now
+              << " port_id=" << port_id
+              << " node_id=" << node_id
+              << " source_port=" << ev.source_port_id
+              << " target_port=" << ev.target_port_id
+              << " priority=" << ev.priority
+              << " ev_paused=" << ev.paused
+              << " applied_paused=" << applied_paused
+              << " dirty=" << dirty
+              << "\n";
+}
+
+void printFlowWatchPfcEmit(uint64_t step, Time now,
+                           const char *phase,
+                           int32_t detect_port,
+                           NodeId detect_node,
+                           int32_t target_port,
+                           NodeId target_node,
+                           int32_t priority,
+                           int32_t paused,
+                           double buf,
+                           double net_rate)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[FLOWWATCH][PFC_EMIT] step=" << step
+              << " now=" << now
+              << " phase=" << phase
+              << " detect_port=" << detect_port
+              << " detect_node=" << detect_node
+              << " target_port=" << target_port
+              << " target_node=" << target_node
+              << " priority=" << priority
+              << " paused=" << paused
+              << " buf=" << buf
+              << " net_rate=" << net_rate
+              << "\n";
+}
+
+void printFlowWatchAlloc(uint64_t step, Time now,
+                         int32_t port_id,
+                         NodeId node_id,
+                         const FlowTagState &tag,
+                         int32_t paused)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[FLOWWATCH][ALLOC] step=" << step
+              << " now=" << now
+              << " port_id=" << port_id
+              << " node_id=" << node_id
+              << " flow_id=" << tag.flow_id
+              << " in_bw=" << tag.in_bw
+              << " out_bw=" << tag.out_bw
+              << " prev_out_bw=" << tag.prev_out_bw
+              << " backlog=" << tag.backlog
+              << " remaining=" << tag.remaining
+              << " is_source=" << tag.is_source
+              << " paused=" << paused
+              << " next_port=" << tag.next_port_id
+              << " downstream_created=" << tag.downstream_created
+              << "\n";
+}
+
+void printFlowWatchEmit(uint64_t step, Time now,
+                        const char *kind,
+                        int32_t port_id,
+                        NodeId node_id,
+                        const FlowTagState &tag)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[FLOWWATCH][EMIT] step=" << step
+              << " now=" << now
+              << " kind=" << kind
+              << " port_id=" << port_id
+              << " node_id=" << node_id
+              << " flow_id=" << tag.flow_id
+              << " out_bw=" << tag.out_bw
+              << " prev_out_bw=" << tag.prev_out_bw
+              << " next_port=" << tag.next_port_id
+              << " downstream_created=" << tag.downstream_created
+              << "\n";
+}
+
+void printFlowWatchPfcMark(uint64_t step, Time now,
+                           int32_t ingress_port,
+                           NodeId ingress_node,
+                           int32_t upstream_port,
+                           NodeId upstream_node,
+                           int32_t egress_port,
+                           NodeId egress_node,
+                           const FlowTagState &tag)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[FLOWWATCH][PFC_MARK] step=" << step
+              << " now=" << now
+              << " ingress_port=" << ingress_port
+              << " ingress_node=" << ingress_node
+              << " upstream_port=" << upstream_port
+              << " upstream_node=" << upstream_node
+              << " dirty_egress_port=" << egress_port
+              << " dirty_egress_node=" << egress_node
+              << " flow_id=" << tag.flow_id
+              << " tag_port=" << tag.port_id
+              << " tag_ingress=" << tag.ingress_port_id
+              << " in_bw=" << tag.in_bw
+              << " out_bw=" << tag.out_bw
+              << " backlog=" << tag.backlog
+              << " is_source=" << tag.is_source
               << "\n";
 }
 #endif

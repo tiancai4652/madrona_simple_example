@@ -97,6 +97,9 @@ MADRONA_NO_INLINE void beginScheduleStepSystem(Engine &ctx, SimDriver &driver)
     if (sim.traceModeEnabled()) {
         sim.systemLogStep += 1;
     }
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    runtime.delayedDropCount = 0;
+    runtime.delayedPfcDropCount = 0;
     driver.tick += 1;
 }
 
@@ -355,6 +358,14 @@ MADRONA_NO_INLINE void pfcDetectOnePortStepSystem(
         dirty, pfc_cfg, pfc_state, outbox, trace, tag_list, ingress_list);
 }
 
+MADRONA_NO_INLINE void markPfcIngressCheckTargetsStepSystem(
+    Engine &ctx,
+    SimDriver &)
+{
+    Sim &sim = ctx.data();
+    sim.markPfcIngressCheckTargets(ctx);
+}
+
 // Phase C: per-Port downstream emit. Pushes Arrival/BwUpdate events into
 // this port's own PortOutbox; flushPortOutbox later appends them to
 // Sim::delayedEvents in port_id ascending order.
@@ -388,6 +399,7 @@ MADRONA_NO_INLINE void postPfcStepSystem(Engine &ctx, SimDriver &)
     sim.flushPortOutbox(ctx);
     if (sim.traceModeEnabled()) {
         sim.logPfcDetectTraces(ctx);
+        sim.logPfcDebugTraces(ctx);
     }
 }
 
@@ -640,18 +652,16 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     // has already cleared each port's inbox / create / completion
     // scratch, and deliverOnePort (n1deliver) has dispatched each due
     // event from the port-local future queues into that port's PortInbox.
-    // We run pfcPropagate → arrival → per-port tag materialize →
-    // flushIngressTagLinks → bwUpdate → per-port tag materialize →
+    // We run arrival → per-port tag materialize → flushIngressTagLinks →
+    // bwUpdate → per-port tag materialize → flushIngressTagLinks →
+    // pfcPropagate →
     // flushIngressTagLinks → flushTagCleanup → flushFlowCompletion →
     // flushPortOutbox → logIngressChain, matching the legacy semantic
     // order while removing the cross-port write from createTagOnPort.
-    auto n2pfc = builder.addToGraph<ParallelForNode<Engine,
-        pfcPropagateOnePortStepSystem,
-        PortState, DirtyPort, PortPfcState, PortTraceLast, PortInbox>>({n1});
     auto n2arr = builder.addToGraph<ParallelForNode<Engine,
         arrivalOnePortStepSystem,
         PortState, DirtyPort, PortTraceLast, PortInbox, PortTagList,
-        PortSourceTagList, PortCreateList>>({n2pfc});
+        PortSourceTagList, PortCreateList>>({n1});
     auto n2createA_local = builder.addToGraph<ParallelForNode<Engine,
         materializeTagCreateOnePortStepSystem,
         PortState, DirtyPort, PortCreateList, PortIngressLinkList,
@@ -669,10 +679,14 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         PortTraceLast>>({n2bw});
     auto n2createB = builder.addToGraph<ParallelForNode<Engine,
         flushIngressTagLinksStepSystem, SimDriver>>({n2createB_local});
+    auto n2pfc = builder.addToGraph<ParallelForNode<Engine,
+        pfcPropagateOnePortStepSystem,
+        PortState, DirtyPort, PortPfcState, PortTraceLast, PortInbox>>(
+            {n2createB});
     auto n2cleanup_local = builder.addToGraph<ParallelForNode<Engine,
         materializeTagCleanupOnePortNowStepSystem,
         PortState, PortCleanup, PortIngressUnlinkList,
-        PortCompletionList, PortOutbox>>({n2createB});
+        PortCompletionList, PortOutbox>>({n2pfc});
     auto n2cleanup = builder.addToGraph<ParallelForNode<Engine,
         flushIngressTagUnlinksStepSystem, SimDriver>>({n2cleanup_local});
     auto n4 = builder.addToGraph<ParallelForNode<Engine,
@@ -709,10 +723,12 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     // write their own Arrival/BwUpdate events into the same outbox, so
     // delayedEvents ordering remains legacy-compatible.
     if constexpr (kTaskgraphStageLimit >= 6) {
+    auto n6mark = builder.addToGraph<ParallelForNode<Engine,
+        markPfcIngressCheckTargetsStepSystem, SimDriver>>({n5});
     auto n6a = builder.addToGraph<ParallelForNode<Engine,
         pfcDetectOnePortStepSystem,
         PortState, PortBuffer, DirtyPort, PortPfcConfig, PortPfcState,
-        PortTraceLast, PortOutbox, PortTagList, IngressTagList>>({n5});
+        PortTraceLast, PortOutbox, PortTagList, IngressTagList>>({n6mark});
     auto n6timers = builder.addToGraph<ParallelForNode<Engine,
         applyPfcTimerOnePortStepSystem,
         PortState, PortPfcState, PortTimers>>({n6a});

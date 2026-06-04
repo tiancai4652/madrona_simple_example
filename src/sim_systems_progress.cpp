@@ -285,7 +285,13 @@ MADRONA_NO_INLINE void Sim::progressPfcTimerOnePort(
             }
 
             const FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+            if (tag.port_entity == Entity::none()) {
+                continue;
+            }
             if (tag.port_id < 0 || tag.port_id >= numPorts) {
+                continue;
+            }
+            if (tag.port_entity != portEntities[tag.port_id]) {
                 continue;
             }
 
@@ -452,6 +458,12 @@ void Sim::progressExhaustedPfcState(Context &ctx, Time dt)
                         .priority = pri,
                         .paused = 0,
                     };
+                    if (flowWatchNodeEnabled(*this, upstream_port)) {
+                        printFlowWatchPfcEmit(systemLogStep, now,
+                            "timer_no_tags_xon", ingress_port,
+                            portToNode[ingress_port], upstream_port,
+                            portToNode[upstream_port], pri, 0, 0.0, 0.0);
+                    }
                     pushDelayedEvent(ctx, ev);
                 }
 

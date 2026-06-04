@@ -172,6 +172,8 @@ struct SimRuntimeState {
     int32_t numDelayedEvents = 0;
     int32_t numActiveTags = 0;
     int32_t numSourceTags = 0;
+    int32_t delayedDropCount = 0;
+    int32_t delayedPfcDropCount = 0;
     int32_t progressAllExhausted = 0;
     int32_t cachedDrainPortID = -1;
     double cachedNextDelayedGap = 0.0;
@@ -334,6 +336,7 @@ struct PortPfcState {
     int32_t paused_upstream_count[PFC_MAX_PRIORITY] {};
     int32_t paused_upstreams[PFC_MAX_PRIORITY][MAX_PAUSED_UPSTREAMS] {};
     int32_t pfc_cnt[PFC_MAX_PRIORITY] {};
+    int32_t pfc_check_target = 0;
     // Phase C: deferred PFC timer mutations. The per-Port pfcDetectOnePort
     // sets want_* flags on its own PortPfcState; the flushPortPfcTimers
     // singleton applies clear-then-set to Sim::pfc{Pause,Resume}Timers in
@@ -408,9 +411,11 @@ struct PortTraceLast {
     // body (i.e. participated in the emit_pfc summary "checked_port_count").
     int32_t pfc_detect_checked = 0;
     int32_t pfc_detect_emitted = 0;
+    int32_t pfc_detect_dropped = 0;
     int32_t deliver_arrival_count = 0;
     int32_t deliver_bwupdate_count = 0;
     int32_t deliver_pfc_count = 0;
+    int32_t deliver_pfc_dropped = 0;
     int32_t progress_source_scan_count = 0;
     int32_t progress_finished_source_count = 0;
     int32_t progress_emitted_cleanup_count = 0;

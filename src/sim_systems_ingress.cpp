@@ -1,12 +1,24 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 using namespace madrona;
 using namespace madrona::math;
 
 namespace madsimple {
 
 namespace {
+
+inline bool isClose(double a, double b,
+                    double rel_eps = 0.05,
+                    double abs_eps = 1e-6)
+{
+    double diff = std::abs(a - b);
+    double max_val = std::max(std::abs(a), std::abs(b));
+    return diff <= abs_eps || diff <= max_val * rel_eps;
+}
 
 // Helper: find a tag belonging to this port by flow_id, using the
 // PortTagList mirror. O(tag_list.count) instead of O(numTagIndexEntries).
@@ -81,6 +93,11 @@ void Sim::pfcPropagateOnePort(Context &ctx,
             }
             if (log_enabled) {
                 printSystemPfcState(step, now, ev,
+                    pfc_state.paused[ev.priority], dirty.isDirty);
+            }
+            if (flowWatchNodeEnabled(*this, port_id)) {
+                printFlowWatchPfcApply(step, now, port_id,
+                    portToNode[port_id], ev,
                     pfc_state.paused[ev.priority], dirty.isDirty);
             }
         } else {
@@ -203,13 +220,18 @@ void Sim::bwUpdateOnePort(Context &ctx,
 
         Entity existing = findTagInPortList(ctx, tag_list, ev.flow_id);
 
-        if (ev.in_bw == 0.0) {
+        if (isClose(ev.in_bw, 0.0)) {
             if (existing != Entity::none()) {
                 FlowTagState &tag = ctx.get<FlowTagState>(existing);
                 materializeBacklog(tag, now);
                 if (enableBuffer != 0 && tag.backlog > 1e-15) {
                     tag.in_bw = 0.0;
                     dirty.isDirty = 1;
+                    if (flowWatchFlowEnabled(tag.flow_id)) {
+                        printFlowWatchEmit(systemLogStep, now,
+                            "bw_buffered_zero", port_id, portToNode[port_id],
+                            tag);
+                    }
                     if (keep_trace) {
                         trace.bwupd_buffered_zero += 1;
                     }
@@ -225,6 +247,11 @@ void Sim::bwUpdateOnePort(Context &ctx,
                         cleanup.num += 1;
                     }
                     dirty.isDirty = 1;
+                    if (flowWatchFlowEnabled(tag_copy.flow_id)) {
+                        printFlowWatchEmit(systemLogStep, now,
+                            "bw_destroy", port_id, portToNode[port_id],
+                            tag_copy);
+                    }
                     if (keep_trace) {
                         trace.bwupd_destroyed += 1;
                     }
@@ -244,8 +271,9 @@ void Sim::bwUpdateOnePort(Context &ctx,
         if (existing == Entity::none()) {
             bool has_cleanup = false;
             for (int32_t j = 0; j < inbox.num_bwupd; j++) {
-                if (inbox.bwupds[j].flow_id == ev.flow_id &&
-                    inbox.bwupds[j].in_bw == 0.0) {
+                if (inbox.bwupds[j].port_id == ev.port_id &&
+                    inbox.bwupds[j].flow_id == ev.flow_id &&
+                    isClose(inbox.bwupds[j].in_bw, 0.0)) {
                     has_cleanup = true;
                     break;
                 }
@@ -315,11 +343,15 @@ void Sim::bwUpdateOnePort(Context &ctx,
             }
         } else {
             FlowTagState &tag = ctx.get<FlowTagState>(existing);
-            if (tag.in_bw != ev.in_bw) {
+            if (!isClose(tag.in_bw, ev.in_bw)) {
                 materializeBacklog(tag, now);
                 tag.in_bw = ev.in_bw;
             }
             dirty.isDirty = 1;
+            if (flowWatchFlowEnabled(tag.flow_id)) {
+                printFlowWatchEmit(systemLogStep, now,
+                    "bw_update", port_id, portToNode[port_id], tag);
+            }
             if (keep_trace) {
                 trace.bwupd_updated += 1;
             }
@@ -360,6 +392,11 @@ void Sim::materializeTagCreateOnePort(Context &ctx,
         }
 
         const FlowTagState &tag = ctx.get<FlowTagState>(created);
+        if (flowWatchFlowEnabled(tag.flow_id)) {
+            printFlowWatchEmit(systemLogStep, now,
+                req.from_arrival != 0 ? "arrival_create" : "bw_create",
+                port_id, portToNode[port_id], tag);
+        }
         if (tag.ingress_port_id >= 0) {
             if (ingress_links.num >= MAX_PORT_INGRESS_LINKS) {
                 FATAL("PortIngressLinkList overflow");

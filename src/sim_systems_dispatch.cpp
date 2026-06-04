@@ -44,6 +44,7 @@ void Sim::deliverEventsOnePort(Context &ctx,
     trace.deliver_arrival_count = 0;
     trace.deliver_bwupdate_count = 0;
     trace.deliver_pfc_count = 0;
+    trace.deliver_pfc_dropped = 0;
 
     int32_t due_count = 0;
     while (due_count < queue.count &&
@@ -79,6 +80,8 @@ void Sim::deliverEventsOnePort(Context &ctx,
             }
             if (inbox.num_pfc < MAX_PORT_INBOX_PFC) {
                 inbox.pfcs[inbox.num_pfc++] = ev;
+            } else {
+                trace.deliver_pfc_dropped += 1;
             }
         }
     }
@@ -227,6 +230,7 @@ void Sim::snapshotDirtyPorts(Context &ctx)
     if (log_enabled) {
         printSystemClearSummary(step, now, cleared_port_count);
     }
+
 }
 
 void Sim::reducePortCachedHints(Context &ctx)
@@ -432,6 +436,69 @@ void Sim::logPfcDetectTraces(Context &ctx)
 
     printSystemPfcDetectSummary(step, now, checked, emitted,
         countActivePfcPauseTimers(ctx), countActivePfcResumeTimers(ctx));
+}
+
+void Sim::logPfcDebugTraces(Context &ctx)
+{
+    if (!traceModeEnabled()) {
+        return;
+    }
+
+    constexpr const char *scope = "pfc_debug";
+    uint64_t step = systemLogStep;
+    if (!compiledSystemLogEnabled(scope, step)) {
+        return;
+    }
+
+    int32_t detect_checked = 0;
+    int32_t detect_emitted = 0;
+    int32_t detect_dropped = 0;
+    int32_t delivered = 0;
+    int32_t deliver_dropped = 0;
+    int32_t applied = 0;
+    int32_t skipped = 0;
+    int32_t active_pause_ports = 0;
+    int32_t active_paused_ports = 0;
+
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+
+        PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+        detect_checked += trace.pfc_detect_checked;
+        detect_emitted += trace.pfc_detect_emitted;
+        detect_dropped += trace.pfc_detect_dropped;
+        delivered += trace.deliver_pfc_count;
+        deliver_dropped += trace.deliver_pfc_dropped;
+        applied += trace.pfc_applied;
+        skipped += trace.pfc_skipped;
+
+        const PortPfcState &pfc = ctx.get<PortPfcState>(port_e);
+        bool has_pause_active = false;
+        bool has_paused = false;
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            has_pause_active = has_pause_active || pfc.pause_active[pri] != 0;
+            has_paused = has_paused || pfc.paused[pri] != 0;
+        }
+        active_pause_ports += has_pause_active ? 1 : 0;
+        active_paused_ports += has_paused ? 1 : 0;
+    }
+
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    printSystemPfcDebugSummary(step, now,
+        detect_checked,
+        detect_emitted,
+        detect_dropped,
+        delivered,
+        deliver_dropped,
+        applied,
+        skipped,
+        runtime.delayedDropCount,
+        runtime.delayedPfcDropCount,
+        active_pause_ports,
+        active_paused_ports);
 }
 
 void Sim::logEmitTraces(Context &ctx)

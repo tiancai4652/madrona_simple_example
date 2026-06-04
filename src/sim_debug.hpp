@@ -22,6 +22,8 @@ extern const bool init_log_print_enabled;
 extern const bool system_log_print_enabled;
 
 bool systemLogEnabled(const char *scope, uint64_t step);
+bool flowWatchFlowEnabled(FlowId flow_id);
+bool flowWatchNodeEnabled(const Sim &sim, int32_t port_id);
 
 inline bool compiledSystemLogEnabled(const char *scope, uint64_t step)
 {
@@ -111,6 +113,18 @@ void printSystemPfcDetectSummary(uint64_t step, Time now,
                                  int32_t emitted_pfc_count,
                                  int32_t pause_timer_count,
                                  int32_t resume_timer_count);
+void printSystemPfcDebugSummary(uint64_t step, Time now,
+                                int32_t detect_checked,
+                                int32_t detect_emitted,
+                                int32_t detect_dropped,
+                                int32_t delivered,
+                                int32_t deliver_dropped,
+                                int32_t applied,
+                                int32_t skipped,
+                                int32_t delayed_dropped,
+                                int32_t delayed_pfc_dropped,
+                                int32_t active_pause_ports,
+                                int32_t active_paused_ports);
 void printSystemClearSummary(uint64_t step, Time now,
                              int32_t cleared_port_count);
 void printSystemDTSummary(uint64_t step, Time now,
@@ -135,5 +149,39 @@ void printSystemProgressSummary(uint64_t step, Time now,
                                 int32_t buffered_dirty_port_count,
                                 double next_now,
                                 double next_finish_gap);
+void printFlowWatchPfcApply(uint64_t step, Time now,
+                            int32_t port_id,
+                            NodeId node_id,
+                            const PfcControlEv &ev,
+                            int32_t applied_paused,
+                            int32_t dirty);
+void printFlowWatchPfcEmit(uint64_t step, Time now,
+                           const char *phase,
+                           int32_t detect_port,
+                           NodeId detect_node,
+                           int32_t target_port,
+                           NodeId target_node,
+                           int32_t priority,
+                           int32_t paused,
+                           double buf,
+                           double net_rate);
+void printFlowWatchAlloc(uint64_t step, Time now,
+                         int32_t port_id,
+                         NodeId node_id,
+                         const FlowTagState &tag,
+                         int32_t paused);
+void printFlowWatchEmit(uint64_t step, Time now,
+                        const char *kind,
+                        int32_t port_id,
+                        NodeId node_id,
+                        const FlowTagState &tag);
+void printFlowWatchPfcMark(uint64_t step, Time now,
+                           int32_t ingress_port,
+                           NodeId ingress_node,
+                           int32_t upstream_port,
+                           NodeId upstream_node,
+                           int32_t egress_port,
+                           NodeId egress_node,
+                           const FlowTagState &tag);
 
 }

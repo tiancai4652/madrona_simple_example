@@ -176,6 +176,55 @@ MADRONA_NO_INLINE void Sim::applyPfcTimerOnePort(
 // ptxas finish per-TU optimisation under `-dlto -dopt=on
 // --extra-device-vectorization`; the monolithic form used to hang the
 // compiler on this TU.
+MADRONA_NO_INLINE void Sim::markPfcIngressCheckTargets(Context &ctx)
+{
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        ctx.get<PortPfcState>(port_e).pfc_check_target = 0;
+    }
+
+    if (enablePfc == 0 || pfcEgress != 0) {
+        return;
+    }
+
+    for (int32_t egress_port = 0; egress_port < numPorts; egress_port++) {
+        Entity egress_e = portEntities[egress_port];
+        if (egress_e == Entity::none() ||
+            ctx.get<DirtyPort>(egress_e).isDirty == 0) {
+            continue;
+        }
+
+        const PortTagList &tag_list = ctx.get<PortTagList>(egress_e);
+        for (int32_t i = 0; i < tag_list.count; i++) {
+            Entity tag_e = tag_list.tags[i];
+            if (tag_e == Entity::none()) {
+                continue;
+            }
+
+            const FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
+            int32_t ingress_port = tag.ingress_port_id;
+            if (ingress_port < 0 || ingress_port >= numPorts) {
+                continue;
+            }
+
+            Entity ingress_e = portEntities[ingress_port];
+            if (ingress_e != Entity::none()) {
+                ctx.get<PortPfcState>(ingress_e).pfc_check_target = 1;
+                int32_t upstream_port = peerPort[ingress_port];
+                if (flowWatchNodeEnabled(*this, upstream_port)) {
+                    printFlowWatchPfcMark(systemLogStep, now,
+                        ingress_port, portToNode[ingress_port],
+                        upstream_port, portToNode[upstream_port],
+                        egress_port, portToNode[egress_port], tag);
+                }
+            }
+        }
+    }
+}
+
 void Sim::pfcDetectOnePort(
     Context &ctx,
     int32_t port_id,
@@ -196,6 +245,7 @@ void Sim::pfcDetectOnePort(
         trace.pfc_detect_checked = 0;
         trace.pfc_detect_emitted = 0;
     }
+    trace.pfc_detect_dropped = 0;
     state.want_clear_pause = 0;
     state.want_clear_resume = 0;
     state.want_set_pause = 0;
@@ -254,6 +304,23 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
             continue;
         }
         materializeBacklog(tag, now);
+
+        // Reconcile tag backlog with actual port buffer state (egress mode).
+        // Same stagnation recovery as ingress mode.
+        {
+            Entity ep_e = portEntities[port_id];
+            if (ep_e != Entity::none()) {
+                PortBuffer &port_buf = ctx.get<PortBuffer>(ep_e);
+                materializeBufCnt(port_buf, now);
+                int32_t epri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+                double actual = port_buf.prior_bufs[epri].buf_cnt;
+                if (actual < 1.0 && tag.backlog > 1.0) {
+                    tag.backlog = actual;
+                    tag.last_backlog_time = now;
+                }
+            }
+        }
+
         int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
         buf_by_pri[pri] += tag.backlog;
 
@@ -297,9 +364,16 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
                         .priority = pri,
                         .paused = 1,
                     };
+                    if (flowWatchNodeEnabled(*this, up)) {
+                        printFlowWatchPfcEmit(systemLogStep, now, "egress_xoff",
+                            port_id, portToNode[port_id], up, portToNode[up],
+                            pri, 1, buf, 0.0);
+                    }
                     if (traceModeEnabled()) {
                         trace.pfc_detect_emitted += 1;
                     }
+                } else {
+                    trace.pfc_detect_dropped += 1;
                 }
             }
             state.pfc_cnt[pri] += 1;
@@ -320,9 +394,16 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
                         .priority = pri,
                         .paused = 0,
                     };
+                    if (flowWatchNodeEnabled(*this, up)) {
+                        printFlowWatchPfcEmit(systemLogStep, now, "egress_xon",
+                            port_id, portToNode[port_id], up, portToNode[up],
+                            pri, 0, buf, 0.0);
+                    }
                     if (traceModeEnabled()) {
                         trace.pfc_detect_emitted += 1;
                     }
+                } else {
+                    trace.pfc_detect_dropped += 1;
                 }
             }
             state.paused_upstream_count[pri] = 0;
@@ -345,31 +426,10 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     IngressTagList &ingress_list)
 {
     // -------- ingress mode: this port is the ingress port --------
-    // Decide if this port is the ingress for any tag whose egress port is
-    // dirty this frame. This mirrors the legacy "ingress_check" set built
-    // by scanning all dirty egress ports' tags.
-    bool is_ingress_check_target = false;
-    for (int32_t i = 0; i < ingress_list.count; i++) {
-        Entity te = ingress_list.tags[i];
-        if (te == Entity::none()) {
-            continue;
-        }
-
-        FlowTagState &tag = ctx.get<FlowTagState>(te);
-        int32_t egress_port = tag.port_id;
-        if (egress_port < 0 || egress_port >= numPorts) {
-            continue;
-        }
-        Entity eg_e = portEntities[egress_port];
-        if (eg_e == Entity::none()) {
-            continue;
-        }
-        if (ctx.get<DirtyPort>(eg_e).isDirty != 0) {
-            is_ingress_check_target = true;
-            break;
-        }
-    }
-    if (!is_ingress_check_target) {
+    // markPfcIngressCheckTargets mirrors Jiuding's legacy ingress_check set:
+    // scan dirty egress ports' live PortTagLists, then mark each contributing
+    // ingress port exactly once before this per-port detect pass.
+    if (state.pfc_check_target == 0) {
         return;
     }
     if (cfg.pfc_enabled == 0) {
@@ -387,10 +447,36 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             continue;
         }
         FlowTagState &tag = ctx.get<FlowTagState>(te);
+        if (tag.port_entity == Entity::none()) {
+            continue;
+        }
+        int32_t egress_port = tag.port_id;
+        if (egress_port < 0 || egress_port >= numPorts ||
+            tag.port_entity != portEntities[egress_port]) {
+            continue;
+        }
         if (tag.is_source != 0) {
             continue;
         }
         materializeBacklog(tag, now);
+
+        // Reconcile tag backlog with actual port buffer state.
+        // When both in_bw and out_bw are 0 (all paused), tag.backlog freezes
+        // even though buf_cnt may have drained to 0. Cap tag backlogs to the
+        // actual port buffer level so PFC can detect XON correctly.
+        // Matches Jiuding's stagnation recovery in systems.cpp:687-778.
+        Entity eport_e = portEntities[egress_port];
+        if (eport_e != Entity::none()) {
+            PortBuffer &port_buf = ctx.get<PortBuffer>(eport_e);
+            materializeBufCnt(port_buf, now);
+            int32_t eport_pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+            double actual = port_buf.prior_bufs[eport_pri].buf_cnt;
+            if (actual < 1.0 && tag.backlog > 1.0) {
+                tag.backlog = actual;
+                tag.last_backlog_time = now;
+            }
+        }
+
         int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
         buf_by_pri[pri] += tag.backlog;
         net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
@@ -422,9 +508,17 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
                         .priority = pri,
                         .paused = 1,
                     };
+                    if (flowWatchNodeEnabled(*this, upstream_port)) {
+                        printFlowWatchPfcEmit(systemLogStep, now,
+                            "ingress_xoff", port_id, portToNode[port_id],
+                            upstream_port, portToNode[upstream_port],
+                            pri, 1, buf, net_rate_by_pri[pri]);
+                    }
                     if (traceModeEnabled()) {
                         trace.pfc_detect_emitted += 1;
                     }
+                } else {
+                    trace.pfc_detect_dropped += 1;
                 }
             }
             state.pfc_cnt[pri] += 1;
@@ -445,9 +539,17 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
                         .priority = pri,
                         .paused = 0,
                     };
+                    if (flowWatchNodeEnabled(*this, up)) {
+                        printFlowWatchPfcEmit(systemLogStep, now,
+                            "ingress_xon", port_id, portToNode[port_id],
+                            up, portToNode[up], pri, 0, buf,
+                            net_rate_by_pri[pri]);
+                    }
                     if (traceModeEnabled()) {
                         trace.pfc_detect_emitted += 1;
                     }
+                } else {
+                    trace.pfc_detect_dropped += 1;
                 }
             }
             state.paused_upstream_count[pri] = 0;
@@ -463,6 +565,11 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     // pause period can immediately schedule its matching resume timer.
     // last-write-wins across priorities matches the legacy behaviour
     // (setPfcPauseTimer/setPfcResumeTimer index by port, not pri).
+    //
+    // When net_rate > 0 (upstream hasn't stopped yet due to link delay),
+    // the resume timer uses effective_net = -out_total to predict when
+    // the buffer would drain if only out_bw were active.  This matches
+    // the legacy Jiuding logic.
     for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
         double buf = buf_by_pri[pri];
         double net_rate = net_rate_by_pri[pri];

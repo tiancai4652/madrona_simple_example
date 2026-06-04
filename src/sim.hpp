@@ -358,6 +358,9 @@ struct Sim : public madrona::WorldBase {
     // --extra-device-vectorization` when both branches live in the same
     // function body. Behaviour is 1:1 with the original monolithic
     // pfcDetectOnePort; see sim_systems_pfc.cpp for the full contract.
+    MADRONA_NO_INLINE void markPfcIngressCheckTargets(
+        madrona::Context &ctx);
+
     MADRONA_NO_INLINE void pfcDetectOnePortEgress(
         madrona::Context &ctx,
         int32_t port_id,
@@ -394,6 +397,7 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE void flushPortOutbox(madrona::Context &ctx);
     MADRONA_NO_INLINE void flushPortPfcTimers(madrona::Context &ctx);
     MADRONA_NO_INLINE void logPfcDetectTraces(madrona::Context &ctx);
+    MADRONA_NO_INLINE void logPfcDebugTraces(madrona::Context &ctx);
     MADRONA_NO_INLINE void logEmitTraces(madrona::Context &ctx);
 
     // Phase E: per-Port ingress-chain workers. They consume the target

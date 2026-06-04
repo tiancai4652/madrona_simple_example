@@ -179,6 +179,15 @@ MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
 
     FlowTagState tag = ctx.get<FlowTagState>(tag_entity);
     Time effective_now = logical_now >= 0.0 ? logical_now : now;
+    if (flowWatchFlowEnabled(tag.flow_id)) {
+        printFlowWatchEmit(systemLogStep, effective_now,
+            propagate_cleanup ? "materialize_destroy_prop" :
+                "materialize_destroy_local",
+            tag.port_id,
+            tag.port_id >= 0 && tag.port_id < numPorts ?
+                portToNode[tag.port_id] : -1,
+            tag);
+    }
 
     if (tag.next_port_id < 0) {
         if (completions.num < MAX_PORT_COMPLETE) {

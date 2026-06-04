@@ -2,6 +2,7 @@
 #include "sim_debug.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 using namespace madrona;
@@ -10,6 +11,15 @@ using namespace madrona::math;
 namespace madsimple {
 
 namespace {
+
+inline bool isClose(double a, double b,
+                    double rel_eps = 0.05,
+                    double abs_eps = 1e-6)
+{
+    double diff = std::abs(a - b);
+    double max_val = std::max(std::abs(a), std::abs(b));
+    return diff <= abs_eps || diff <= max_val * rel_eps;
+}
 
 struct PriorityTagBuckets {
     Entity tags[PFC_MAX_PRIORITY][MAX_TAGS_PER_PORT] {};
@@ -133,7 +143,12 @@ MADRONA_NO_INLINE void collectAllocTagScratch(
 
     for (int32_t i = 0; i < scratch.num_tags; i++) {
         FlowTagState &tag = ctx.get<FlowTagState>(scratch.tags[i]);
-        if (tag.is_source == 0 && tag.in_bw == 0.0 && tag.backlog < 1.0) {
+        if (tag.is_source == 0 && isClose(tag.in_bw, 0.0) && tag.backlog < 1.0) {
+            if (flowWatchFlowEnabled(tag.flow_id)) {
+                printFlowWatchEmit(sim.systemLogStep, sim.now,
+                    "alloc_cleanup_destroy", tag.port_id,
+                    sim.portToNode[tag.port_id], tag);
+            }
             tag.backlog = 0.0;
             if (cleanup.num < MAX_PORT_CLEANUP) {
                 cleanup.tags[cleanup.num] = scratch.tags[i];
@@ -238,7 +253,7 @@ MADRONA_NO_INLINE void finalizeAllocPortState(
             }
         }
 
-        if (tag.is_source == 0 && tag.in_bw == 0.0 &&
+        if (tag.is_source == 0 && isClose(tag.in_bw, 0.0) &&
             tag.backlog > 1e-15 && tag.out_bw > 1e-15) {
             Time t_bl_drain = tag.backlog / tag.out_bw;
             if (t_bl_drain > 1e-15 && t_bl_drain < 1e6 &&
@@ -404,6 +419,8 @@ MADRONA_NO_INLINE void allocOnePortQoSSP(
                 allocated = remaining_bw;
             }
             if (allocated < 1e-15) {
+                // Jiuding QoS SP has_buffer fallback level 2:
+                // distribute based on max(in_bw, 0) + backlog.
                 double bl_sum = 0.0;
                 for (int32_t i = 0; i < buckets.counts[pri]; i++) {
                     FlowTagState &tag =
@@ -423,6 +440,15 @@ MADRONA_NO_INLINE void allocOnePortQoSSP(
                             d += tag.backlog;
                         }
                         tag.out_bw = remaining_bw * (d / bl_sum);
+                        allocated += tag.out_bw;
+                    }
+                } else if (buckets.in_sum[pri] > 1e-15) {
+                    // Jiuding QoS SP has_buffer fallback level 3:
+                    // distribute based on in_bw only.
+                    for (int32_t i = 0; i < buckets.counts[pri]; i++) {
+                        FlowTagState &tag =
+                            ctx.get<FlowTagState>(buckets.tags[pri][i]);
+                        tag.out_bw = remaining_bw * (tag.in_bw / buckets.in_sum[pri]);
                         allocated += tag.out_bw;
                     }
                 }
@@ -753,6 +779,17 @@ void Sim::allocOnePort(
     finalizeAllocPortState(*this, ctx, *port_buf, hints, drain_hint, trace,
         keep_trace, scratch.live_tags, scratch.num_live, port_bw,
         scratch.live_sum_in, out_total, is_dest_only);
+
+    for (int32_t i = 0; i < scratch.num_live; i++) {
+        FlowTagState &tag = ctx.get<FlowTagState>(scratch.live_tags[i]);
+        if (flowWatchFlowEnabled(tag.flow_id)) {
+            int32_t pri = std::clamp(tag.priority, 0,
+                PFC_MAX_PRIORITY - 1);
+            int32_t paused = pfc_state != nullptr ? pfc_state->paused[pri] : 0;
+            printFlowWatchAlloc(systemLogStep, now, port_id,
+                portToNode[port_id], tag, paused);
+        }
+    }
 }
 
 // Phase C: per-Port downstream emit worker. Each port only sees its own
@@ -798,6 +835,10 @@ void Sim::emitOnePort(
         if (tag.next_port_id < 0) {
             continue;
         }
+        if (flowWatchFlowEnabled(tag.flow_id)) {
+            printFlowWatchEmit(systemLogStep, now, "consider", port_id,
+                portToNode[port_id], tag);
+        }
         if (tag.downstream_created == 0) {
             if (tag.out_bw > 1e-15) {
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
@@ -815,6 +856,10 @@ void Sim::emitOnePort(
                         .priority = tag.priority,
                     };
                     tag.downstream_created = 1;
+                    if (flowWatchFlowEnabled(tag.flow_id)) {
+                        printFlowWatchEmit(systemLogStep, now, "arrival",
+                            port_id, portToNode[port_id], tag);
+                    }
                     if (keep_trace) {
                         trace.emit_arrival_count += 1;
                     }
@@ -822,7 +867,7 @@ void Sim::emitOnePort(
             }
             continue;
         }
-        if (tag.out_bw == tag.prev_out_bw) {
+        if (isClose(tag.out_bw, tag.prev_out_bw)) {
             continue;
         }
         if (outbox.num_events < MAX_PORT_OUTBOX) {
@@ -836,6 +881,10 @@ void Sim::emitOnePort(
                 .flow_id = tag.flow_id,
                 .in_bw = tag.out_bw,
             };
+            if (flowWatchFlowEnabled(tag.flow_id)) {
+                printFlowWatchEmit(systemLogStep, now, "bwupdate", port_id,
+                    portToNode[port_id], tag);
+            }
             if (keep_trace) {
                 trace.emit_bwupdate_count += 1;
             }

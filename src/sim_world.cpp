@@ -416,6 +416,10 @@ MADRONA_NO_INLINE void Sim::pushDelayedEvent(Context &ctx,
     }
 
     if (queue.count >= MAX_PORT_DELAYED_EVENTS) {
+        runtime.delayedDropCount += 1;
+        if (ev.type == DelayedEvent::Type::PfcControl) {
+            runtime.delayedPfcDropCount += 1;
+        }
         return;
     }
 
