@@ -193,6 +193,8 @@ def main():
                 f"pend={world.num_pending_flows()} "
                 f"delayed={world.num_delayed_events()} "
                 f"active={world.num_active_tags()} "
+                f"source={world.num_source_tags()} "
+                f"done={world.num_flow_completions()} "
                 f"sps={sps:.1f} elapsed={elapsed:.1f}s",
                 flush=True,
             )

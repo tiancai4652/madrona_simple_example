@@ -88,24 +88,24 @@ using NodeId = int32_t;
 constexpr int32_t MAX_FLOW_COMPLETIONS = 2742272;
 constexpr int32_t PFC_MAX_PRIORITY = 1;
 
-// Must be >= the maximum number of flows per port so buffer chunks can record
-// all active flow weights. For leafspine10240 d256, observed max_port_tags=255.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 320;
+// Must be >= the maximum number of flows/events per hot port so buffer chunks
+// and per-port queues do not silently drop same-timestamp fan-in.
+constexpr int32_t MAX_CHUNK_WEIGHTS = 1024;
 constexpr int32_t MAX_BUFFER_CHUNKS = 16;
-constexpr int32_t MAX_PAUSED_UPSTREAMS = 320;
+constexpr int32_t MAX_PAUSED_UPSTREAMS = 1024;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
 // batches, so they must cover the largest same-port fan-in in one step.
-constexpr int32_t MAX_PORT_CLEANUP = 320;
-constexpr int32_t MAX_PORT_OUTBOX = 320;
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 320;
-constexpr int32_t MAX_TAGS_PER_PORT = 320;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 1024;
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 320;
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 320;
-constexpr int32_t MAX_PORT_INBOX_PFC = 320;
-constexpr int32_t MAX_PORT_CREATE = 320;
+constexpr int32_t MAX_PORT_CLEANUP = 1024;
+constexpr int32_t MAX_PORT_OUTBOX = 1024;
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 2048;
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 1024;
+constexpr int32_t MAX_TAGS_PER_PORT = 1024;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 4096;
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 1024;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 1024;
+constexpr int32_t MAX_PORT_INBOX_PFC = 1024;
+constexpr int32_t MAX_PORT_CREATE = 1024;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
 constexpr int32_t MAX_PORT_COMPLETE = 320;
