@@ -361,6 +361,26 @@ MADRONA_NO_INLINE int32_t Sim::lookupFlowIngressPort(
     return -1;
 }
 
+MADRONA_NO_INLINE bool Sim::upstreamTagAlive(
+    Context &ctx,
+    const FlowTagState &tag) const
+{
+    if (tag.is_source != 0) {
+        return false;
+    }
+
+    int32_t upstream_port = -1;
+    if (tag.ingress_port_id >= 0 && tag.ingress_port_id < numPorts) {
+        upstream_port = peerPort[tag.ingress_port_id];
+    }
+
+    if (upstream_port < 0 || upstream_port >= numPorts) {
+        return false;
+    }
+
+    return findTag(ctx, upstream_port, tag.flow_id) != Entity::none();
+}
+
 namespace {
 
 inline int32_t delayedEventTargetPort(const DelayedEvent &ev)

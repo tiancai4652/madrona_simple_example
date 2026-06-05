@@ -463,20 +463,7 @@ void Sim::advanceOnePortBuffer(
                     continue;
                 }
 
-                bool upstream_alive = false;
-                if (tag.is_source == 0) {
-                    int32_t upstream_port = -1;
-                    if (tag.ingress_port_id >= 0 &&
-                        tag.ingress_port_id < numPorts) {
-                        upstream_port = peerPort[tag.ingress_port_id];
-                    }
-                    if (upstream_port >= 0) {
-                        Entity up = findTag(ctx, upstream_port, tag.flow_id);
-                        if (up != Entity::none()) {
-                            upstream_alive = true;
-                        }
-                    }
-                }
+                bool upstream_alive = upstreamTagAlive(ctx, tag);
 
                 if (tag.backlog < 1e-15) {
                     if (!upstream_alive && cleanup.num < MAX_PORT_CLEANUP) {

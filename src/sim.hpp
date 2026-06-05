@@ -473,6 +473,9 @@ struct Sim : public madrona::WorldBase {
         int32_t port_id) const;
     MADRONA_NO_INLINE madrona::Entity findTag(
         madrona::Context &ctx, int32_t port_id, FlowId flow_id) const;
+    MADRONA_NO_INLINE bool upstreamTagAlive(
+        madrona::Context &ctx,
+        const FlowTagState &tag) const;
     MADRONA_NO_INLINE madrona::Entity createTagOnPort(
         madrona::Context &ctx,
         int32_t port_id,

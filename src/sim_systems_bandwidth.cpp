@@ -144,6 +144,9 @@ MADRONA_NO_INLINE void collectAllocTagScratch(
     for (int32_t i = 0; i < scratch.num_tags; i++) {
         FlowTagState &tag = ctx.get<FlowTagState>(scratch.tags[i]);
         if (tag.is_source == 0 && isClose(tag.in_bw, 0.0) && tag.backlog < 1.0) {
+            if (sim.upstreamTagAlive(ctx, tag)) {
+                continue;
+            }
             if (flowWatchFlowEnabled(tag.flow_id)) {
                 printFlowWatchEmit(sim.systemLogStep, sim.now,
                     "alloc_cleanup_destroy", tag.port_id,
