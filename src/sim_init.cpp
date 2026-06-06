@@ -57,6 +57,7 @@ void Sim::loadFlow(Engine &ctx)
         .numDelayedEvents = 0,
         .numActiveTags = 0,
         .numSourceTags = 0,
+        .pfcControlEventsSeen = 0,
         .cachedDrainPortID = -1,
         .cachedNextDelayedGap = timerInactiveSentinel(),
         .cachedNextBacklogGap = timerInactiveSentinel(),

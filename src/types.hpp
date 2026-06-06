@@ -174,6 +174,7 @@ struct SimRuntimeState {
     int32_t numSourceTags = 0;
     int32_t delayedDropCount = 0;
     int32_t delayedPfcDropCount = 0;
+    int32_t pfcControlEventsSeen = 0;
     int32_t progressAllExhausted = 0;
     int32_t cachedDrainPortID = -1;
     double cachedNextDelayedGap = 0.0;

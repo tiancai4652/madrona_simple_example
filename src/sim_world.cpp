@@ -457,6 +457,9 @@ MADRONA_NO_INLINE void Sim::pushDelayedEvent(Context &ctx,
     int32_t idx = queue.head + queue.count;
     queue.count += 1;
     queue.events[idx] = ev;
+    if (ev.type == DelayedEvent::Type::PfcControl) {
+        runtime.pfcControlEventsSeen = 1;
+    }
 
     while (idx > queue.head && queue.events[idx].t < queue.events[idx - 1].t) {
         DelayedEvent tmp = queue.events[idx - 1];
