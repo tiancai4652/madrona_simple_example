@@ -369,6 +369,17 @@ MADRONA_NO_INLINE bool Sim::upstreamTagAlive(
         return false;
     }
 
+    Entity flow_entity = findFlowMetaEntity(ctx, tag.flow_id);
+    if (flow_entity == Entity::none()) {
+        return false;
+    }
+
+    const FlowRuntimeState &runtime =
+        ctx.get<FlowRuntimeState>(flow_entity);
+    if (runtime.route_active == 0 || runtime.completed != 0) {
+        return false;
+    }
+
     int32_t upstream_port = -1;
     if (tag.ingress_port_id >= 0 && tag.ingress_port_id < numPorts) {
         upstream_port = peerPort[tag.ingress_port_id];

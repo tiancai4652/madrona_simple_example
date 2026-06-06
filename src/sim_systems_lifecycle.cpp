@@ -73,6 +73,20 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
     Time effective_now = logical_now >= 0.0 ? logical_now : now;
     bool has_cleanup_ev = false;
 
+    if (tag.is_source != 0 && tag.next_port_id >= 0) {
+        Entity flow_entity = findFlowMetaEntity(ctx, tag.flow_id);
+        if (flow_entity != Entity::none()) {
+            const FlowRuntimeState &runtime =
+                ctx.get<FlowRuntimeState>(flow_entity);
+            const FlowDef &flow_def = ctx.get<FlowDef>(flow_entity);
+            if (runtime.completed != 0 &&
+                flow_def.src_node / 32 == flow_def.dst_node / 32) {
+                Time delay = getPortLinkDelay(tag.port_id, tag.next_port_id);
+                recordFlowCompletion(ctx, tag.flow_id, effective_now + delay);
+            }
+        }
+    }
+
     if (tag.next_port_id < 0) {
         recordFlowCompletion(ctx, tag.flow_id, effective_now);
     }
@@ -187,6 +201,24 @@ MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
             tag.port_id >= 0 && tag.port_id < numPorts ?
                 portToNode[tag.port_id] : -1,
             tag);
+    }
+
+    if (tag.is_source != 0 && tag.next_port_id >= 0) {
+        Entity flow_entity = findFlowMetaEntity(ctx, tag.flow_id);
+        if (flow_entity != Entity::none()) {
+            const FlowRuntimeState &runtime =
+                ctx.get<FlowRuntimeState>(flow_entity);
+            const FlowDef &flow_def = ctx.get<FlowDef>(flow_entity);
+            if (runtime.completed != 0 &&
+                flow_def.src_node / 32 == flow_def.dst_node / 32 &&
+                completions.num < MAX_PORT_COMPLETE) {
+                Time delay = getPortLinkDelay(tag.port_id, tag.next_port_id);
+                completions.reqs[completions.num++] = PortCompletionReq {
+                    .flow_id = tag.flow_id,
+                    .end_time = effective_now + delay,
+                };
+            }
+        }
     }
 
     if (tag.next_port_id < 0) {
