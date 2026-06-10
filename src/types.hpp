@@ -85,30 +85,30 @@ using NodeId = int32_t;
 // one place. Topology / flow-global limits live in sim.hpp; these constants
 // cover exported buffers and per-port local queues/components declared below.
 
-constexpr int32_t MAX_FLOW_COMPLETIONS = 137216;
+constexpr int32_t MAX_FLOW_COMPLETIONS = 1371136;
 constexpr int32_t PFC_MAX_PRIORITY = 1;
 
 // Must be >= the maximum number of flows/events per hot port so buffer chunks
 // and per-port queues do not silently drop same-timestamp fan-in.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 256;
+constexpr int32_t MAX_CHUNK_WEIGHTS = 512;
 constexpr int32_t MAX_BUFFER_CHUNKS = 16;
-constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
+constexpr int32_t MAX_PAUSED_UPSTREAMS = 192;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
 // batches, so they must cover the largest same-port fan-in in one step.
-constexpr int32_t MAX_PORT_CLEANUP = 512;
-constexpr int32_t MAX_PORT_OUTBOX = 512;
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 512;
-constexpr int32_t MAX_TAGS_PER_PORT = 256;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 448;
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 512;
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 512;
-constexpr int32_t MAX_PORT_INBOX_PFC = 64;
-constexpr int32_t MAX_PORT_CREATE = 512;
+constexpr int32_t MAX_PORT_CLEANUP = 1024;
+constexpr int32_t MAX_PORT_OUTBOX = 1024;
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 1024;
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 1024;
+constexpr int32_t MAX_TAGS_PER_PORT = 512;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 960;
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 1024;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 1024;
+constexpr int32_t MAX_PORT_INBOX_PFC = 192;
+constexpr int32_t MAX_PORT_CREATE = 1024;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
-constexpr int32_t MAX_PORT_COMPLETE = 320;
+constexpr int32_t MAX_PORT_COMPLETE = 512;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 
 // Matches the layout of the completion record snapshotted by
@@ -337,6 +337,7 @@ struct PortPfcState {
     int32_t paused_upstream_count[PFC_MAX_PRIORITY] {};
     int32_t paused_upstreams[PFC_MAX_PRIORITY][MAX_PAUSED_UPSTREAMS] {};
     int32_t pfc_cnt[PFC_MAX_PRIORITY] {};
+    double last_fill_rate[PFC_MAX_PRIORITY] {};
     int32_t pfc_check_target = 0;
     // Phase C: deferred PFC timer mutations. The per-Port pfcDetectOnePort
     // sets want_* flags on its own PortPfcState; the flushPortPfcTimers

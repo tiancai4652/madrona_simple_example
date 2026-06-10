@@ -573,6 +573,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
         double buf = buf_by_pri[pri];
         double net_rate = net_rate_by_pri[pri];
+        if (net_rate > 1.0) {
+            state.last_fill_rate[pri] = net_rate;
+        }
         if (state.pause_active[pri] == 0 && net_rate > 1.0) {
             double gap = cfg.xoff[pri] - buf;
             if (gap > 1e-9) {
@@ -608,6 +611,47 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
                         state.want_set_resume = 1;
                         state.set_resume_t = t_xon;
                     }
+                }
+            }
+        }
+    }
+
+    Entity port_e = portEntities[port_id];
+    if (port_e == Entity::none()) {
+        return;
+    }
+
+    const PortTimers &timers = ctx.get<PortTimers>(port_e);
+    bool pause_timer_active =
+        timerIsActive(timers.pfc_pause) && state.want_clear_pause == 0;
+    bool resume_timer_active =
+        timerIsActive(timers.pfc_resume) && state.want_clear_resume == 0;
+    if (!pause_timer_active &&
+        !resume_timer_active &&
+        state.want_set_pause == 0 &&
+        state.want_set_resume == 0) {
+        bool has_pause_history = false;
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            if (state.pfc_cnt[pri] > 0) {
+                has_pause_history = true;
+                break;
+            }
+        }
+
+        if (has_pause_history) {
+            for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+                if (state.pause_active[pri] == 0 &&
+                    net_rate_by_pri[pri] <= 1.0 &&
+                    state.last_fill_rate[pri] > 1.0) {
+                    double gap = cfg.xoff[pri] - buf_by_pri[pri];
+                    if (gap > 1e-9) {
+                        double t_xoff = gap / state.last_fill_rate[pri];
+                        if (t_xoff > 1e-9 && t_xoff < 1e6) {
+                            state.want_set_pause = 1;
+                            state.set_pause_t = t_xoff;
+                        }
+                    }
+                    break;
                 }
             }
         }

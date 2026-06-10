@@ -34,18 +34,18 @@ constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
 
 
-constexpr int32_t MAX_TOPO_NODES = 1152;
-constexpr int32_t MAX_TOPO_LINKS = 3200;
-constexpr int32_t MAX_TOPO_PORTS = 3200;
-constexpr int32_t MAX_NODE_NEIGHBORS = 56;
-constexpr int32_t MAX_FLOWS = 137216;
+constexpr int32_t MAX_TOPO_NODES = 5376;
+constexpr int32_t MAX_TOPO_LINKS = 15488;
+constexpr int32_t MAX_TOPO_PORTS = 15488;
+constexpr int32_t MAX_NODE_NEIGHBORS = 168;
+constexpr int32_t MAX_FLOWS = 1371136;
 constexpr int32_t MAX_PATH_NODES = 6;
 constexpr int32_t MAX_ECMP_NEXT_HOPS = 20;
 constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
-constexpr int32_t MAX_DELAYED_EVENTS = 618496;
-constexpr int32_t MAX_EVENTS_PER_STEP = 99328;
-constexpr int32_t MAX_TAG_INDEX = 520192;
-constexpr int32_t MAX_SOURCE_TAGS = 130048;
+constexpr int32_t MAX_DELAYED_EVENTS = 6369280;
+constexpr int32_t MAX_EVENTS_PER_STEP = 1147904;
+constexpr int32_t MAX_TAG_INDEX = 5222400;
+constexpr int32_t MAX_SOURCE_TAGS = 1305600;
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {

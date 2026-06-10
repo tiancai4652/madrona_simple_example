@@ -239,6 +239,21 @@ void Sim::bwUpdateOnePort(Context &ctx,
                         printSystemBwUpdateTag(step, now, "buffered_zero",
                             tag, dirty.isDirty);
                     }
+                } else if (upstreamTagAlive(ctx, tag)) {
+                    tag.in_bw = 0.0;
+                    dirty.isDirty = 1;
+                    if (flowWatchFlowEnabled(tag.flow_id)) {
+                        printFlowWatchEmit(systemLogStep, now,
+                            "bw_keep_zero_alive", port_id,
+                            portToNode[port_id], tag);
+                    }
+                    if (keep_trace) {
+                        trace.bwupd_buffered_zero += 1;
+                    }
+                    if (log_enabled) {
+                        printSystemBwUpdateTag(step, now, "keep_zero_alive",
+                            tag, dirty.isDirty);
+                    }
                 } else {
                     FlowTagState tag_copy = tag;
                     if (cleanup.num < MAX_PORT_CLEANUP) {

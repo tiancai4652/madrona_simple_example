@@ -611,14 +611,6 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
                 continue;
             }
             FlowCompletionRecord record = flow_runtime.completion_record;
-            const FlowDef &flow_def = ctx.get<FlowDef>(flow_entity);
-            bool cross_leaf = flow_def.src_node / 32 != flow_def.dst_node / 32;
-            if (runtime.pfcControlEventsSeen != 0 &&
-                runtime.numActiveTags == 0 &&
-                cross_leaf &&
-                record.end_time < sim.now) {
-                record.end_time = sim.now;
-            }
             buf.records[out_idx++] = record;
         }
     }
