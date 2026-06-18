@@ -84,27 +84,27 @@ using NodeId = int32_t;
 // Keep these together so scale changes such as d64 -> d256 can be adjusted in
 // one place. Topology / flow-global limits live in sim.hpp; these constants
 // cover exported buffers and per-port local queues/components declared below.
-constexpr int32_t MAX_FLOW_COMPLETIONS = 677888;
+constexpr int32_t MAX_FLOW_COMPLETIONS = 273408;
 constexpr int32_t PFC_MAX_PRIORITY = 1;
 
 // Must be >= the maximum number of flows/events per hot port so buffer chunks
 // and per-port queues do not silently drop same-timestamp fan-in.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 64;
+constexpr int32_t MAX_CHUNK_WEIGHTS = 256;
 constexpr int32_t MAX_BUFFER_CHUNKS = 16;
-constexpr int32_t MAX_PAUSED_UPSTREAMS = 384;
+constexpr int32_t MAX_PAUSED_UPSTREAMS = 128;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
 // batches, so they must cover the largest same-port fan-in in one step.
-constexpr int32_t MAX_PORT_CLEANUP = 256;
-constexpr int32_t MAX_PORT_OUTBOX = 256;
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 256;
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 256;
-constexpr int32_t MAX_TAGS_PER_PORT = 64;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 192;
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 256;
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 256;
-constexpr int32_t MAX_PORT_INBOX_PFC = 384;
-constexpr int32_t MAX_PORT_CREATE = 256;
+constexpr int32_t MAX_PORT_CLEANUP = 512;
+constexpr int32_t MAX_PORT_OUTBOX = 512;
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 512;
+constexpr int32_t MAX_TAGS_PER_PORT = 256;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 448;
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 512;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 512;
+constexpr int32_t MAX_PORT_INBOX_PFC = 128;
+constexpr int32_t MAX_PORT_CREATE = 512;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
 constexpr int32_t MAX_PORT_COMPLETE = 320;

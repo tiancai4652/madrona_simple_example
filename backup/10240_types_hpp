@@ -84,6 +84,7 @@ using NodeId = int32_t;
 // Keep these together so scale changes such as d64 -> d256 can be adjusted in
 // one place. Topology / flow-global limits live in sim.hpp; these constants
 // cover exported buffers and per-port local queues/components declared below.
+
 constexpr int32_t MAX_FLOW_COMPLETIONS = 677888;
 constexpr int32_t PFC_MAX_PRIORITY = 1;
 
