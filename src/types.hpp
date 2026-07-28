@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <madrona/components.hpp>
+#include <madrona/sync.hpp>
 
 namespace madsimple {
 
@@ -109,6 +110,28 @@ constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
 constexpr int32_t MAX_PORT_COMPLETE = 320;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
+constexpr uint32_t MAX_SYSTEM_EVENTS = 1024;
+constexpr uint32_t MAX_FAKE_FINISHED_FLOWS = 16;
+
+// Per-NPU flow bookkeeping capacity constants. Unlike the old design
+// (single global PendingSetFlowQueue + a monotonically-growing
+// flowMetaEntities[] array), each NPU owns a small *bounded* and *reused*
+// pool of FlowMeta entities plus its own inbox/active/finished lists. This
+// caps total dynamic-flow memory at MAX_NPUS * MAX_FLOWS_PER_NPU instead of
+// "total flows ever created over the whole run", and lets every NPU's
+// setFlow()/materialize/schedule/checkFlowFinish work purely on its own
+// entity's components with zero cross-NPU locking. See
+// report/2-merge-plan/实施/阶段A2-per-NPU流并行化方案.md for the full design.
+constexpr uint32_t MAX_NPUS = 256;
+constexpr uint32_t MAX_FLOWS_PER_NPU = 64;
+
+// Because NPU-owned FlowMeta entities are recycled through NpuFlowPool, the
+// per-entity completion_record does not survive slot reuse. This bounded
+// append-only log keeps their FCT records durable so
+// num_flow_completions()/flow_completion(idx) stay consistent for
+// dynamically injected flows (the static flow-file path keeps rebuilding
+// its records straight from flowMetaEntities[] as before).
+constexpr int32_t MAX_DYNAMIC_FLOW_COMPLETIONS = 16384;
 
 // Matches the layout of the completion record snapshotted by
 // Sim::recordFlowCompletion(). Kept POD so it can be copied into the
@@ -128,6 +151,100 @@ struct FlowCompletionRecord {
     {
         return end_time - start_time;
     }
+};
+
+struct SysFlowRecord {
+    uint32_t owner_npu_id = 0;
+    uint32_t flow_id = 0;
+    uint64_t comm_src = 0;
+    uint64_t comm_dst = 0;
+    uint64_t flow_size = 0;
+    uint64_t start_time_ns = 0;
+    uint64_t end_time_ns = 0;
+};
+
+struct SystemEventQueue {
+    uint64_t times_ns[MAX_SYSTEM_EVENTS] {};
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    madrona::SpinLock lock;
+};
+
+// ---------------------------------------------------------------------
+// Per-NPU flow bookkeeping (replaces the old global PendingSetFlowQueue /
+// CompletedSysFlowSnapshot / flowMetaEntities[]-based scheduling window
+// for dynamically injected (setFlow) flows).
+//
+// Design invariant (see design doc for the full argument): net_sys_
+// interface::setFlow(ctx, npu_id, ...) is only ever called by NPU
+// `npu_id`'s *own* step-system invocation (i.e. a per-NPU parallel worker
+// submitting a flow it itself owns). Under that invariant, writing into
+// this NPU's own NpuFlowInbox from inside that worker touches only this
+// entity's own column storage, so no lock is required even when many
+// NPUs call setFlow concurrently in the same ParallelForNode.
+// ---------------------------------------------------------------------
+
+struct NpuFlowInboxEntry {
+    uint64_t comm_src = 0;
+    uint64_t comm_dst = 0;
+    uint64_t flow_size = 0;
+    uint32_t flow_id = 0;
+};
+
+// Lock-free per-NPU inbox for setFlow() requests. Drained once per step by
+// the (serial, but O(active NPUs) not O(total flows ever)) materializeNpuFlows
+// singleton.
+struct NpuFlowInbox {
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    NpuFlowInboxEntry entries[MAX_FLOWS_PER_NPU] {};
+};
+
+// Preallocated FlowMeta entity pool owned by this NPU, mirroring the
+// PortTagPool pattern used for FlowTag entities: all MAX_FLOWS_PER_NPU
+// FlowMeta entities are created once when the NPU entity is initialized,
+// and recycled through this free list. No ctx.makeEntity/destroyEntity
+// call is ever needed on the per-step hot path.
+struct NpuFlowPool {
+    uint32_t free_count = 0;
+    madrona::Entity free_flows[MAX_FLOWS_PER_NPU] {};
+};
+
+struct NpuActiveFlow {
+    madrona::Entity flow_entity = madrona::Entity::none();
+    uint32_t flow_id = 0;
+};
+
+// Flows this NPU currently has materialized and in flight (pending or
+// active, not yet completed). Bounded to this NPU alone, so a still-
+// pending flow belonging to NPU A (or the static flow-file batch) can
+// never block NPU B's ready flow from being scheduled -- this is the
+// head-of-line-blocking fix relative to the old single global
+// pendingFlowCursor window shared by every flow source.
+struct NpuFlowActiveList {
+    uint32_t count = 0;
+    NpuActiveFlow active[MAX_FLOWS_PER_NPU] {};
+};
+
+// Completion mailbox for this NPU. Appended to by the network layer's
+// (already serial) recordFlowCompletion() whenever a flow whose
+// owner_npu_id matches this NPU finishes; read via checkFlowFinish() and
+// cleared via clearFlowFinishQueue(), both scoped to this NPU only so an
+// O(all NPUs' completions this step) scan is never required.
+struct NpuFlowFinishedList {
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    SysFlowRecord flows[MAX_FLOWS_PER_NPU] {};
+};
+
+// Durable FCT history for NPU-owned (dynamically injected) flows, appended
+// by recordFlowCompletion() and merged into FlowCompletionBuf by the
+// per-step export mirror. Unlike NpuFlowFinishedList this is never cleared
+// by the system layer -- it is the network layer's own reporting channel.
+struct DynamicFlowCompletionLog {
+    int32_t count = 0;
+    int32_t overflow_count = 0;
+    FlowCompletionRecord records[MAX_DYNAMIC_FLOW_COMPLETIONS] {};
 };
 
 // Singleton snapshot of Sim scalar counts + simulationTime. Attached to
@@ -150,6 +267,54 @@ struct SimStats {
     // from "HostPrint output lost".
     int32_t lastTick = 0;
 };
+
+enum class FakeSystemState : uint32_t {
+    Disabled,
+    Init,
+    Computing,
+    WaitingFlow,
+    Finished,
+    Failed,
+};
+
+struct FakeSystemDriver {
+    uint32_t enabled = 0;
+    FakeSystemState state = FakeSystemState::Disabled;
+    uint32_t round = 0;
+    uint32_t max_rounds = 3;
+    uint32_t npu_id = 0;
+    uint32_t flow_id_base = 900000;
+    uint64_t compute_duration_ns = 100000;
+    uint64_t compute_finish_ns = 0;
+    uint64_t flow_size = 1024 * 1024;
+    uint64_t src_npu = 0;
+    uint64_t dst_npu = 1;
+    uint32_t error_code = 0;
+    uint32_t submitted_flows = 0;
+    uint32_t completed_flows = 0;
+    uint32_t events_added = 0;
+    uint64_t last_submit_time_ns = 0;
+    uint64_t last_complete_time_ns = 0;
+};
+
+using FakeSystemStats = FakeSystemDriver;
+
+// One entity per simulated NPU. FakeSystemStats carries the FakeSystem
+// validation state machine (see fake_system.cpp); the Npu* components
+// carry this NPU's own bounded flow bookkeeping (see the per-NPU design
+// note above). Bundling both on the same entity means the *existing*
+// fakeSystemStepSystem ParallelForNode (already parallel over every
+// FakeSystemArch entity) is automatically also the per-NPU parallel flow
+// worker -- no separate archetype/entity-lookup indirection is needed for
+// the FakeSystem case. A future real Chakra per-NPU driver archetype can
+// embed the same four Npu* components to get the same properties.
+struct FakeSystemArch : public madrona::Archetype<
+    FakeSystemStats,
+    NpuFlowInbox,
+    NpuFlowPool,
+    NpuFlowActiveList,
+    NpuFlowFinishedList
+> {};
 
 // Flow-lifecycle singleton state. This keeps the mutable "how many flows are
 // still pending / routed / completed" bookkeeping in ECS-owned storage rather

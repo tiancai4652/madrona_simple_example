@@ -5,6 +5,7 @@ from ._madrona_simple_example_cpp import SimpleGridworldSimulator, madrona
 __all__ = [
     'GridWorld',
     'make_default_network_inputs',
+    'make_empty_flow_inputs',
     'load_network_inputs_from_files',
 ]
 
@@ -99,11 +100,25 @@ def _parse_flow_lines(lines):
     }
 
 
-def load_network_inputs_from_files(topology_path, flow_path):
+def make_empty_flow_inputs():
+    return {
+        'flow_ids': np.array([], dtype=np.int64),
+        'flow_src_nodes': np.array([], dtype=np.int32),
+        'flow_dst_nodes': np.array([], dtype=np.int32),
+        'flow_sizes': np.array([], dtype=np.float64),
+        'flow_start_times': np.array([], dtype=np.float64),
+        'flow_priorities': np.array([], dtype=np.int32),
+    }
+
+
+def load_network_inputs_from_files(topology_path, flow_path=None):
     with open(topology_path, 'r', encoding='utf-8') as f:
         topo_inputs = _parse_topology_lines(f)
-    with open(flow_path, 'r', encoding='utf-8') as f:
-        flow_inputs = _parse_flow_lines(f)
+    if flow_path is None:
+        flow_inputs = make_empty_flow_inputs()
+    else:
+        with open(flow_path, 'r', encoding='utf-8') as f:
+            flow_inputs = _parse_flow_lines(f)
 
     merged = dict(topo_inputs)
     merged.update(flow_inputs)

@@ -32,6 +32,28 @@ inline int32_t hashTagLookupKey(FlowId flow_id)
     return (int32_t)(key & (uint64_t)tagLookupMask());
 }
 
+inline int32_t flowMetaLookupMask()
+{
+    return MAX_FLOW_META_LOOKUP - 1;
+}
+
+inline int32_t hashFlowMetaLookupKey(FlowId flow_id)
+{
+    uint64_t key = (uint64_t)flow_id;
+    key ^= key >> 33;
+    key *= 0xff51afd7ed558ccdULL;
+    key ^= key >> 33;
+    key *= 0xc4ceb9fe1a85ec53ULL;
+    key ^= key >> 33;
+    return (int32_t)(key & (uint64_t)flowMetaLookupMask());
+}
+
+inline int32_t flowMetaProbeDistance(int32_t home_slot, int32_t slot)
+{
+    return (slot - home_slot + MAX_FLOW_META_LOOKUP) &
+        flowMetaLookupMask();
+}
+
 inline bool tagLookupMatches(const PortTagLookupEntry &entry, FlowId flow_id)
 {
     return entry.flow_id == flow_id;
@@ -39,7 +61,7 @@ inline bool tagLookupMatches(const PortTagLookupEntry &entry, FlowId flow_id)
 
 MADRONA_NO_INLINE void retireFlowMeta(Context &ctx,
                                       Sim &sim,
-                                      FlowId,
+                                      FlowId flow_id,
                                       Entity flow_entity)
 {
     if (flow_entity == Entity::none()) {
@@ -61,46 +83,70 @@ MADRONA_NO_INLINE void retireFlowMeta(Context &ctx,
     runtime.active = 0;
     runtime.completed = 1;
     runtime.route_active = 0;
+    sim.removeFlowMetaLookup(flow_id);
 }
 
 }
 
-MADRONA_NO_INLINE int32_t Sim::flowLookupIndex(FlowId flow_id) const
+MADRONA_NO_INLINE int32_t Sim::findFlowMetaLookupSlot(
+    FlowId flow_id) const
 {
-    if (flowLookupSpan <= 0) {
-        return -1;
+    int32_t slot = hashFlowMetaLookupKey(flow_id);
+    while (flowMetaLookupIds[slot] != -1) {
+        if (flowMetaLookupIds[slot] == flow_id) {
+            return slot;
+        }
+        slot = (slot + 1) & flowMetaLookupMask();
     }
 
-    int64_t lookup_idx = (int64_t)flow_id - (int64_t)flowLookupBase;
-    if (lookup_idx < 0 || lookup_idx >= flowLookupSpan) {
-        return -1;
+    return -1;
+}
+
+MADRONA_NO_INLINE void Sim::insertFlowMetaLookup(FlowId flow_id,
+                                                 Entity entity)
+{
+    int32_t slot = hashFlowMetaLookupKey(flow_id);
+    while (flowMetaLookupIds[slot] != -1 &&
+           flowMetaLookupIds[slot] != flow_id) {
+        slot = (slot + 1) & flowMetaLookupMask();
     }
 
-    return (int32_t)lookup_idx;
+    flowMetaLookupIds[slot] = flow_id;
+    flowMetaEntityLookup[slot] = entity;
+}
+
+MADRONA_NO_INLINE void Sim::removeFlowMetaLookup(FlowId flow_id)
+{
+    int32_t slot = findFlowMetaLookupSlot(flow_id);
+    if (slot < 0) {
+        return;
+    }
+
+    int32_t hole = slot;
+    int32_t next = (hole + 1) & flowMetaLookupMask();
+
+    while (flowMetaLookupIds[next] != -1) {
+        int32_t home = hashFlowMetaLookupKey(flowMetaLookupIds[next]);
+        if (flowMetaProbeDistance(home, next) >
+            flowMetaProbeDistance(home, hole)) {
+            flowMetaLookupIds[hole] = flowMetaLookupIds[next];
+            flowMetaEntityLookup[hole] = flowMetaEntityLookup[next];
+            hole = next;
+        }
+        next = (next + 1) & flowMetaLookupMask();
+    }
+
+    flowMetaLookupIds[hole] = -1;
+    flowMetaEntityLookup[hole] = Entity::none();
 }
 
 MADRONA_NO_INLINE Entity Sim::findFlowMetaEntity(Context &ctx,
                                                  FlowId flow_id) const
 {
-    int32_t lookup_idx = flowLookupIndex(flow_id);
+    (void)ctx;
+    int32_t lookup_idx = findFlowMetaLookupSlot(flow_id);
     if (lookup_idx >= 0) {
         return flowMetaEntityLookup[lookup_idx];
-    }
-
-    if (network == nullptr) {
-        return Entity::none();
-    }
-
-    for (int32_t i = 0; i < network->numFlows; i++) {
-        Entity flow_entity = flowMetaEntities[i];
-        if (flow_entity == Entity::none()) {
-            continue;
-        }
-
-        const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
-        if (flow.id == flow_id) {
-            return flow_entity;
-        }
     }
 
     return Entity::none();
@@ -259,7 +305,169 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
         .priority = flow.priority,
     };
 
+    // NPU-owned dynamic flow: mirror the completion into that NPU's own
+    // bounded finished-flow mailbox, remove it from the NPU's active list,
+    // and hand the FlowMeta entity straight back to the NPU's own pool for
+    // reuse. This runs from the (already serial) network-side completion
+    // flush, so touching another entity's (the owning NPU's) components
+    // here is safe -- it is the one deliberate serialization point in the
+    // per-NPU design, and it is O(that NPU's MAX_FLOWS_PER_NPU) at worst,
+    // not O(total flows ever created).
+    if (runtime.owner_npu_id >= 0) {
+        // The FlowMeta entity itself goes back into the NPU's pool below, so
+        // keep a durable copy of the FCT record for the Python-visible
+        // flow_completion(idx) export.
+        DynamicFlowCompletionLog &dyn_log =
+            ctx.singleton<DynamicFlowCompletionLog>();
+        if (dyn_log.count < MAX_DYNAMIC_FLOW_COMPLETIONS) {
+            dyn_log.records[dyn_log.count++] = runtime.completion_record;
+        } else {
+            dyn_log.overflow_count += 1;
+        }
+
+        Entity npu_entity = findNpuEntity((uint32_t)runtime.owner_npu_id);
+        if (npu_entity != Entity::none()) {
+            NpuFlowFinishedList &finished =
+                ctx.get<NpuFlowFinishedList>(npu_entity);
+            if (finished.count < MAX_FLOWS_PER_NPU) {
+                finished.flows[finished.count++] = SysFlowRecord {
+                    .owner_npu_id = (uint32_t)runtime.owner_npu_id,
+                    .flow_id = (uint32_t)flow_id,
+                    .comm_src = (uint64_t)flow.src_node,
+                    .comm_dst = (uint64_t)flow.dst_node,
+                    .flow_size = (uint64_t)flow.size,
+                    .start_time_ns =
+                        (uint64_t)(flow.start_time * 1000000.0 + 0.5),
+                    .end_time_ns = (uint64_t)(end_time * 1000000.0 + 0.5),
+                };
+            } else {
+                finished.overflow_count += 1;
+            }
+
+            NpuFlowActiveList &active =
+                ctx.get<NpuFlowActiveList>(npu_entity);
+            for (uint32_t i = 0; i < active.count; i++) {
+                if (active.active[i].flow_entity != flow_entity) {
+                    continue;
+                }
+                active.active[i] = active.active[active.count - 1];
+                active.count -= 1;
+                break;
+            }
+
+            NpuFlowPool &pool = ctx.get<NpuFlowPool>(npu_entity);
+            if (pool.free_count < MAX_FLOWS_PER_NPU) {
+                pool.free_flows[pool.free_count++] = flow_entity;
+            }
+        }
+    }
+
     retireFlowMeta(ctx, *this, flow_id, flow_entity);
+}
+
+MADRONA_NO_INLINE void Sim::materializeNpuFlows(Context &ctx)
+{
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
+
+    for (int32_t npu_id = 0; npu_id < numNpus; npu_id++) {
+        Entity npu_entity = npuEntities[npu_id];
+        if (npu_entity == Entity::none()) {
+            continue;
+        }
+
+        NpuFlowInbox &inbox = ctx.get<NpuFlowInbox>(npu_entity);
+        if (inbox.count == 0) {
+            continue;
+        }
+
+        NpuFlowPool &pool = ctx.get<NpuFlowPool>(npu_entity);
+        NpuFlowActiveList &active = ctx.get<NpuFlowActiveList>(npu_entity);
+
+        for (uint32_t i = 0; i < inbox.count; i++) {
+            const NpuFlowInboxEntry &req = inbox.entries[i];
+
+            if (pool.free_count == 0) {
+                inbox.overflow_count += 1;
+                continue;
+            }
+            if (active.count >= MAX_FLOWS_PER_NPU) {
+                inbox.overflow_count += 1;
+                continue;
+            }
+
+            Entity flow_entity = pool.free_flows[--pool.free_count];
+            pool.free_flows[pool.free_count] = Entity::none();
+
+            FlowDef flow {
+                .id = (FlowId)req.flow_id,
+                .src_node = (NodeId)req.comm_src,
+                .dst_node = (NodeId)req.comm_dst,
+                .size = (Bytes)req.flow_size,
+                .start_time = now,
+                .priority = 0,
+            };
+            ctx.get<FlowDef>(flow_entity) = flow;
+            ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};
+            ctx.get<FlowRuntimeState>(flow_entity) = FlowRuntimeState {
+                .pending = 1,
+                .active = 0,
+                .completed = 0,
+                .route_active = 0,
+                .owner_npu_id = npu_id,
+                .completion_record = FlowCompletionRecord {},
+            };
+            // flow_order = -1: this entity is NPU-owned, not part of the
+            // static flowMetaEntities[]/pendingFlowCursor window (see
+            // FlowScheduleState comment in sim.hpp).
+            ctx.get<FlowScheduleState>(flow_entity) = FlowScheduleState {
+                .flow_order = -1,
+                .ready_now = 0,
+                .prepared = 0,
+                .port_path_len = 0,
+                .port_path = {},
+                .prepared_event = DelayedEvent {},
+            };
+
+            // The flow_id -> FlowMeta lookup table stays a single shared
+            // structure (network-side routing needs to resolve any flow_id
+            // to its entity regardless of owner); insertion here is safe
+            // because materializeNpuFlows itself is a serial singleton
+            // step, so this loop never races with another NPU's insert.
+            insertFlowMetaLookup(flow.id, flow_entity);
+
+            active.active[active.count++] = NpuActiveFlow {
+                .flow_entity = flow_entity,
+                .flow_id = req.flow_id,
+            };
+
+            // NOTE: counters.numPendingFlows is intentionally left untouched
+            // here. It is exclusively the static flow-file scheduling
+            // window's size (see schedulePendingFlows's
+            // pendingFlowCursor + numPendingFlows window math in
+            // sim_systems_schedule.cpp); NPU-owned flows are scheduled
+            // through the independent scheduleNpuFlows() path below and
+            // must never grow that window, or schedulePendingFlows would
+            // start reading past the static flowMetaEntities[] contents it
+            // actually owns.
+            counters.numFlowDefs += 1;
+        }
+
+        inbox.count = 0;
+    }
+}
+
+MADRONA_NO_INLINE void Sim::pruneSystemEvents(Context &ctx)
+{
+    SystemEventQueue &events = ctx.singleton<SystemEventQueue>();
+    uint64_t now_ns = (uint64_t)(now * 1000000.0 + 0.5);
+    uint32_t out = 0;
+    for (uint32_t i = 0; i < events.count; i++) {
+        uint64_t event_ns = events.times_ns[i];
+        if (event_ns > now_ns) {
+            events.times_ns[out++] = event_ns;
+        }
+    }
+    events.count = out;
 }
 
 MADRONA_NO_INLINE void Sim::refreshTagCounters(Context &ctx)

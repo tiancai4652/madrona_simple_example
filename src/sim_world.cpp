@@ -525,6 +525,7 @@ Time Sim::chooseDT(Context &ctx) const
     double backlog_gap = std::numeric_limits<double>::max();
     double pfc_pause_gap = std::numeric_limits<double>::max();
     double pfc_resume_gap = std::numeric_limits<double>::max();
+    double system_gap = std::numeric_limits<double>::max();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
 
     if (runtime.numDelayedEvents > 0 &&
@@ -538,8 +539,8 @@ Time Sim::chooseDT(Context &ctx) const
 
     if (counters.numPendingFlows > 0) {
         Entity flow_entity =
-            (counters.pendingFlowCursor >= 0 && network != nullptr &&
-             counters.pendingFlowCursor < network->numFlows) ?
+            (counters.pendingFlowCursor >= 0 &&
+             counters.pendingFlowCursor < numFlowMetaEntities) ?
             flowMetaEntities[counters.pendingFlowCursor] :
             Entity::none();
         if (flow_entity != Entity::none()) {
@@ -587,6 +588,22 @@ Time Sim::chooseDT(Context &ctx) const
     if (dtMin > 0.0 && dt < dtMin) {
         dt = dtMin;
     }
+
+    const SystemEventQueue &system_events = ctx.singleton<SystemEventQueue>();
+    uint64_t now_ns = (uint64_t)(now * 1000000.0 + 0.5);
+    for (uint32_t i = 0; i < system_events.count; i++) {
+        uint64_t event_ns = system_events.times_ns[i];
+        if (event_ns > now_ns) {
+            Time gap = (Time)(event_ns - now_ns) / 1000000.0;
+            if (gap < system_gap) {
+                system_gap = gap;
+            }
+        }
+    }
+    if (system_gap < timerInactiveSentinel()) {
+        dt = std::min(dt, system_gap);
+    }
+
     if (dt > 1e12 || dt == timerInactiveSentinel()) {
         dt = 0.001;
     }

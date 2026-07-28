@@ -1,5 +1,6 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
+#include "sys/fake_system.hpp"
 
 #ifndef MADRONA_GPU_MODE
 #include <chrono>
@@ -103,6 +104,35 @@ MADRONA_NO_INLINE void beginScheduleStepSystem(Engine &ctx, SimDriver &driver)
     driver.tick += 1;
 }
 
+MADRONA_NO_INLINE void pruneSystemEventsStepSystem(Engine &ctx, SimDriver &)
+{
+    ctx.data().pruneSystemEvents(ctx);
+}
+
+// Per-NPU parallel worker: already iterates every FakeSystemArch entity
+// (one per simulated NPU) independently. fakeSystemStep() internally reads
+// this NPU's own last-step NpuFlowFinishedList, clears it via
+// clearFlowFinishQueue(ctx, fake.npu_id), and (once its compute delay
+// elapses) calls setFlow(ctx, fake.npu_id, ...) -- both of which now touch
+// only this NPU's own components (see net_sys_interface.cpp), so N of
+// these can run concurrently with zero cross-NPU lock contention.
+MADRONA_NO_INLINE void fakeSystemStepSystem(Engine &ctx,
+                                            FakeSystemStats &fake)
+{
+    fakeSystemStep(ctx, fake);
+}
+
+// Serial singleton: drains every NPU's own (lock-free) inbox into that
+// NPU's own preallocated FlowMeta pool. O(active NPUs * their own pending
+// count), not O(total flows ever created) -- see sim.hpp/materializeNpuFlows
+// doc comment.
+MADRONA_NO_INLINE void materializeNpuFlowsStepSystem(
+    Engine &ctx,
+    SimDriver &)
+{
+    ctx.data().materializeNpuFlows(ctx);
+}
+
 MADRONA_NO_INLINE void preparePendingFlowMetaStepSystem(
     Engine &ctx,
     FlowDef &flow,
@@ -117,6 +147,9 @@ MADRONA_NO_INLINE void flushScheduleStepSystem(Engine &ctx, SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.schedulePendingFlows(ctx);
+    // Independent of schedulePendingFlows: walks each NPU's own bounded
+    // NpuFlowActiveList (see doc comment on Sim::scheduleNpuFlows).
+    sim.scheduleNpuFlows(ctx);
 }
 
 MADRONA_NO_INLINE void beginDeliverStepSystem(Engine &ctx, SimDriver &)
@@ -599,20 +632,26 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     if (n < 0) n = 0;
     if (n > MAX_FLOW_COMPLETIONS) n = MAX_FLOW_COMPLETIONS;
     int32_t out_idx = 0;
-    if (sim.network != nullptr) {
-        for (int32_t i = 0; i < sim.network->numFlows && out_idx < n; i++) {
-            Entity flow_entity = sim.flowMetaEntities[i];
-            if (flow_entity == Entity::none()) {
-                continue;
-            }
-            const FlowRuntimeState &flow_runtime =
-                ctx.get<FlowRuntimeState>(flow_entity);
-            if (flow_runtime.completed == 0) {
-                continue;
-            }
-            FlowCompletionRecord record = flow_runtime.completion_record;
-            buf.records[out_idx++] = record;
+    for (int32_t i = 0; i < sim.numFlowMetaEntities && out_idx < n; i++) {
+        Entity flow_entity = sim.flowMetaEntities[i];
+        if (flow_entity == Entity::none()) {
+            continue;
         }
+        const FlowRuntimeState &flow_runtime =
+            ctx.get<FlowRuntimeState>(flow_entity);
+        if (flow_runtime.completed == 0) {
+            continue;
+        }
+        FlowCompletionRecord record = flow_runtime.completion_record;
+        buf.records[out_idx++] = record;
+    }
+    // NPU-owned (dynamically injected) flows live in recycled per-NPU pool
+    // slots, so their records come from the durable log instead of from a
+    // flowMetaEntities[] rescan.
+    const DynamicFlowCompletionLog &dyn_log =
+        ctx.singleton<DynamicFlowCompletionLog>();
+    for (int32_t i = 0; i < dyn_log.count && out_idx < n; i++) {
+        buf.records[out_idx++] = dyn_log.records[i];
     }
     for (int32_t i = out_idx; i < MAX_FLOW_COMPLETIONS; i++) {
         buf.records[i] = FlowCompletionRecord {};
@@ -634,9 +673,21 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
 
     auto n0begin = builder.addToGraph<ParallelForNode<Engine,
         beginScheduleStepSystem, SimDriver>>({});
+    auto n0prune = builder.addToGraph<ParallelForNode<Engine,
+        pruneSystemEventsStepSystem, SimDriver>>({n0begin});
+    // Per-NPU parallel: N FakeSystem/NPU entities, each touching only its
+    // own components (state machine + NpuFlow{Inbox,Pool,ActiveList,
+    // FinishedList}). See report/2-merge-plan/实施/阶段A2-per-NPU流并行化方案.md.
+    auto n0fake = builder.addToGraph<ParallelForNode<Engine,
+        fakeSystemStepSystem, FakeSystemStats>>({n0prune});
+    // Serial, but O(active NPUs' own pending counts), not O(total flows
+    // ever materialized) -- replaces the old single global
+    // PendingSetFlowQueue drain.
+    auto n0materialize = builder.addToGraph<ParallelForNode<Engine,
+        materializeNpuFlowsStepSystem, SimDriver>>({n0fake});
     auto n0prepare = builder.addToGraph<ParallelForNode<Engine,
         preparePendingFlowMetaStepSystem,
-        FlowDef, FlowRuntimeState, FlowScheduleState>>({n0begin});
+        FlowDef, FlowRuntimeState, FlowScheduleState>>({n0materialize});
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
         flushScheduleStepSystem, SimDriver>>({n0prepare});
     auto n1reset = builder.addToGraph<ParallelForNode<Engine,

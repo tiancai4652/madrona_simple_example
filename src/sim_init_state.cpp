@@ -16,8 +16,8 @@ void Sim::resetNetworkState()
     nodeLookupSpan = 0;
     numTopoLinks = 0;
     numPorts = 0;
-    flowLookupBase = 0;
-    flowLookupSpan = 0;
+    numFlowMetaEntities = 0;
+    numNpus = 0;
     enableBuffer = 1;
     enablePfc = 0;
     pfcEgress = 0;
@@ -42,11 +42,18 @@ void Sim::resetNetworkState()
         topoLinks[i] = TopoLinkState {};
     }
 
-    for (int32_t i = 0; i < MAX_FLOWS; i++) {
+    for (int32_t i = 0; i < MAX_FLOW_META_LOOKUP; i++) {
+        flowMetaLookupIds[i] = -1;
         flowMetaEntityLookup[i] = Entity::none();
+    }
+
+    for (int32_t i = 0; i < MAX_FLOWS; i++) {
         flowMetaEntities[i] = Entity::none();
     }
 
+    for (uint32_t i = 0; i < MAX_NPUS; i++) {
+        npuEntities[i] = Entity::none();
+    }
 }
 
 }

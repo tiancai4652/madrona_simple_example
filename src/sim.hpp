@@ -44,6 +44,7 @@ constexpr int32_t MAX_DELAYED_EVENTS = 2908160;
 constexpr int32_t MAX_EVENTS_PER_STEP = 328704;
 constexpr int32_t MAX_TAG_INDEX = 2580480;
 constexpr int32_t MAX_SOURCE_TAGS = 645120;
+constexpr int32_t MAX_FLOW_META_LOOKUP = 1048576;
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {
@@ -85,6 +86,7 @@ struct FlowRuntimeState {
     int32_t active = 0;
     int32_t completed = 0;
     int32_t route_active = 0;
+    int32_t owner_npu_id = -1;
     FlowCompletionRecord completion_record {};
 };
 
@@ -93,6 +95,14 @@ struct FlowRuntimeState {
 // both inside the current pending window and ready at sim.now; the singleton
 // schedule flush then commits the scratch in input order so delayed-event
 // insertion order and counters stay deterministic.
+//
+// flow_order sentinel: >= 0 means "static flow-file entity, part of the
+// global flowMetaEntities[]/pendingFlowCursor window" (original semantics,
+// unchanged). == -1 means "NPU-owned dynamic entity materialized from a
+// per-NPU NpuFlowPool slot" -- these are *not* part of the global window and
+// are instead scheduled by Sim::scheduleNpuFlows() walking each NPU's own
+// bounded NpuFlowActiveList, so one NPU's not-yet-ready flow can never block
+// another NPU's ready flow.
 struct FlowScheduleState {
     int32_t flow_order = -1;
     int32_t ready_now = 0;
@@ -156,7 +166,9 @@ struct Sim : public madrona::WorldBase {
     int32_t findNeighborSlot(int32_t node_slot, NodeId neighbor_id) const;
     Time getLinkDelay(NodeId src, NodeId dst) const;
     Time getPortLinkDelay(int32_t src_port_id, int32_t dst_port_id) const;
-    int32_t flowLookupIndex(FlowId flow_id) const;
+    int32_t findFlowMetaLookupSlot(FlowId flow_id) const;
+    void insertFlowMetaLookup(FlowId flow_id, madrona::Entity entity);
+    void removeFlowMetaLookup(FlowId flow_id);
     int32_t findTagLookupSlot(const PortTagLookup &lookup,
                               FlowId flow_id) const;
     void insertTagLookup(PortTagLookup &lookup,
@@ -503,6 +515,37 @@ struct Sim : public madrona::WorldBase {
         PortOutbox &outbox);
     MADRONA_NO_INLINE void recordFlowCompletion(
         madrona::Context &ctx, FlowId flow_id, Time end_time);
+    MADRONA_NO_INLINE void pruneSystemEvents(madrona::Context &ctx);
+
+    // --- Per-NPU flow bookkeeping (see design doc referenced in types.hpp)
+    // ---
+    // Creates NPU `npu_id`'s FakeSystemArch entity and preallocates its
+    // NpuFlowPool (MAX_FLOWS_PER_NPU FlowMeta entities), mirroring
+    // createPort()/initPortQueues()'s PortTagPool preallocation pattern.
+    // Single-threaded, called only from Sim::Sim().
+    MADRONA_NO_INLINE void createNpu(madrona::Context &ctx,
+                                     uint32_t npu_id,
+                                     uint64_t src_npu,
+                                     uint64_t dst_npu);
+    // O(1) dense lookup, npu_id -> that NPU's FakeSystemArch entity.
+    MADRONA_NO_INLINE madrona::Entity findNpuEntity(uint32_t npu_id) const;
+    // Serial singleton step: drains every NPU's NpuFlowInbox, pops a
+    // preallocated entity from that NPU's own NpuFlowPool per request, and
+    // fills in FlowDef/FlowRouteState/FlowRuntimeState/FlowScheduleState in
+    // place (flow_order = -1). Registers the new flow_id into the shared
+    // flowMetaEntityLookup table (the one piece of state that must stay
+    // global, since network-side routing resolves flow_id -> FlowMeta
+    // entity irrespective of owner). Bounded by MAX_NPUS *
+    // MAX_FLOWS_PER_NPU per step, not by total flows ever created.
+    MADRONA_NO_INLINE void materializeNpuFlows(madrona::Context &ctx);
+    // Serial singleton step, the NPU-owned counterpart of
+    // schedulePendingFlows(): walks each NPU's own bounded
+    // NpuFlowActiveList and activates (pushes the delayed arrival event +
+    // marks the route active) any flow whose FlowScheduleState.ready_now
+    // was set by preparePendingFlowMeta(). Unlike schedulePendingFlows, it
+    // does *not* assume/require array order == start_time order, so it
+    // never needs to stop scanning at the first not-yet-ready entry.
+    MADRONA_NO_INLINE void scheduleNpuFlows(madrona::Context &ctx);
     MADRONA_NO_INLINE void materializeBacklog(FlowTagState &tag, Time at_time);
     MADRONA_NO_INLINE void materializeRemaining(FlowTagState &tag, Time at_time);
     MADRONA_NO_INLINE void materializeBufCnt(PortBuffer &port_buf,
@@ -569,10 +612,17 @@ struct Sim : public madrona::WorldBase {
     int32_t peerPort[MAX_TOPO_PORTS];
     mutable int32_t bfsDist[MAX_TOPO_NODES];
     mutable int32_t bfsQueue[MAX_TOPO_NODES];
-    FlowId flowLookupBase = 0;
-    int32_t flowLookupSpan = 0;
-    madrona::Entity flowMetaEntityLookup[MAX_FLOWS];
+    FlowId flowMetaLookupIds[MAX_FLOW_META_LOOKUP];
+    madrona::Entity flowMetaEntityLookup[MAX_FLOW_META_LOOKUP];
     madrona::Entity flowMetaEntities[MAX_FLOWS];
+    int32_t numFlowMetaEntities;
+
+    // Dense npu_id -> FakeSystemArch entity lookup for the per-NPU flow
+    // bookkeeping. npu_id is assumed dense in [0, numNpus) (we control
+    // NPU-entity creation ourselves in createNpu(), unlike external
+    // topology/flow ids which may be sparse).
+    madrona::Entity npuEntities[MAX_NPUS];
+    int32_t numNpus;
 
     int32_t enableBuffer;
     int32_t enablePfc;

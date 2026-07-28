@@ -31,6 +31,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
     registry.registerComponent<SimDriver>();
+    registry.registerComponent<FakeSystemStats>();
 
     registry.registerComponent<PortState>();
     registry.registerComponent<FlowDef>();
@@ -68,9 +69,17 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerSingleton<SimRuntimeState>();
     registry.registerSingleton<FlowCompletionBuf>();
     registry.registerSingleton<StepPhaseTimes>();
+    registry.registerSingleton<SystemEventQueue>();
+    registry.registerSingleton<DynamicFlowCompletionLog>();
+
+    registry.registerComponent<NpuFlowInbox>();
+    registry.registerComponent<NpuFlowPool>();
+    registry.registerComponent<NpuFlowActiveList>();
+    registry.registerComponent<NpuFlowFinishedList>();
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
+    registry.registerArchetype<FakeSystemArch>();
     registry.registerArchetype<Port>();
     registry.registerArchetype<FlowMeta>();
     registry.registerArchetype<FlowTag>();
@@ -131,6 +140,23 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     Entity driver = ctx.makeEntity<SimDriverArch>();
     ctx.get<SimDriver>(driver) = SimDriver { .tick = 0 };
 
+    // Stage-A2 validation: create NUM_FAKE_NPUS independent NPU/FakeSystem
+    // entities instead of a single one. They all run inside the *same*
+    // existing fakeSystemStepSystem ParallelForNode (already parallel over
+    // FakeSystemArch), each touching only its own NpuFlow* components, so
+    // this is the concrete demonstration of the per-NPU parallel design
+    // (see report/2-merge-plan/实施/阶段A2-per-NPU流并行化方案.md). Traffic
+    // pattern is a simple ring (npu i -> npu (i+1) % N) purely so multiple
+    // NPUs are concurrently active with distinct in-flight flows; a real
+    // system layer would instead size/seed this from Chakra task data.
+    constexpr uint32_t NUM_FAKE_NPUS = 4;
+    static_assert(NUM_FAKE_NPUS <= MAX_NPUS);
+    for (uint32_t i = 0; i < NUM_FAKE_NPUS; i++) {
+        uint64_t src_npu = i;
+        uint64_t dst_npu = (i + 1) % NUM_FAKE_NPUS;
+        createNpu(ctx, i, src_npu, dst_npu);
+    }
+
     initTrace("Sim::Sim before loadTopo", trace_mode_enabled);
     loadTopo(ctx);
     initTrace("Sim::Sim after loadTopo, before loadFlow", trace_mode_enabled);
@@ -179,6 +205,13 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
 
     StepPhaseTimes &init_phase_times = ctx.singleton<StepPhaseTimes>();
     init_phase_times = StepPhaseTimes {};
+    SystemEventQueue &init_events = ctx.singleton<SystemEventQueue>();
+    init_events.count = 0;
+    init_events.overflow_count = 0;
+    DynamicFlowCompletionLog &init_dyn_log =
+        ctx.singleton<DynamicFlowCompletionLog>();
+    init_dyn_log.count = 0;
+    init_dyn_log.overflow_count = 0;
 
     initTrace("Sim::Sim done", trace_mode_enabled);
 }

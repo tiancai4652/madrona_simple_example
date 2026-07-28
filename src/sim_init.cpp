@@ -18,32 +18,6 @@ void Sim::loadFlow(Engine &ctx)
         FATAL("Flow count exceeds MAX_FLOWS");
     }
 
-    if (flow_count > 0) {
-        FlowId min_flow_id = network->flows[0].id;
-        FlowId max_flow_id = network->flows[0].id;
-        for (int32_t i = 0; i < flow_count; i++) {
-            if (network->flows[i].id < min_flow_id) {
-                min_flow_id = network->flows[i].id;
-            }
-            if (network->flows[i].id > max_flow_id) {
-                max_flow_id = network->flows[i].id;
-            }
-        }
-
-        int64_t lookup_span =
-            (int64_t)max_flow_id - (int64_t)min_flow_id + 1;
-        if (lookup_span > 0 && lookup_span <= MAX_FLOWS) {
-            flowLookupBase = min_flow_id;
-            flowLookupSpan = (int32_t)lookup_span;
-            for (int32_t i = 0; i < flowLookupSpan; i++) {
-                flowMetaEntityLookup[i] = Entity::none();
-            }
-        } else {
-            flowLookupBase = 0;
-            flowLookupSpan = 0;
-        }
-    }
-
     FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
     flow_counters = FlowCounters {
         .numFlowDefs = flow_count,
@@ -82,6 +56,7 @@ void Sim::loadFlow(Engine &ctx)
             .active = 0,
             .completed = 0,
             .route_active = 0,
+            .owner_npu_id = -1,
             .completion_record = FlowCompletionRecord {},
         };
         ctx.get<FlowScheduleState>(flow_entity) = FlowScheduleState {
@@ -93,11 +68,9 @@ void Sim::loadFlow(Engine &ctx)
             .prepared_event = DelayedEvent {},
         };
         flowMetaEntities[i] = flow_entity;
-        if (flowLookupSpan > 0) {
-            int32_t lookup_idx = (int32_t)(flow.id - flowLookupBase);
-            flowMetaEntityLookup[lookup_idx] = flow_entity;
-        }
+        insertFlowMetaLookup(flow.id, flow_entity);
     }
+    numFlowMetaEntities = flow_count;
 
     if constexpr (init_log_compiled_in) {
         if (init_log_print_enabled) {

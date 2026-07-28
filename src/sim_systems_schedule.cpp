@@ -144,6 +144,22 @@ MADRONA_NO_INLINE void Sim::preparePendingFlowMeta(
         return;
     }
 
+    // NPU-owned dynamic flow (flow_order == -1, see sim.hpp comment): not
+    // part of the static flowMetaEntities[]/pendingFlowCursor window, so
+    // skip that window check entirely. It is instead gated purely by
+    // start_time <= now, exactly like the static path below -- the only
+    // difference is which singleton (scheduleNpuFlows vs
+    // schedulePendingFlows) later consumes ready_now/prepared.
+    if (schedule_state.flow_order < 0) {
+        if (flow.start_time > now + 1e-15) {
+            return;
+        }
+        schedule_state.ready_now = 1;
+        schedule_state.prepared =
+            prepareFlowScheduleState(flow, schedule_state) ? 1 : 0;
+        return;
+    }
+
     const FlowCounters &counters = ctx.singleton<FlowCounters>();
     int32_t ready_begin = counters.pendingFlowCursor;
     int32_t pending_end = ready_begin + counters.numPendingFlows;
@@ -332,6 +348,76 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
             remaining = 0;
         }
         counters.numPendingFlows = remaining;
+    }
+}
+
+// NPU-owned counterpart of schedulePendingFlows(). Each NPU's
+// NpuFlowActiveList is small (<= MAX_FLOWS_PER_NPU) and *not* assumed to be
+// sorted by start_time, so -- unlike schedulePendingFlows's early `break` on
+// the first not-yet-ready entry -- this simply skips not-yet-ready entries
+// and keeps scanning. That is what actually fixes the head-of-line-blocking
+// bug the single global pendingFlowCursor window had: one NPU's (or the
+// static batch's) still-future flow can never prevent another NPU's
+// already-ready flow, sitting anywhere in its own small list, from being
+// activated this step.
+MADRONA_NO_INLINE void Sim::scheduleNpuFlows(Context &ctx)
+{
+    SimRuntimeState &sim_runtime = ctx.singleton<SimRuntimeState>();
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
+
+    for (int32_t npu_id = 0; npu_id < numNpus; npu_id++) {
+        Entity npu_entity = npuEntities[npu_id];
+        if (npu_entity == Entity::none()) {
+            continue;
+        }
+
+        NpuFlowActiveList &active = ctx.get<NpuFlowActiveList>(npu_entity);
+        for (uint32_t i = 0; i < active.count; i++) {
+            Entity flow_entity = active.active[i].flow_entity;
+            if (flow_entity == Entity::none()) {
+                continue;
+            }
+
+            FlowRuntimeState &flow_runtime =
+                ctx.get<FlowRuntimeState>(flow_entity);
+            if (flow_runtime.pending == 0) {
+                continue;
+            }
+
+            const FlowScheduleState &schedule_state =
+                ctx.get<FlowScheduleState>(flow_entity);
+            if (schedule_state.ready_now == 0) {
+                continue;
+            }
+
+            if (schedule_state.prepared != 0 &&
+                sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
+                pushDelayedEvent(ctx, schedule_state.prepared_event);
+            }
+
+            if (schedule_state.prepared != 0 &&
+                counters.numFlowRoutes < MAX_FLOWS) {
+                const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
+                FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
+                if (route.num_steps <= 0) {
+                    counters.numFlowRoutes += 1;
+                }
+                route = FlowRouteState {};
+                route.flow_id = flow.id;
+                route.num_steps = schedule_state.port_path_len - 1;
+                for (int32_t j = 0;
+                     j + 1 < schedule_state.port_path_len;
+                     j++) {
+                    route.steps[j].port_id = schedule_state.port_path[j];
+                    route.steps[j].next_port_id =
+                        schedule_state.port_path[j + 1];
+                }
+                flow_runtime.route_active = 1;
+            }
+
+            flow_runtime.pending = 0;
+            flow_runtime.active = 1;
+        }
     }
 }
 
