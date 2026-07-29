@@ -192,8 +192,8 @@ struct NpuFlowInboxEntry {
 };
 
 // Lock-free per-NPU inbox for setFlow() requests. Drained once per step by
-// the (serial, but O(active NPUs) not O(total flows ever)) materializeNpuFlows
-// singleton.
+// the (serial, but O(active NPUs) not O(total flows ever))
+// createFlowsFromNpuRequests singleton.
 struct NpuFlowInbox {
     uint32_t count = 0;
     uint32_t overflow_count = 0;

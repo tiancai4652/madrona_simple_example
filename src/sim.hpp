@@ -537,7 +537,7 @@ struct Sim : public madrona::WorldBase {
     // global, since network-side routing resolves flow_id -> FlowMeta
     // entity irrespective of owner). Bounded by MAX_NPUS *
     // MAX_FLOWS_PER_NPU per step, not by total flows ever created.
-    MADRONA_NO_INLINE void materializeNpuFlows(madrona::Context &ctx);
+    MADRONA_NO_INLINE void createFlowsFromNpuRequests(madrona::Context &ctx);
     // Serial singleton step, the NPU-owned counterpart of
     // schedulePendingFlows(): walks each NPU's own bounded
     // NpuFlowActiveList and activates (pushes the delayed arrival event +

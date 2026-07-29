@@ -9,9 +9,9 @@ namespace madsimple {
 // NpuFlowPool. This mirrors initPortQueues()'s PortTagPool preallocation
 // (sim_init_port.cpp): every FlowMeta entity this NPU will ever use is
 // created exactly once here, up front, single-threaded. From then on,
-// setFlow()/materializeNpuFlows()/recordFlowCompletion() only ever pop from
-// / push back into this NPU's own free list -- no ctx.makeEntity or
-// ctx.destroyEntity call happens on the per-step hot path.
+// setFlow()/createFlowsFromNpuRequests()/recordFlowCompletion() only ever
+// pop from / push back into this NPU's own free list -- no ctx.makeEntity
+// or ctx.destroyEntity call happens on the per-step hot path.
 //
 // `src_npu`/`dst_npu` seed this NPU's FakeSystemDriver state machine (see
 // fake_system.cpp) with the traffic pattern it will drive for the
@@ -45,8 +45,8 @@ MADRONA_NO_INLINE void Sim::createNpu(Context &ctx,
     for (uint32_t i = 0; i < MAX_FLOWS_PER_NPU; i++) {
         Entity flow_entity = ctx.makeEntity<FlowMeta>();
         // Idle default: pending == 0 so preparePendingFlowMeta/
-        // scheduleNpuFlows ignore this entity until materializeNpuFlows
-        // actually assigns it to a real request.
+        // scheduleNpuFlows ignores this entity until
+        // createFlowsFromNpuRequests actually assigns it to a real request.
         ctx.get<FlowDef>(flow_entity) = FlowDef {};
         ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};
         ctx.get<FlowRuntimeState>(flow_entity) = FlowRuntimeState {

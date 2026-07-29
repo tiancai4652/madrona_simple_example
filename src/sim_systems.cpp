@@ -365,7 +365,7 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
     retireFlowMeta(ctx, *this, flow_id, flow_entity);
 }
 
-MADRONA_NO_INLINE void Sim::materializeNpuFlows(Context &ctx)
+MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequests(Context &ctx)
 {
     FlowCounters &counters = ctx.singleton<FlowCounters>();
 
@@ -431,7 +431,7 @@ MADRONA_NO_INLINE void Sim::materializeNpuFlows(Context &ctx)
             // The flow_id -> FlowMeta lookup table stays a single shared
             // structure (network-side routing needs to resolve any flow_id
             // to its entity regardless of owner); insertion here is safe
-            // because materializeNpuFlows itself is a serial singleton
+            // because createFlowsFromNpuRequests itself is a serial singleton
             // step, so this loop never races with another NPU's insert.
             insertFlowMetaLookup(flow.id, flow_entity);
 

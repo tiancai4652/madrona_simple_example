@@ -124,13 +124,14 @@ MADRONA_NO_INLINE void fakeSystemStepSystem(Engine &ctx,
 
 // Serial singleton: drains every NPU's own (lock-free) inbox into that
 // NPU's own preallocated FlowMeta pool. O(active NPUs * their own pending
-// count), not O(total flows ever created) -- see sim.hpp/materializeNpuFlows
+// count), not O(total flows ever created) -- see
+// sim.hpp/createFlowsFromNpuRequests
 // doc comment.
-MADRONA_NO_INLINE void materializeNpuFlowsStepSystem(
+MADRONA_NO_INLINE void createFlowsFromNpuRequestsStepSystem(
     Engine &ctx,
     SimDriver &)
 {
-    ctx.data().materializeNpuFlows(ctx);
+    ctx.data().createFlowsFromNpuRequests(ctx);
 }
 
 MADRONA_NO_INLINE void preparePendingFlowMetaStepSystem(
@@ -683,11 +684,11 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     // Serial, but O(active NPUs' own pending counts), not O(total flows
     // ever materialized) -- replaces the old single global
     // PendingSetFlowQueue drain.
-    auto n0materialize = builder.addToGraph<ParallelForNode<Engine,
-        materializeNpuFlowsStepSystem, SimDriver>>({n0fake});
+    auto n0createFlows = builder.addToGraph<ParallelForNode<Engine,
+        createFlowsFromNpuRequestsStepSystem, SimDriver>>({n0fake});
     auto n0prepare = builder.addToGraph<ParallelForNode<Engine,
         preparePendingFlowMetaStepSystem,
-        FlowDef, FlowRuntimeState, FlowScheduleState>>({n0materialize});
+        FlowDef, FlowRuntimeState, FlowScheduleState>>({n0createFlows});
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
         flushScheduleStepSystem, SimDriver>>({n0prepare});
     auto n1reset = builder.addToGraph<ParallelForNode<Engine,
