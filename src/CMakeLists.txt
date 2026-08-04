@@ -6,7 +6,6 @@ set(SIMULATOR_SRCS
     sim_init_state.cpp
     sim_init_port.cpp
     sim_init_topo.cpp
-    sim_init_npu.cpp
     sim_world.cpp
     sim_debug.cpp
     sim_systems.cpp
@@ -19,7 +18,11 @@ set(SIMULATOR_SRCS
     sim_systems_buffer.cpp
     sim_systems_pfc.cpp
     sys/net_sys_interface.cpp
-    sys/fake_system.cpp
+    sys/chakra_node_processing.cpp
+    sys/system_init.cpp
+    sys/communication_system.cpp
+    sys/time_management.cpp
+    sys/llm_system.cpp
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC

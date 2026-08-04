@@ -156,7 +156,16 @@ uint32_t checkFlowFinish(Engine &ctx,
     uint32_t out_count = 0;
     for (uint32_t i = 0; i < finished.count && out_count < max_flows_finish;
          i++) {
-        flows_finish[out_count++] = finished.flows[i];
+        const SysFlowRecord &record = finished.flows[i];
+        SysFlow &flow = flows_finish[out_count++];
+        flow.id = record.flow_id;
+        flow.comm_size = record.flow_size;
+        flow.comm_src = record.comm_src;
+        flow.comm_dst = record.comm_dst;
+        flow.durationMicros = static_cast<uint32_t>(
+            (record.end_time_ns - record.start_time_ns) / 1000);
+        flow.state = TaskState::FINISH;
+        flow.is_send = true;
     }
 
     return out_count;

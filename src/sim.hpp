@@ -9,6 +9,7 @@
 
 #include "types.hpp"
 #include "init.hpp"
+#include "sys/sys_types.hpp"
 
 namespace madsimple {
 
@@ -519,15 +520,7 @@ struct Sim : public madrona::WorldBase {
 
     // --- Per-NPU flow bookkeeping (see design doc referenced in types.hpp)
     // ---
-    // Creates NPU `npu_id`'s FakeSystemArch entity and preallocates its
-    // NpuFlowPool (MAX_FLOWS_PER_NPU FlowMeta entities), mirroring
-    // createPort()/initPortQueues()'s PortTagPool preallocation pattern.
-    // Single-threaded, called only from Sim::Sim().
-    MADRONA_NO_INLINE void createNpu(madrona::Context &ctx,
-                                     uint32_t npu_id,
-                                     uint64_t src_npu,
-                                     uint64_t dst_npu);
-    // O(1) dense lookup, npu_id -> that NPU's FakeSystemArch entity.
+    // O(1) dense lookup, npu_id -> that NPU's real system entity.
     MADRONA_NO_INLINE madrona::Entity findNpuEntity(uint32_t npu_id) const;
     // Serial singleton step: drains every NPU's NpuFlowInbox, pops a
     // preallocated entity from that NPU's own NpuFlowPool per request, and
@@ -617,12 +610,23 @@ struct Sim : public madrona::WorldBase {
     madrona::Entity flowMetaEntities[MAX_FLOWS];
     int32_t numFlowMetaEntities;
 
-    // Dense npu_id -> FakeSystemArch entity lookup for the per-NPU flow
-    // bookkeeping. npu_id is assumed dense in [0, numNpus) (we control
-    // NPU-entity creation ourselves in createNpu(), unlike external
-    // topology/flow ids which may be sparse).
+    // Dense npu_id -> NpuNode entity lookup shared by the real system layer
+    // and per-NPU network bridge.
     madrona::Entity npuEntities[MAX_NPUS];
     int32_t numNpus;
+
+    // Migrated Chakra system-layer state. The existing npuEntities array is
+    // shared by system execution and the per-NPU network bridge.
+    madrona::Entity init_entity;
+    madrona::Entity next_process_time_entity;
+    madrona::Entity sys_config_entity;
+    madrona::Entity ring_config_entity;
+    madrona::Entity check_npu_finish_entity;
+    madrona::Entity ring_topo_entity[3];
+    madrona::Entity npus_chakra_exec_entity
+        [NPU_NUM][MAX_CHAKRA_NODES_PER_NPU];
+    int32_t send_recv_map_recvend[NPU_NUM][NPU_NUM];
+    bool sys_chakra_entities_created;
 
     int32_t enableBuffer;
     int32_t enablePfc;

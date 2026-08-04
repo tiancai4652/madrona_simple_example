@@ -632,6 +632,26 @@ Tensor Manager::doneTensor() const
         {impl_->cfg.numWorlds, 1});
 }
 
+Tensor Manager::chakraNodesDataTensor() const
+{
+    return impl_->exportTensor(ExportID::ChakraNodesData,
+        TensorElementType::Int32,
+        {impl_->cfg.numWorlds, NPU_NUM, CHAKRA_NODES_DATA_LENGTH});
+}
+
+Tensor Manager::processParamsTensor() const
+{
+    return impl_->exportTensor(ExportID::ProcessParams,
+        TensorElementType::Int32, {impl_->cfg.numWorlds, 1000});
+}
+
+Tensor Manager::systemStatusTensor() const
+{
+    static_assert(sizeof(SystemStatus) == sizeof(int32_t) * 8);
+    return impl_->exportTensor(ExportID::SystemStatus,
+        TensorElementType::Int32, {impl_->cfg.numWorlds, 8});
+}
+
 double Manager::simulationTime()
 {
     return impl_->simulationTime();

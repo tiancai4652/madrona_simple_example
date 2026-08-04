@@ -1,6 +1,8 @@
 import csv
 import numpy as np
+import torch
 from ._madrona_simple_example_cpp import SimpleGridworldSimulator, madrona
+from .chakra import build_process_params, load_chakra_workload
 
 __all__ = [
     'GridWorld',
@@ -220,6 +222,8 @@ class GridWorld:
                  dt_min = 0.0,
                  qos_mode = 0,
                  prior_weights = None,
+                 system_workload = None,
+                 system_config = None,
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -227,6 +231,20 @@ class GridWorld:
         self.rewards_input = rewards
         self.walls = walls
         self.network_inputs = make_default_network_inputs() if network_inputs is None else network_inputs
+
+        if (system_workload is None) != (system_config is None):
+            raise ValueError(
+                "system_workload and system_config must be provided together")
+        if system_config is not None:
+            system_config.validate()
+            node_ids = np.asarray(self.network_inputs['node_ids'])
+            node_types = np.asarray(self.network_inputs['node_types'])
+            host_ids = set(node_ids[node_types == 0].astype(int).tolist())
+            missing = [npu_id for npu_id in range(system_config.npu_count)
+                       if npu_id not in host_ids]
+            if missing:
+                raise ValueError(
+                    f"network topology is missing NPU host ids: {missing[:8]}")
 
         if prior_weights is None:
             prior_weights = np.zeros(8, dtype=np.float64)
@@ -274,11 +292,41 @@ class GridWorld:
         self.rewards = self.sim.reward_tensor().to_torch()
         self.dones = self.sim.done_tensor().to_torch()
 
+        self._system_enabled = system_workload is not None
+        if self._system_enabled:
+            chakra_data = load_chakra_workload(
+                system_workload, system_config.npu_count)
+            process_params = build_process_params(system_config)
+            chakra_tensor = self.sim.chakra_nodes_data_tensor().to_torch()
+            params_tensor = self.sim.process_params_tensor().to_torch()
+            chakra_row = torch.from_numpy(chakra_data)
+            params_row = torch.from_numpy(process_params)
+            for world_idx in range(num_worlds):
+                chakra_tensor[world_idx].copy_(chakra_row)
+                params_tensor[world_idx].copy_(params_row)
+
     def step(self):
         self.sim.step()
 
     def simulation_time(self):
         return self.sim.simulation_time()
+
+    def system_status(self):
+        raw = self.sim.system_status_tensor().to_torch()[0].cpu().tolist()
+        return {
+            'initialized': bool(raw[0]),
+            'finished': bool(raw[1]),
+            'failed': bool(raw[2]),
+            'error_code': int(raw[3]),
+            'finished_npus': int(raw[4]),
+            'total_npus': int(raw[5]),
+        }
+
+    def system_finished(self):
+        return self.system_status()['finished']
+
+    def system_failed(self):
+        return self.system_status()['failed']
 
     def num_flow_defs(self):
         return self.sim.num_flow_defs()

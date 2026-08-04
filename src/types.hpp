@@ -23,6 +23,9 @@ enum class ExportID : uint32_t {
     SimStats,
     FlowCompletionBuf,
     StepPhaseTimes,
+    ChakraNodesData,
+    ProcessParams,
+    SystemStatus,
     NumExports,
 };
 
@@ -123,7 +126,7 @@ constexpr uint32_t MAX_FAKE_FINISHED_FLOWS = 16;
 // entity's components with zero cross-NPU locking. See
 // report/2-merge-plan/实施/阶段A2-per-NPU流并行化方案.md for the full design.
 constexpr uint32_t MAX_NPUS = 256;
-constexpr uint32_t MAX_FLOWS_PER_NPU = 64;
+constexpr uint32_t MAX_FLOWS_PER_NPU = 512;
 
 // Because NPU-owned FlowMeta entities are recycled through NpuFlowPool, the
 // per-entity completion_record does not survive slot reuse. This bounded
@@ -267,54 +270,6 @@ struct SimStats {
     // from "HostPrint output lost".
     int32_t lastTick = 0;
 };
-
-enum class FakeSystemState : uint32_t {
-    Disabled,
-    Init,
-    Computing,
-    WaitingFlow,
-    Finished,
-    Failed,
-};
-
-struct FakeSystemDriver {
-    uint32_t enabled = 0;
-    FakeSystemState state = FakeSystemState::Disabled;
-    uint32_t round = 0;
-    uint32_t max_rounds = 3;
-    uint32_t npu_id = 0;
-    uint32_t flow_id_base = 900000;
-    uint64_t compute_duration_ns = 100000;
-    uint64_t compute_finish_ns = 0;
-    uint64_t flow_size = 1024 * 1024;
-    uint64_t src_npu = 0;
-    uint64_t dst_npu = 1;
-    uint32_t error_code = 0;
-    uint32_t submitted_flows = 0;
-    uint32_t completed_flows = 0;
-    uint32_t events_added = 0;
-    uint64_t last_submit_time_ns = 0;
-    uint64_t last_complete_time_ns = 0;
-};
-
-using FakeSystemStats = FakeSystemDriver;
-
-// One entity per simulated NPU. FakeSystemStats carries the FakeSystem
-// validation state machine (see fake_system.cpp); the Npu* components
-// carry this NPU's own bounded flow bookkeeping (see the per-NPU design
-// note above). Bundling both on the same entity means the *existing*
-// fakeSystemStepSystem ParallelForNode (already parallel over every
-// FakeSystemArch entity) is automatically also the per-NPU parallel flow
-// worker -- no separate archetype/entity-lookup indirection is needed for
-// the FakeSystem case. A future real Chakra per-NPU driver archetype can
-// embed the same four Npu* components to get the same properties.
-struct FakeSystemArch : public madrona::Archetype<
-    FakeSystemStats,
-    NpuFlowInbox,
-    NpuFlowPool,
-    NpuFlowActiveList,
-    NpuFlowFinishedList
-> {};
 
 // Flow-lifecycle singleton state. This keeps the mutable "how many flows are
 // still pending / routed / completed" bookkeeping in ECS-owned storage rather

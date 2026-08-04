@@ -365,6 +365,15 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
     retireFlowMeta(ctx, *this, flow_id, flow_entity);
 }
 
+MADRONA_NO_INLINE Entity Sim::findNpuEntity(uint32_t npu_id) const
+{
+    if (npu_id >= MAX_NPUS) {
+        return Entity::none();
+    }
+
+    return npuEntities[npu_id];
+}
+
 MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequests(Context &ctx)
 {
     FlowCounters &counters = ctx.singleton<FlowCounters>();

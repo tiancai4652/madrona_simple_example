@@ -1,5 +1,6 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
+#include "sys/system_init.hpp"
 #include <madrona/mw_gpu_entry.hpp>
 
 using namespace madrona;
@@ -31,7 +32,6 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<Done>();
     registry.registerComponent<CurStep>();
     registry.registerComponent<SimDriver>();
-    registry.registerComponent<FakeSystemStats>();
 
     registry.registerComponent<PortState>();
     registry.registerComponent<FlowDef>();
@@ -71,6 +71,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerSingleton<StepPhaseTimes>();
     registry.registerSingleton<SystemEventQueue>();
     registry.registerSingleton<DynamicFlowCompletionLog>();
+    registry.registerSingleton<SystemStatus>();
 
     registry.registerComponent<NpuFlowInbox>();
     registry.registerComponent<NpuFlowPool>();
@@ -79,7 +80,10 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
-    registry.registerArchetype<FakeSystemArch>();
+    registry.registerComponent<ChakraNodesData>();
+    registry.registerComponent<ProcessParams>();
+    registry.registerArchetype<SysInputArch>();
+    llm_system::registerTypes(registry);
     registry.registerArchetype<Port>();
     registry.registerArchetype<FlowMeta>();
     registry.registerArchetype<FlowTag>();
@@ -95,6 +99,12 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
         (uint32_t)ExportID::FlowCompletionBuf);
     registry.exportSingleton<StepPhaseTimes>(
         (uint32_t)ExportID::StepPhaseTimes);
+    registry.exportColumn<SysInputArch, ChakraNodesData>(
+        (uint32_t)ExportID::ChakraNodesData);
+    registry.exportColumn<SysInputArch, ProcessParams>(
+        (uint32_t)ExportID::ProcessParams);
+    registry.exportSingleton<SystemStatus>(
+        (uint32_t)ExportID::SystemStatus);
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -140,22 +150,11 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     Entity driver = ctx.makeEntity<SimDriverArch>();
     ctx.get<SimDriver>(driver) = SimDriver { .tick = 0 };
 
-    // Stage-A2 validation: create NUM_FAKE_NPUS independent NPU/FakeSystem
-    // entities instead of a single one. They all run inside the *same*
-    // existing fakeSystemStepSystem ParallelForNode (already parallel over
-    // FakeSystemArch), each touching only its own NpuFlow* components, so
-    // this is the concrete demonstration of the per-NPU parallel design
-    // (see report/2-merge-plan/实施/阶段A2-per-NPU流并行化方案.md). Traffic
-    // pattern is a simple ring (npu i -> npu (i+1) % N) purely so multiple
-    // NPUs are concurrently active with distinct in-flight flows; a real
-    // system layer would instead size/seed this from Chakra task data.
-    constexpr uint32_t NUM_FAKE_NPUS = 4;
-    static_assert(NUM_FAKE_NPUS <= MAX_NPUS);
-    for (uint32_t i = 0; i < NUM_FAKE_NPUS; i++) {
-        uint64_t src_npu = i;
-        uint64_t dst_npu = (i + 1) % NUM_FAKE_NPUS;
-        createNpu(ctx, i, src_npu, dst_npu);
-    }
+    Entity sys_input = ctx.makeEntity<SysInputArch>();
+    ctx.get<ProcessParams>(sys_input) = ProcessParams {};
+    init_entity = sys_input;
+    ctx.singleton<SystemStatus>() = SystemStatus {};
+    llm_system::init(ctx);
 
     initTrace("Sim::Sim before loadTopo", trace_mode_enabled);
     loadTopo(ctx);

@@ -45,6 +45,9 @@ public:
     MGR_EXPORT madrona::py::Tensor observationTensor() const;
     MGR_EXPORT madrona::py::Tensor rewardTensor() const;
     MGR_EXPORT madrona::py::Tensor doneTensor() const;
+    MGR_EXPORT madrona::py::Tensor chakraNodesDataTensor() const;
+    MGR_EXPORT madrona::py::Tensor processParamsTensor() const;
+    MGR_EXPORT madrona::py::Tensor systemStatusTensor() const;
 
     MGR_EXPORT double simulationTime();
     MGR_EXPORT int32_t numFlowDefs();
