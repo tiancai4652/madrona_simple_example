@@ -123,6 +123,7 @@ namespace madsimple
         uint64_t comm_size;
         uint64_t comm_src;
         uint64_t comm_dst;
+        uint64_t comm_para;
         uint32_t durationMicros;
 
         // Flow execution order ID
@@ -137,6 +138,7 @@ namespace madsimple
               comm_size(0),
               comm_src(0),
               comm_dst(0),
+              comm_para(0),
               durationMicros(0),
               exec_index(0),
               state(TaskState::INIT),
@@ -150,6 +152,7 @@ namespace madsimple
             comm_size = 0;
             comm_src = 0;
             comm_dst = 0;
+            comm_para = 0;
             durationMicros = 0;
             exec_index = 0;
             state = TaskState::INIT;
@@ -840,6 +843,7 @@ namespace madsimple
     {
         uint64_t comm_src;
         uint64_t comm_dst;
+        uint64_t flow_id;
     };
 
 

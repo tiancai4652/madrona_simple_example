@@ -359,6 +359,7 @@ namespace madsimple::llm_system {
                             ctx.get < NodeID > (process_e).value = node.id;
                             uint32_t flow_id = processingCommTasks.getFlowId();
                             ctx.get < TaskFlows > (process_e).flows[0].id = flow_id;
+                            ctx.get < TaskFlows > (process_e).flows[0].comm_para = node.comm_para;
                             ctx.get < TaskFlows > (process_e).flows[0].comm_size = comm_size;
                             ctx.get < TaskFlows > (process_e).flows[0].comm_src = src;
                             ctx.get < TaskFlows > (process_e).flows[0].comm_dst = dst;
@@ -454,6 +455,7 @@ namespace madsimple::llm_system {
                         ctx.get < NodeID > (process_e).value = node.id;
                         ctx.get < RecvNodeFlag > (process_e).comm_src = src;
                         ctx.get < RecvNodeFlag > (process_e).comm_dst = dst;
+                        ctx.get < RecvNodeFlag > (process_e).flow_id = node.comm_para;
                         ctx.data().npus_chakra_exec_entity[id.value][node.id] = process_e;
                         // setFlow(ctx, src, dst, node.comm_size, flow_id);
                         #if SIMPLE_LOG_MODE

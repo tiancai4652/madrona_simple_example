@@ -336,6 +336,7 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
                     .comm_src = (uint64_t)flow.src_node,
                     .comm_dst = (uint64_t)flow.dst_node,
                     .flow_size = (uint64_t)flow.size,
+                    .comm_para = flow.comm_para,
                     .start_time_ns =
                         (uint64_t)(flow.start_time * 1000000.0 + 0.5),
                     .end_time_ns = (uint64_t)(end_time * 1000000.0 + 0.5),
@@ -414,6 +415,7 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequests(Context &ctx)
                 .size = (Bytes)req.flow_size,
                 .start_time = now,
                 .priority = 0,
+                .comm_para = req.comm_para,
             };
             ctx.get<FlowDef>(flow_entity) = flow;
             ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};

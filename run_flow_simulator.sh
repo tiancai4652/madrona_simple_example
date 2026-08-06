@@ -18,20 +18,20 @@ DEV_MODE=2   # 0 = SYS, 1 = NET, 2 = MIX
 
 # 日志开关（对应 multiverse global_types.hpp；SIMPLE_LOG_MODE 与 SYS_LOG 二选一）
 SIMPLE_LOG_MODE=0   # 1 = 简单日志（需 SYS_LOG=0）
-SYS_LOG=1           # 1 = 详细日志（需 SIMPLE_LOG_MODE=0）
+SYS_LOG=0           # 1 = 详细日志（需 SIMPLE_LOG_MODE=0）
 SYS_LOG_SPECIAL=0
 SYS_LOG_TARGET_NODE=0   # 只打印该 NPU 的日志
 
 # 流仿真器网络日志（std::cout 的 [SYS][...] 输出；开启会自动启用 trace 模式）
-NET_LOG=1               # 1 = 开启流仿真器网络日志
+NET_LOG=0               # 1 = 开启流仿真器网络日志
 NET_LOG_SCOPE=all       # all 或 ingress_chain / emit_tag
 NET_LOG_EVERY=10        # 每 N 步打印一次，控制日志量
 
 # 运行日志输出文件（留空则不落盘，直接打印到终端）
-run_log=/app/report/2-merge-plan/实施/run.log
+run_log=
 topology_file=/app/jiuding_dodsim/examples/leafspine128/leafspine_h128_topo.txt
 workload_path=/app/multiverse-dev/scripts/input/workload/128gpus-tp8-pp2-dp8-vpp2-gbs32-mbs1-hid_size12288-seq_len2048-json-comm_scale100-comp_scale100
-# workload_path=/app/multiverse-dev/scripts/input/workload/16_4_2_2
+# workload_path="/app/华为负载/20260715 - 九鼎仿真平台训练负载示例/test_16a2_8p_deepseekv3_671b_l2_train_gbs16_seq4096_tp2_ep4_pp2/workload_train1.1_chakra"
 max_steps=200000
 gpu=0   # 0 = CPU, 1 = GPU
 out_csv=

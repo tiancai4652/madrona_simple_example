@@ -162,6 +162,7 @@ struct SysFlowRecord {
     uint64_t comm_src = 0;
     uint64_t comm_dst = 0;
     uint64_t flow_size = 0;
+    uint64_t comm_para = 0;
     uint64_t start_time_ns = 0;
     uint64_t end_time_ns = 0;
 };
@@ -192,6 +193,7 @@ struct NpuFlowInboxEntry {
     uint64_t comm_dst = 0;
     uint64_t flow_size = 0;
     uint32_t flow_id = 0;
+    uint64_t comm_para = 0;
 };
 
 // Lock-free per-NPU inbox for setFlow() requests. Drained once per step by

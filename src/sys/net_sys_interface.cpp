@@ -101,7 +101,8 @@ void setFlow(Engine &ctx,
              uint64_t comm_src,
              uint64_t comm_dst,
              uint64_t flow_size,
-             uint32_t flow_id)
+             uint32_t flow_id,
+             uint64_t comm_para)
 {
     // Design invariant: this must only ever be called by NPU `npu_id`'s
     // own step-system invocation (a per-NPU worker submitting a flow it
@@ -126,6 +127,7 @@ void setFlow(Engine &ctx,
         .comm_dst = comm_dst,
         .flow_size = flow_size,
         .flow_id = flow_id,
+        .comm_para = comm_para,
     };
 }
 
@@ -162,6 +164,7 @@ uint32_t checkFlowFinish(Engine &ctx,
         flow.comm_size = record.flow_size;
         flow.comm_src = record.comm_src;
         flow.comm_dst = record.comm_dst;
+        flow.comm_para = record.comm_para;
         flow.durationMicros = static_cast<uint32_t>(
             (record.end_time_ns - record.start_time_ns) / 1000);
         flow.state = TaskState::FINISH;

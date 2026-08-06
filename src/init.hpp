@@ -31,6 +31,7 @@ struct FlowDef {
     Bytes size = 0.0;
     Time start_time = 0.0;
     int32_t priority = 0;
+    uint64_t comm_para = 0;
 };
 
 // FlowCompletionRecord moved to types.hpp so it can be embedded in the

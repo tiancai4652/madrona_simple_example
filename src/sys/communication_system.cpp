@@ -127,7 +127,7 @@ namespace madsimple::llm_system
         {
             for (size_t i = 0; i < flow_exec_count; i++)
             {
-                setFlow(ctx, npu_id.value, npu_id.flows_exec[i].comm_src, npu_id.flows_exec[i].comm_dst, npu_id.flows_exec[i].comm_size, npu_id.flows_exec[i].id);
+                setFlow(ctx, npu_id.value, npu_id.flows_exec[i].comm_src, npu_id.flows_exec[i].comm_dst, npu_id.flows_exec[i].comm_size, npu_id.flows_exec[i].id, npu_id.flows_exec[i].comm_para);
             }
             npu_id.flows_exec_init();
             return true;
@@ -241,7 +241,7 @@ namespace madsimple::llm_system
             {
                 #if SIMPLE_LOG_MODE
                 if (SYS_LOG_TARGET_NODE == recvNodeFlag.comm_dst) {
-                   
+
                     printf("npus_chakra_exec_entity not none! npu_id[%d], node_id[%d]\n", npu_id.value, node_id.value);
                     printf("send_recv_map_recvend set 0, src(%lu),dst(%lu)\n", recvNodeFlag.comm_src, recvNodeFlag.comm_dst);
                 }
@@ -260,11 +260,13 @@ namespace madsimple::llm_system
             {
                 for (size_t i = 0; i < flow_finish_count; i++)
                 {
-                    if(npu_id.recv_node_flows_finish[i].comm_src == recvNodeFlag.comm_src && npu_id.recv_node_flows_finish[i].comm_dst == recvNodeFlag.comm_dst)
+                    if(npu_id.recv_node_flows_finish[i].comm_para == recvNodeFlag.flow_id &&
+                       npu_id.recv_node_flows_finish[i].comm_src == recvNodeFlag.comm_src &&
+                       npu_id.recv_node_flows_finish[i].comm_dst == recvNodeFlag.comm_dst)
                     {
                         #if SIMPLE_LOG_MODE
                         if (SYS_LOG_TARGET_NODE == recvNodeFlag.comm_dst) {
-                           
+
                             printf("npus_chakra_exec_entity not none! npu_id[%d], node_id[%d]\n", npu_id.value, node_id.value);
                             printf("send_recv_map_recvend set 0, src(%lu),dst(%lu)\n", recvNodeFlag.comm_src, recvNodeFlag.comm_dst);
                         }
