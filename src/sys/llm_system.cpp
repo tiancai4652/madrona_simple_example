@@ -457,7 +457,16 @@ namespace madsimple::llm_system {
                         ctx.get < RecvNodeFlag > (process_e).comm_dst = dst;
                         ctx.get < RecvNodeFlag > (process_e).flow_id = node.comm_para;
                         ctx.data().npus_chakra_exec_entity[id.value][node.id] = process_e;
-                        // setFlow(ctx, src, dst, node.comm_size, flow_id);
+                        // If the matching SEND flow already completed (its
+                        // persistent pair-state is 2), this RECV can finish
+                        // immediately instead of waiting on the single-step
+                        // mailbox snapshot.
+                        if (node.comm_para != 0 &&
+                            ctx.data().claimRecvDone(node.comm_para, src, dst)) {
+                            processingCommTasks.setFinish(node.id, getCurrentTime(ctx), id.value);
+                            ctx.destroyEntity(process_e);
+                            ctx.data().npus_chakra_exec_entity[id.value][node.id] = Entity::none();
+                        }
                         #if SIMPLE_LOG_MODE
                         if (SYS_LOG_TARGET_NODE == dst) {
                             LOG_NODE_RECV_FLOW_CREATE(src,dst);

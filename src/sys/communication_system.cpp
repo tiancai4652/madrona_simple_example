@@ -254,30 +254,47 @@ namespace madsimple::llm_system
         }
         else
         {
-            // SysFlow flows_finish[MAX_FLOW_NUM_PER_COMM_NODE];
-            uint32_t flow_finish_count = checkFlowFinish(ctx, recvNodeFlag.comm_src, npu_id.recv_node_flows_finish);
-            if (flow_finish_count > 0)
+            bool matched = false;
+            if (recvNodeFlag.flow_id != 0)
             {
+                // Persistent per-flow pair state (keyed by comm_para): once
+                // the matching SEND flow completes (state 2) this RECV can
+                // finish regardless of when it fired. Unlike the single-step
+                // NpuFlowFinishedList mailbox snapshot, this survives the
+                // step boundary, so a RECV that fires after its flow already
+                // completed still matches.
+                matched = ctx.data().claimRecvDone(
+                    recvNodeFlag.flow_id, recvNodeFlag.comm_src,
+                    recvNodeFlag.comm_dst) != 0;
+            }
+            else
+            {
+                // comm_para == 0: fall back to the single-step mailbox
+                // (src,dst) matching for workloads without flow_id.
+                uint32_t flow_finish_count = checkFlowFinish(
+                    ctx, recvNodeFlag.comm_src,
+                    npu_id.recv_node_flows_finish);
                 for (size_t i = 0; i < flow_finish_count; i++)
                 {
-                    if(npu_id.recv_node_flows_finish[i].comm_para == recvNodeFlag.flow_id &&
-                       npu_id.recv_node_flows_finish[i].comm_src == recvNodeFlag.comm_src &&
-                       npu_id.recv_node_flows_finish[i].comm_dst == recvNodeFlag.comm_dst)
+                    if (npu_id.recv_node_flows_finish[i].comm_src == recvNodeFlag.comm_src &&
+                        npu_id.recv_node_flows_finish[i].comm_dst == recvNodeFlag.comm_dst)
                     {
-                        #if SIMPLE_LOG_MODE
-                        if (SYS_LOG_TARGET_NODE == recvNodeFlag.comm_dst) {
-
-                            printf("npus_chakra_exec_entity not none! npu_id[%d], node_id[%d]\n", npu_id.value, node_id.value);
-                            printf("send_recv_map_recvend set 0, src(%lu),dst(%lu)\n", recvNodeFlag.comm_src, recvNodeFlag.comm_dst);
-                        }
-                        #endif
-                        ctx.data().send_recv_map_recvend[recvNodeFlag.comm_src][recvNodeFlag.comm_dst]=0;
-                        ctx.get<ProcessingCommTasks>(ctx.data().npuEntities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx),npu_id.value);
-                        ctx.destroyEntity(ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value]);
+                        matched = true;
                         break;
                     }
                 }
                 npu_id.recv_node_flows_finish_init();
+            }
+
+            if (matched)
+            {
+                #if SIMPLE_LOG_MODE
+                if (SYS_LOG_TARGET_NODE == recvNodeFlag.comm_dst) {
+                    printf("recv flow done: npu_id[%d], node_id[%d]\n", npu_id.value, node_id.value);
+                }
+                #endif
+                ctx.get<ProcessingCommTasks>(ctx.data().npuEntities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx),npu_id.value);
+                ctx.destroyEntity(ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value]);
             }
         }
     }

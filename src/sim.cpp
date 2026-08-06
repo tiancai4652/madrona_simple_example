@@ -139,8 +139,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
         priorWeights[i] = cfg.prior_weights[i];
     }
 
-    Entity agent = ctx.makeEntity<Agent>();
-    ctx.get<Reset>(agent) = Reset { .resetNow = 0 };
+    Entity agent = ctx.makeEntity<Agent>();    ctx.get<Reset>(agent) = Reset { .resetNow = 0 };
     ctx.get<Action>(agent) = Action::None;
     ctx.get<GridPos>(agent) = GridPos { .y = 0, .x = 0 };
     ctx.get<Reward>(agent) = Reward { .r = 0.f };

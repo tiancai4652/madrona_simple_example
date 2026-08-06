@@ -15,14 +15,14 @@
 // Each ChakraNode occupies 51 ints with new 3-int attribute format
 #define INTS_PER_NODE 51
 
-#define NPU_NUM 128
+#define NPU_NUM 16
 
 
 // #define MAX_CHAKRA_NODES_PER_NPU 9 * 9999
-#define MAX_CHAKRA_NODES_PER_NPU 44
+#define MAX_CHAKRA_NODES_PER_NPU 193
 #define MAX_CONCURRENT_CHAKRA_NODES_PER_NPU 3
 #define MAX_CHAKRA_NODP_NODES 5
-#define CHAKRA_NODES_DATA_LENGTH 5000 // aligned with tensor export size in mgr.cpp
+#define CHAKRA_NODES_DATA_LENGTH 10000 // aligned with tensor export size in mgr.cpp
 // Define invalid dependency value
 #define INVALID_DEPENDENCY 2147483646
 #define NODE_NAME_LENGTH 20

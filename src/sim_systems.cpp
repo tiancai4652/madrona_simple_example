@@ -9,6 +9,100 @@ using namespace madrona::math;
 
 namespace madsimple {
 
+// -------------------------------------------------------------------------
+// Persistent per-flow send/recv pairing state (keyed by comm_para).
+// Replaces the (src,dst)-keyed send_recv_map_recvend slot semantics so that
+// concurrent flows between the same pair are distinguished and a RECV that
+// fires after its SEND flow already completed can still match.
+// -------------------------------------------------------------------------
+
+int32_t Sim::findFlowPairStateSlot(uint64_t comm_para,
+                                   uint64_t comm_src,
+                                   uint64_t comm_dst) const
+{
+    if (comm_para == 0) {
+        return -1;
+    }
+    uint64_t hash = comm_para;
+    hash ^= hash >> 33;
+    hash *= 0xff51afd7ed558ccdULL;
+    hash ^= hash >> 33;
+    hash ^= comm_src * 0x9e3779b97f4a7c15ULL;
+    hash ^= comm_dst * 0xbf58476d1ce4e5b9ULL;
+    int32_t start = (int32_t)(hash & (MAX_FLOW_PAIR_STATES - 1));
+    for (int32_t probe = 0; probe < MAX_FLOW_PAIR_STATES; probe++) {
+        int32_t slot = (start + probe) & (MAX_FLOW_PAIR_STATES - 1);
+        if (flow_pair_states[slot].comm_para == 0) {
+            return slot;   // empty slot (caller decides to insert)
+        }
+        if (flow_pair_states[slot].comm_para == comm_para &&
+            flow_pair_states[slot].comm_src == comm_src &&
+            flow_pair_states[slot].comm_dst == comm_dst) {
+            return slot;
+        }
+    }
+    return -1;   // table full
+}
+
+// RECV side: return 1 if the flow's SEND has already completed (state 2) and
+// reset the slot; otherwise register this RECV as waiting (state 1) and
+// return 0. Keyed by the (comm_para, src, dst) triple so that workloads
+// without globally-unique comm_para (e.g. multiverse comm_para=3 constant)
+// still get one slot per (src,dst), while Huawei's unique flow_ids are
+// distinguished per flow.
+int32_t Sim::claimRecvDone(uint64_t comm_para, uint64_t comm_src, uint64_t comm_dst)
+{
+    flow_pair_lock.lock();
+    int32_t slot = findFlowPairStateSlot(comm_para, comm_src, comm_dst);
+    int32_t result = 0;
+    if (slot >= 0) {
+        if (flow_pair_states[slot].comm_para != comm_para) {
+            flow_pair_states[slot] = FlowPairStateSlot {
+                .comm_para = comm_para,
+                .comm_src = comm_src,
+                .comm_dst = comm_dst,
+                .state = 1,
+            };
+        } else if (flow_pair_states[slot].state == 2) {
+            // Consumed: keep the key so the linear-probe chain is not
+            // broken by an empty hole shadowing later slots of this key.
+            flow_pair_states[slot].state = 0;
+            result = 1;
+        } else if (flow_pair_states[slot].state == 0) {
+            flow_pair_states[slot].state = 1;
+        }
+    }
+    flow_pair_lock.unlock();
+    return result;
+}
+
+// SEND side: mark the flow as completed (state 2). If the RECV was already
+// waiting (state 1), it will be consumed by the RECV poll in the next system
+// phase.
+void Sim::markSendDone(uint64_t comm_para, uint64_t comm_src, uint64_t comm_dst)
+{
+    if (comm_para == 0) {
+        return;
+    }
+    flow_pair_lock.lock();
+    int32_t slot = findFlowPairStateSlot(comm_para, comm_src, comm_dst);
+    if (slot >= 0) {
+        if (flow_pair_states[slot].comm_para != comm_para) {
+            flow_pair_states[slot] = FlowPairStateSlot {
+                .comm_para = comm_para,
+                .comm_src = comm_src,
+                .comm_dst = comm_dst,
+                .state = 2,
+            };
+        } else {
+            flow_pair_states[slot].comm_src = comm_src;
+            flow_pair_states[slot].comm_dst = comm_dst;
+            flow_pair_states[slot].state = 2;
+        }
+    }
+    flow_pair_lock.unlock();
+}
+
 namespace {
 
 inline int32_t tagLookupMask()
@@ -344,6 +438,9 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
             } else {
                 finished.overflow_count += 1;
             }
+
+            markSendDone(flow.comm_para, (uint64_t)flow.src_node,
+                         (uint64_t)flow.dst_node);
 
             NpuFlowActiveList &active =
                 ctx.get<NpuFlowActiveList>(npu_entity);
