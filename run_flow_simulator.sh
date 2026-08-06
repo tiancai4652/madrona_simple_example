@@ -16,6 +16,19 @@ DIM2=8
 NPU_NUM=128
 DEV_MODE=2   # 0 = SYS, 1 = NET, 2 = MIX
 
+# 日志开关（对应 multiverse global_types.hpp；SIMPLE_LOG_MODE 与 SYS_LOG 二选一）
+SIMPLE_LOG_MODE=0   # 1 = 简单日志（需 SYS_LOG=0）
+SYS_LOG=1           # 1 = 详细日志（需 SIMPLE_LOG_MODE=0）
+SYS_LOG_SPECIAL=0
+SYS_LOG_TARGET_NODE=0   # 只打印该 NPU 的日志
+
+# 流仿真器网络日志（std::cout 的 [SYS][...] 输出；开启会自动启用 trace 模式）
+NET_LOG=1               # 1 = 开启流仿真器网络日志
+NET_LOG_SCOPE=all       # all 或 ingress_chain / emit_tag
+NET_LOG_EVERY=10        # 每 N 步打印一次，控制日志量
+
+# 运行日志输出文件（留空则不落盘，直接打印到终端）
+run_log=/app/report/2-merge-plan/实施/run.log
 topology_file=/app/jiuding_dodsim/examples/leafspine128/leafspine_h128_topo.txt
 workload_path=/app/multiverse-dev/scripts/input/workload/128gpus-tp8-pp2-dp8-vpp2-gbs32-mbs1-hid_size12288-seq_len2048-json-comm_scale100-comp_scale100
 # workload_path=/app/multiverse-dev/scripts/input/workload/16_4_2_2
@@ -92,6 +105,17 @@ else
     echo "警告: 未找到 $SYS_CONFIG"
 fi
 
+# 替换日志开关（SIMPLE_LOG_MODE / SYS_LOG / SYS_LOG_SPECIAL / SYS_LOG_TARGET_NODE）
+if [ -f "$SYS_CONFIG" ]; then
+    sed -i "s/^#define[[:space:]]*SIMPLE_LOG_MODE[[:space:]]*[0-9]*/#define SIMPLE_LOG_MODE $SIMPLE_LOG_MODE/" "$SYS_CONFIG"
+    sed -i "s/^#define[[:space:]]*SYS_LOG[[:space:]][0-9]*/#define SYS_LOG $SYS_LOG/" "$SYS_CONFIG"
+    sed -i "s/^#define[[:space:]]*SYS_LOG_SPECIAL[[:space:]]*[0-9]*/#define SYS_LOG_SPECIAL $SYS_LOG_SPECIAL/" "$SYS_CONFIG"
+    sed -i "s/^#define[[:space:]]*SYS_LOG_TARGET_NODE[[:space:]]*[0-9]*/#define SYS_LOG_TARGET_NODE $SYS_LOG_TARGET_NODE/" "$SYS_CONFIG"
+    echo "✓ 已更新 $SYS_CONFIG (日志开关: SIMPLE_LOG_MODE=$SIMPLE_LOG_MODE SYS_LOG=$SYS_LOG SYS_LOG_SPECIAL=$SYS_LOG_SPECIAL SYS_LOG_TARGET_NODE=$SYS_LOG_TARGET_NODE)"
+else
+    echo "警告: 未找到 $SYS_CONFIG"
+fi
+
 # 替换 Python 端 NPU 上限，必须与 C++ NPU_NUM 一致（否则张量形状不匹配）
 if [ -f "$CHAKRA_CONFIG" ]; then
     sed -i "s/^MAX_NPUS[[:space:]]*=[[:space:]]*[0-9]*/MAX_NPUS = $NPU_NUM/" "$CHAKRA_CONFIG"
@@ -125,6 +149,21 @@ ARGS+=(--max-steps "$max_steps")
 [ "$gpu" = 1 ]    && ARGS+=(--gpu)
 [ -n "$out_csv" ] && ARGS+=(--out-csv "$out_csv")
 
+# 流仿真器网络日志：设置环境变量（system_log_print_enabled=1 同时启用 trace 模式）
+if [ "$NET_LOG" = 1 ]; then
+    export system_log_print_enabled=1
+    [ -n "$NET_LOG_SCOPE" ] && export system_log_scope="$NET_LOG_SCOPE"
+    [ -n "$NET_LOG_EVERY" ] && export system_log_every="$NET_LOG_EVERY"
+fi
+
 echo "=== running flow simulator ==="
 cd "$ROOT"
-PYTHONPATH="$ROOT/src" python3 scripts/run_flow_simulator.py "${ARGS[@]}"
+if [ -n "$run_log" ]; then
+    echo "日志写入: $run_log"
+    mkdir -p "$(dirname "$run_log")"
+    PYTHONPATH="$ROOT/src" \
+        python3 scripts/run_flow_simulator.py "${ARGS[@]}" > "$run_log" 2>&1
+else
+    PYTHONPATH="$ROOT/src" \
+        python3 scripts/run_flow_simulator.py "${ARGS[@]}"
+fi
