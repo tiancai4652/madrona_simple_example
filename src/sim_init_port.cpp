@@ -75,6 +75,7 @@ MADRONA_NO_INLINE void initPortQueues(
     ctx.get<PortCreateList>(port_entity) = PortCreateList {};
     PortTagPool pool {};
     pool.free_count = INITIAL_TAGS_PER_PORT;
+    pool.allocated_count = INITIAL_TAGS_PER_PORT;
     for (int32_t i = 0; i < INITIAL_TAGS_PER_PORT; i++) {
         Entity tag_entity = ctx.makeEntity<FlowTag>();
         ctx.get<FlowTagState>(tag_entity) = FlowTagState {};

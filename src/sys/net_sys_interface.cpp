@@ -111,25 +111,26 @@ void setFlow(Engine &ctx,
              uint32_t flow_id,
              uint64_t comm_para)
 {
-    // Design invariant: this must only ever be called by NPU `npu_id`'s
-    // own step-system invocation (a per-NPU worker submitting a flow it
-    // itself owns). Under that invariant, findNpuEntity(npu_id) resolves
-    // back to the exact entity this call is already executing "as", so
-    // writing into its own NpuFlowInbox touches only this entity's own
-    // column storage -- no lock needed even when many NPUs call setFlow
-    // concurrently from the same fakeSystemStepSystem ParallelForNode.
+    // Multiple ProcessComm_E entities belonging to the same NPU can execute
+    // sys_checkFlow concurrently on GPU. Reserve a distinct inbox slot
+    // atomically; the later serial createFlowsFromNpuRequests step sorts the
+    // batch by flow key before consuming it, so allocation order is identical
+    // on CPU and GPU.
     Entity npu_e = ctx.data().findNpuEntity(npu_id);
     if (npu_e == Entity::none()) {
         return;
     }
 
     NpuFlowInbox &inbox = ctx.get<NpuFlowInbox>(npu_e);
-    if (inbox.count >= MAX_FLOWS_PER_NPU) {
-        inbox.overflow_count += 1;
+    madrona::AtomicU32Ref count_ref(inbox.count);
+    uint32_t slot = count_ref.fetch_add_relaxed(1);
+    if (slot >= MAX_FLOWS_PER_NPU) {
+        count_ref.fetch_sub<madrona::sync::relaxed>(1);
+        madrona::AtomicU32Ref(inbox.overflow_count).fetch_add_relaxed(1);
         return;
     }
 
-    inbox.entries[inbox.count++] = NpuFlowInboxEntry {
+    inbox.entries[slot] = NpuFlowInboxEntry {
         .comm_src = comm_src,
         .comm_dst = comm_dst,
         .flow_size = flow_size,

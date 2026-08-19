@@ -809,7 +809,8 @@ namespace madsimple
                          NpuFlowInbox,
                          NpuFlowPool,
                          NpuFlowActiveList,
-                         NpuFlowFinishedList>
+                         NpuFlowFinishedList,
+                         NpuFlowPairState>
     {
     };
 

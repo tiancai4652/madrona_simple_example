@@ -135,9 +135,14 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
         }
         if (npu != Entity::none() &&
             (ctx.get<NpuFlowInbox>(npu).overflow_count > 0 ||
-             ctx.get<NpuFlowFinishedList>(npu).overflow_count > 0)) {
+             ctx.get<NpuFlowFinishedList>(npu).overflow_count > 0 ||
+             ctx.get<NpuFlowPairState>(npu).overflow_count > 0)) {
             status.failed = 1;
-            status.error_code = 4;
+            if (ctx.get<NpuFlowPairState>(npu).overflow_count > 0) {
+                status.error_code = 5;
+            } else {
+                status.error_code = 4;
+            }
         }
     }
     status.finished_npus = finished_npus;

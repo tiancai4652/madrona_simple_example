@@ -54,10 +54,6 @@ void Sim::resetNetworkState()
     for (uint32_t i = 0; i < MAX_NPUS; i++) {
         npuEntities[i] = Entity::none();
     }
-
-    for (int32_t i = 0; i < MAX_FLOW_PAIR_STATES; i++) {
-        flow_pair_states[i] = FlowPairStateSlot {};
-    }
 }
 
 }

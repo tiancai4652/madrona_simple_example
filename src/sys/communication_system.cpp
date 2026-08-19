@@ -264,7 +264,7 @@ namespace madsimple::llm_system
                 // step boundary, so a RECV that fires after its flow already
                 // completed still matches.
                 matched = ctx.data().claimRecvDone(
-                    recvNodeFlag.flow_id, recvNodeFlag.comm_src,
+                    ctx, recvNodeFlag.flow_id, recvNodeFlag.comm_src,
                     recvNodeFlag.comm_dst) != 0;
             }
             else

@@ -123,25 +123,6 @@ struct FlowMeta : public madrona::Archetype<
 // FlowArrivalEv / BwUpdateEv / PfcControlEv / DelayedEvent were moved to
 // types.hpp (phase C) so PortOutbox can embed them in the Port archetype.
 
-// Persistent per-flow send/recv pairing state, keyed by comm_para (the
-// Huawei flow_id). Mirrors the old send_recv_map_recvend 0/1/2 slot
-// semantics but keyed by flow_id instead of (src,dst), so concurrent flows
-// between the same pair are distinguished and a RECV that fires after its
-// SEND flow already completed can still match.
-//   0 = idle
-//   1 = RECV fired and registered (waiting for the SEND flow to complete)
-//   2 = SEND flow completed (data ready; RECV may consume)
-struct FlowPairStateSlot {
-    uint64_t comm_para = 0;   // key; 0 = empty slot
-    uint64_t comm_src = 0;
-    uint64_t comm_dst = 0;
-    int32_t state = 0;
-};
-
-static constexpr int32_t MAX_FLOW_PAIR_STATES = 16384;
-static_assert((MAX_FLOW_PAIR_STATES & (MAX_FLOW_PAIR_STATES - 1)) == 0,
-              "MAX_FLOW_PAIR_STATES must be a power of two");
-
 struct Sim : public madrona::WorldBase {
     struct Config {
         uint32_t maxEpisodeLength = 200;
@@ -647,17 +628,14 @@ struct Sim : public madrona::WorldBase {
     int32_t send_recv_map_recvend[NPU_NUM][NPU_NUM];
     bool sys_chakra_entities_created;
 
-    FlowPairStateSlot flow_pair_states[MAX_FLOW_PAIR_STATES];
-
-    MADRONA_NO_INLINE int32_t findFlowPairStateSlot(uint64_t comm_para,
-                                                    uint64_t comm_src,
-                                                    uint64_t comm_dst) const;
-    MADRONA_NO_INLINE int32_t claimRecvDone(uint64_t comm_para,
-                                            uint64_t comm_src,
-                                            uint64_t comm_dst);
-    MADRONA_NO_INLINE void markSendDone(uint64_t comm_para,
-                                        uint64_t comm_src,
-                                        uint64_t comm_dst);
+    MADRONA_NO_INLINE int32_t claimRecvDone(madrona::Context &ctx,
+                                           uint64_t comm_para,
+                                           uint64_t comm_src,
+                                           uint64_t comm_dst);
+    MADRONA_NO_INLINE void markSendDone(madrona::Context &ctx,
+                                       uint64_t comm_para,
+                                       uint64_t comm_src,
+                                       uint64_t comm_dst);
 
     int32_t enableBuffer;
     int32_t enablePfc;

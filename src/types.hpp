@@ -249,6 +249,24 @@ struct NpuFlowFinishedList {
     SysFlowRecord flows[MAX_FLOWS_PER_NPU] {};
 };
 
+// Persistent SEND completion mailbox owned by one destination NPU.
+// SEND completion is published from the serial network flush; concurrent
+// RECV systems only scan and atomically consume matching ready entries.
+struct NpuFlowPairSlot {
+    uint64_t comm_para = 0;
+    uint64_t comm_src = 0;
+    uint64_t comm_dst = 0;
+    int32_t state = 0; // 0 = reusable, 2 = SEND completed
+};
+
+constexpr uint32_t MAX_NPU_FLOW_PAIR_STATES = MAX_FLOWS_PER_NPU;
+
+struct NpuFlowPairState {
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    NpuFlowPairSlot slots[MAX_NPU_FLOW_PAIR_STATES] {};
+};
+
 // Durable FCT history for NPU-owned (dynamically injected) flows, appended
 // by recordFlowCompletion() and merged into FlowCompletionBuf by the
 // per-step export mirror. Unlike NpuFlowFinishedList this is never cleared
@@ -668,6 +686,7 @@ struct PortCreateList {
 // prerequisite for later making tag creation/destruction fully per-port.
 struct PortTagPool {
     int32_t free_count = 0;
+    int32_t allocated_count = 0;
     madrona::Entity free_tags[MAX_TAGS_PER_PORT] {};
 };
 

@@ -46,6 +46,7 @@ namespace madsimple::llm_system
         registry.registerComponent<ProcessingCommTasks>();
         registry.registerComponent<OneNPUFinishedFlag>();
         registry.registerComponent<ChakraNodesForNoDP>();
+        registry.registerComponent<NpuFlowPairState>();
         // registry.registerArchetype<NpuNode>();
         REGISTER_ARCHETYPE_WITH_NAME(registry, NpuNode);
 
@@ -196,6 +197,7 @@ namespace madsimple::llm_system
             ctx.get<NpuFlowInbox>(npuNode) = NpuFlowInbox {};
             ctx.get<NpuFlowActiveList>(npuNode) = NpuFlowActiveList {};
             ctx.get<NpuFlowFinishedList>(npuNode) = NpuFlowFinishedList {};
+            ctx.get<NpuFlowPairState>(npuNode) = NpuFlowPairState {};
             NpuFlowPool &pool = ctx.get<NpuFlowPool>(npuNode);
             pool = NpuFlowPool {};
             pool.free_count = MAX_FLOWS_PER_NPU;

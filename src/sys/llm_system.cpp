@@ -391,7 +391,8 @@ namespace madsimple::llm_system {
                         // immediately instead of waiting on the single-step
                         // mailbox snapshot.
                         if (node.comm_para != 0 &&
-                            ctx.data().claimRecvDone(node.comm_para, src, dst)) {
+                            ctx.data().claimRecvDone(
+                                ctx, node.comm_para, src, dst)) {
                             processingCommTasks.setFinish(node.id, getCurrentTime(ctx), id.value);
                             ctx.destroyEntity(process_e);
                             ctx.data().npus_chakra_exec_entity[id.value][node.id] = Entity::none();

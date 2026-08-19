@@ -32,13 +32,14 @@ NET_LOG_EVERY=10
 run_log=
 topology_file=/app/jiuding_dodsim/examples/leafspine128/leafspine_h128_topo.txt
 workload_path="/app/华为负载/20260715 - 九鼎仿真平台训练负载示例/test_16a2_8p_deepseekv3_671b_l2_train_gbs16_seq4096_tp2_ep4_pp2/workload_train1.1_chakra"
-max_steps=200000
-out_csv=
+max_steps=${MAX_STEPS:-200000}
+PRINT_EVERY=${PRINT_EVERY:-10}
+out_csv=${OUT_CSV:-}
 # GPU 编译模式：0 = 正式(LTO)，1 = Debug 快速编译（首次打通/调试用，浮点不保证一致）
 GPU_COMPILE_BOOTSTRAP=0
 # initTasks 诊断：0=正常，1=空内核，2=仅 setupTasks，3=仅 constructGraphs
 GPU_INIT_TASKS_DIAG_STAGE=0
-GPU_TRACE_INIT=0          # 1 = 打印并同步每个 GPU 初始化阶段
+GPU_TRACE_INIT=${GPU_TRACE_INIT:-0} # 1 = 打印并同步每个 GPU 初始化阶段
 # Madrona 默认 4GB device malloc heap 会使首个 malloc 内核 launch 资源不足。
 # TaskGraph 构建仅需少量临时分配，64MB 足够。
 GPU_DEVICE_HEAP_SIZE=67108864
@@ -174,7 +175,7 @@ cmake --build "$ROOT/build" -j$(nproc)
 # ============================================================
 ARGS=(--topo "$topology_file" --workload "$workload_path")
 ARGS+=(--npu-count "$NPU_NUM" --ring-dims "$DIM0,$DIM1,$DIM2")
-ARGS+=(--max-steps "$max_steps" --gpu)
+ARGS+=(--max-steps "$max_steps" --print-every "$PRINT_EVERY" --gpu)
 [ -n "$out_csv" ] && ARGS+=(--out-csv "$out_csv")
 
 echo "=== running flow simulator (GPU) ==="

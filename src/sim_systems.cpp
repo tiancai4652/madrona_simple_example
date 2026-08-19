@@ -4,6 +4,7 @@
 #include <madrona/sync.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <limits>
 
 using namespace madrona;
@@ -12,142 +13,101 @@ using namespace madrona::math;
 namespace madsimple {
 
 // -------------------------------------------------------------------------
-// Persistent per-flow send/recv pairing state (keyed by comm_para).
-// Replaces the (src,dst)-keyed send_recv_map_recvend slot semantics so that
-// concurrent flows between the same pair are distinguished and a RECV that
-// fires after its SEND flow already completed can still match.
+// Persistent per-NPU SEND completion mailbox (keyed by comm_para, src, dst).
+// SEND publication happens in the serial network completion flush. RECV
+// systems never insert: they only scan the destination NPU's component and
+// atomically consume a matching ready slot, so their GPU execution order
+// cannot change which keys are admitted.
 // -------------------------------------------------------------------------
 
-namespace {
-
-constexpr uint64_t flowPairReserved = ~uint64_t { 0 };
-
-inline uint64_t flowPairHash(uint64_t comm_para,
-                             uint64_t comm_src,
-                             uint64_t comm_dst)
+int32_t Sim::claimRecvDone(Context &ctx,
+                           uint64_t comm_para,
+                           uint64_t comm_src,
+                           uint64_t comm_dst)
 {
-    uint64_t hash = comm_para;
-    hash ^= hash >> 33;
-    hash *= 0xff51afd7ed558ccdULL;
-    hash ^= hash >> 33;
-    hash ^= comm_src * 0x9e3779b97f4a7c15ULL;
-    hash ^= comm_dst * 0xbf58476d1ce4e5b9ULL;
-    return hash;
-}
-
-} // namespace
-
-int32_t Sim::findFlowPairStateSlot(uint64_t comm_para,
-                                   uint64_t comm_src,
-                                   uint64_t comm_dst) const
-{
-    if (comm_para == 0) {
-        return -1;
-    }
-    uint64_t hash = flowPairHash(comm_para, comm_src, comm_dst);
-    int32_t start = (int32_t)(hash & (uint64_t)(MAX_FLOW_PAIR_STATES - 1));
-    for (int32_t probe = 0; probe < MAX_FLOW_PAIR_STATES; probe++) {
-        int32_t slot = (start + probe) & (MAX_FLOW_PAIR_STATES - 1);
-        uint64_t para = AtomicU64Ref(
-            const_cast<uint64_t&>(flow_pair_states[slot].comm_para))
-            .load<sync::acquire>();
-        if (para == flowPairReserved) {
-            return -2;
-        }
-        if (para == 0) {
-            return slot;
-        }
-        if (para == comm_para &&
-            flow_pair_states[slot].comm_src == comm_src &&
-            flow_pair_states[slot].comm_dst == comm_dst) {
-            return slot;
-        }
-    }
-    return -1;
-}
-
-// RECV side: return 1 if the flow's SEND has already completed (state 2) and
-// reset the slot; otherwise register this RECV as waiting (state 1) and
-// return 0. Lock-free: Madrona's ParallelFor runs many NPUs in the same
-// warp, so a device SpinLock here is a SIMT deadlock (holder and spinner
-// diverge, spinner never lets the holder unlock). Failed CAS just leaves
-// this RECV pending; it is re-polled on a later step.
-int32_t Sim::claimRecvDone(uint64_t comm_para, uint64_t comm_src, uint64_t comm_dst)
-{
-    if (comm_para == 0 || comm_para == flowPairReserved) {
+    if (comm_para == 0 || comm_dst >= (uint64_t)numNpus) {
         return 0;
     }
-    for (int32_t attempt = 0; attempt < 8; attempt++) {
-        int32_t slot = findFlowPairStateSlot(comm_para, comm_src, comm_dst);
-        if (slot == -2) {
+
+    Entity npu_entity = findNpuEntity((uint32_t)comm_dst);
+    if (npu_entity == Entity::none()) {
+        return 0;
+    }
+
+    NpuFlowPairState &mailbox = ctx.get<NpuFlowPairState>(npu_entity);
+    uint32_t count = mailbox.count;
+    for (uint32_t i = 0; i < count; i++) {
+        NpuFlowPairSlot &slot = mailbox.slots[i];
+        if (slot.comm_para != comm_para ||
+            slot.comm_src != comm_src ||
+            slot.comm_dst != comm_dst) {
             continue;
         }
-        if (slot < 0) {
-            return 0;
-        }
-        FlowPairStateSlot &s = flow_pair_states[slot];
-        uint64_t para = AtomicU64Ref(s.comm_para).load<sync::acquire>();
-        if (para == comm_para &&
-            s.comm_src == comm_src &&
-            s.comm_dst == comm_dst) {
-            AtomicI32Ref st(s.state);
-            int32_t cur = st.load<sync::acquire>();
-            if (cur == 2) {
-                int32_t expected = 2;
-                if (st.compare_exchange_weak<sync::acq_rel, sync::relaxed>(
-                        expected, 0)) {
-                    return 1;
-                }
-                continue;
+
+        int32_t expected = 2;
+        AtomicI32Ref state_ref(slot.state);
+        while (expected == 2) {
+            if (state_ref.compare_exchange_weak<
+                    sync::acq_rel, sync::relaxed>(expected, 0)) {
+                return 1;
             }
-            if (cur == 0) {
-                int32_t expected = 0;
-                st.compare_exchange_weak<sync::acq_rel, sync::relaxed>(
-                    expected, 1);
-            }
-            return 0;
-        }
-        if (para == 0) {
-            uint64_t expected = 0;
-            if (!AtomicU64Ref(s.comm_para)
-                    .compare_exchange_weak<sync::acq_rel, sync::relaxed>(
-                        expected, flowPairReserved)) {
-                continue;
-            }
-            s.comm_src = comm_src;
-            s.comm_dst = comm_dst;
-            AtomicI32Ref(s.state).store<sync::release>(1);
-            AtomicU64Ref(s.comm_para).store<sync::release>(comm_para);
-            return 0;
         }
         return 0;
     }
+
     return 0;
 }
 
-// SEND side: mark the flow as completed (state 2). Runs from the serial
-// createFlowsFromNpuRequests step, so it is never concurrent with itself or
-// with claimRecvDone (different task-graph nodes). Plain stores are enough.
-void Sim::markSendDone(uint64_t comm_para, uint64_t comm_src, uint64_t comm_dst)
+void Sim::markSendDone(Context &ctx,
+                       uint64_t comm_para,
+                       uint64_t comm_src,
+                       uint64_t comm_dst)
 {
-    if (comm_para == 0 || comm_para == flowPairReserved) {
+    if (comm_para == 0 || comm_dst >= (uint64_t)numNpus) {
         return;
     }
-    int32_t slot = findFlowPairStateSlot(comm_para, comm_src, comm_dst);
-    if (slot < 0) {
+
+    Entity npu_entity = findNpuEntity((uint32_t)comm_dst);
+    if (npu_entity == Entity::none()) {
         return;
     }
-    FlowPairStateSlot &s = flow_pair_states[slot];
-    if (AtomicU64Ref(s.comm_para).load<sync::acquire>() != comm_para) {
-        s.comm_src = comm_src;
-        s.comm_dst = comm_dst;
-        AtomicI32Ref(s.state).store<sync::release>(2);
-        AtomicU64Ref(s.comm_para).store<sync::release>(comm_para);
+
+    NpuFlowPairState &mailbox = ctx.get<NpuFlowPairState>(npu_entity);
+    int32_t reusable = -1;
+    for (uint32_t i = 0; i < mailbox.count; i++) {
+        NpuFlowPairSlot &slot = mailbox.slots[i];
+        int32_t state = AtomicI32Ref(slot.state).load<sync::acquire>();
+        if (slot.comm_para == comm_para &&
+            slot.comm_src == comm_src &&
+            slot.comm_dst == comm_dst) {
+            AtomicI32Ref(slot.state).store<sync::release>(2);
+            return;
+        }
+        if (state == 0 && reusable < 0) {
+            reusable = (int32_t)i;
+        }
+    }
+
+    uint32_t slot_idx;
+    if (reusable >= 0) {
+        slot_idx = (uint32_t)reusable;
+    } else if (mailbox.count < MAX_NPU_FLOW_PAIR_STATES) {
+        slot_idx = mailbox.count++;
     } else {
-        s.comm_src = comm_src;
-        s.comm_dst = comm_dst;
-        AtomicI32Ref(s.state).store<sync::release>(2);
+        mailbox.overflow_count += 1;
+        SystemStatus &status = ctx.singleton<SystemStatus>();
+        status.failed = 1;
+        status.error_code = 5;
+        assert(mailbox.count < MAX_NPU_FLOW_PAIR_STATES &&
+               "NpuFlowPairState capacity exceeded");
+        return;
     }
+
+    NpuFlowPairSlot &slot = mailbox.slots[slot_idx];
+    slot.comm_para = comm_para;
+    slot.comm_src = comm_src;
+    slot.comm_dst = comm_dst;
+    AtomicI32Ref(slot.state).store<sync::release>(2);
 }
 
 namespace {
@@ -486,7 +446,7 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
                 finished.overflow_count += 1;
             }
 
-            markSendDone(flow.comm_para, (uint64_t)flow.src_node,
+            markSendDone(ctx, flow.comm_para, (uint64_t)flow.src_node,
                          (uint64_t)flow.dst_node);
 
             NpuFlowActiveList &active =
@@ -519,6 +479,32 @@ MADRONA_NO_INLINE Entity Sim::findNpuEntity(uint32_t npu_id) const
     return npuEntities[npu_id];
 }
 
+namespace {
+
+inline bool npuInboxEntryLess(const NpuFlowInboxEntry &a,
+                              const NpuFlowInboxEntry &b)
+{
+    if (a.flow_id != b.flow_id) return a.flow_id < b.flow_id;
+    if (a.comm_src != b.comm_src) return a.comm_src < b.comm_src;
+    if (a.comm_dst != b.comm_dst) return a.comm_dst < b.comm_dst;
+    return a.comm_para < b.comm_para;
+}
+
+MADRONA_NO_INLINE void sortNpuFlowInbox(NpuFlowInbox &inbox)
+{
+    for (uint32_t i = 1; i < inbox.count; i++) {
+        NpuFlowInboxEntry entry = inbox.entries[i];
+        uint32_t j = i;
+        while (j > 0 && npuInboxEntryLess(entry, inbox.entries[j - 1])) {
+            inbox.entries[j] = inbox.entries[j - 1];
+            j -= 1;
+        }
+        inbox.entries[j] = entry;
+    }
+}
+
+} // namespace
+
 MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequests(Context &ctx)
 {
     FlowCounters &counters = ctx.singleton<FlowCounters>();
@@ -533,6 +519,7 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequests(Context &ctx)
         if (inbox.count == 0) {
             continue;
         }
+        sortNpuFlowInbox(inbox);
 
         NpuFlowPool &pool = ctx.get<NpuFlowPool>(npu_entity);
         NpuFlowActiveList &active = ctx.get<NpuFlowActiveList>(npu_entity);

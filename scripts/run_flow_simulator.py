@@ -50,6 +50,8 @@ def main():
                         help="ring dims as X,Y,Z (default: derived from npu count)")
     parser.add_argument("--chunks", type=int, default=1)
     parser.add_argument("--max-steps", type=int, default=200000)
+    parser.add_argument("--print-every", type=int, default=10,
+                        help="print simulator counters every N steps")
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--out-csv", default=None,
                         help="optional path to write flow completion CSV")
@@ -88,7 +90,7 @@ def main():
     done_step = 0
     for step in range(1, args.max_steps + 1):
         world.step()
-        if step % 10 == 0 or step == 1:
+        if step % args.print_every == 0 or step == 1:
             print(f"[sim] step={step} time_ms={world.simulation_time():.4f} "
                   f"defs={world.num_flow_defs()} "
                   f"pending={world.num_pending_flows()} "
