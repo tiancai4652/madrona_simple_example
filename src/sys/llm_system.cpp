@@ -144,85 +144,10 @@ namespace madsimple::llm_system {
 
     // Communication functions moved to communication_system.cpp
 
-    void sys_processChakraNodes(Engine & ctx,
-        NpuID & id,
-        ChakraNodes & chakraNodes,
+    MADRONA_NO_INLINE void processCompNodeOne(
+        Engine & ctx, NpuID & id, ChakraNode & node,
         HardwareResource & hardwareResource,
-        ProcessingCompTask & processingCompTask,
-        ProcessingCommTasks & processingCommTasks,
-        OneNPUFinishedFlag & oneNPUFinishedFlag,
-        ChakraNodesForNoDP & chakraNodesForNoDP) {
-
-        #if SYS_LOG
-        if (SYS_LOG_TARGET_NODE == id.value) {
-            LOG_SYS_HEADER("1", "Chakra Node Processing System");
-            LOG_TASK_START("Scanning no-dependency nodes and assigning tasks");
-        }
-        #endif
-
-        // append nodes
-        if (hardwareResource.one_task_finish) {
-            // ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
-            bool is_none_node = true;
-            int node_count = filterNoDependencyNodes(chakraNodes, chakraNodesForNoDP.current_exec_nodes, is_none_node);
-            
-            #if SIMPLE_LOG_MODE
-                // if (id.value >=392 && id.value <= 417) {
-                if (getCurrentTime(ctx) % (100*1000) == 0) {
-                // if (id.value == 706 || id.value == 714 || id.value == 722) {
-                    LOG_INFO("Simulation time: %ld, npu id [%d] found %d no-dependency nodes", getCurrentTime(ctx), id.value, node_count);
-                    if(node_count>0) {
-                        for(int i=0; i<node_count; i++) {
-                            // LOG_INFO("no-dependency node %d", current_exec_nodes[i].id);
-                            printf("Simulation time: %ld, npu id [%d]: no-dependency node %d\n", getCurrentTime(ctx), id.value, chakraNodesForNoDP.current_exec_nodes[i].id);
-                        }
-                    }
-                    if (is_none_node) {
-                        LOG_INFO("npu id [%d], the operators of all chakra nodes are finished at time: %ld!", id.value, getCurrentTime(ctx)); 
-                    }
-                }
-                // }
-            #endif
-
-            if (is_none_node) {
-                oneNPUFinishedFlag.is_finished = true;
-            }
-            // process no np nodes
-            for (size_t i = 0; i < static_cast < size_t > (node_count); i++) {
-
-                
-                ChakraNode &node = chakraNodesForNoDP.current_exec_nodes[i];
-
-                // Skip if already being processed to avoid duplicate lookups
-                if (processingCommTasks.containsNodeId(node.id)) {
-                    #if SYS_LOG
-                        if (SYS_LOG_TARGET_NODE == id.value) {
-                            LOG_INFO("npu[%d] processingCommTasks containsNodeId: %d", id.value, node.id);
-                        }
-                    #endif
-                    continue;
-                }
-                #if SYS_LOG
-                    if (SYS_LOG_TARGET_NODE == id.value) {
-                        printf("#######process no-dependency node: %d, node_type: %d\n", node.id, node.type);
-                    }
-                #endif
-
-                #if TEST_RING_TOPO_LOG_FOR_CPU_ONLY
-                if (id.test_dim) {
-                    printf("[TEST DIM] process no-dependency node: %d, node_type: %d\n", node.id, node.type);
-                }
-                #endif
-
-                #if TEST_CHAKRA_NODE_LOG_FOR_CPU_ONLY
-                if (SYS_LOG_TARGET_NODE == id.value) {
-                    printf("[TEST CHAKRA NODE] process no-dependency node: %d, node_type: %d\n", node.id, node.type);
-                }
-                #endif
-                
-            
-                switch (node.type) {
-                    case ChakraNodeType::COMP_NODE: {
+        ProcessingCompTask & processingCompTask) {
                         if (!hardwareResource.comp_ocupy) {
 
                             // processingCompTask.time_finish_ns = getCurrentTime(ctx) + usToNs(node.durationMicros);
@@ -269,9 +194,11 @@ namespace madsimple::llm_system {
                             }
                             #endif
                         }
-                        break;
-                    }
-                    case ChakraNodeType::COMM_SEND_NODE: {
+    }
+
+    MADRONA_NO_INLINE void processCommSendNodeOne(
+        Engine & ctx, NpuID & id, ChakraNode & node,
+        ProcessingCommTasks & processingCommTasks) {
                         // uint64_t src = node.comm_src;
                         // to fix chakra bugs.
                         uint64_t src = id.value;
@@ -284,7 +211,7 @@ namespace madsimple::llm_system {
                             SystemStatus &status = ctx.singleton<SystemStatus>();
                             status.failed = 1;
                             status.error_code = 2;
-                            break;
+                            return;
                         }
 
                         if (true)
@@ -397,9 +324,11 @@ namespace madsimple::llm_system {
                             }
                             #endif
                         }
-                        break;
-                    }
-                    case ChakraNodeType::COMM_RECV_NODE: {
+    }
+
+    MADRONA_NO_INLINE void processCommRecvNodeOne(
+        Engine & ctx, NpuID & id, ChakraNode & node,
+        ProcessingCommTasks & processingCommTasks) {
 
                         uint64_t src = node.comm_src;
                         // uint64_t dst = node.comm_dst;
@@ -413,7 +342,7 @@ namespace madsimple::llm_system {
                             SystemStatus &status = ctx.singleton<SystemStatus>();
                             status.failed = 1;
                             status.error_code = 3;
-                            break;
+                            return;
                         }
                         #if SIMPLE_LOG_MODE
                             if (SYS_LOG_TARGET_NODE == dst) {
@@ -473,9 +402,11 @@ namespace madsimple::llm_system {
                         }
                         #endif
 
-                        break;
-                    }
-                    case ChakraNodeType::COMM_COLL_NODE: {
+    }
+
+    MADRONA_NO_INLINE void processCommCollNodeOne(
+        Engine & ctx, NpuID & id, ChakraNode & node,
+        ProcessingCommTasks & processingCommTasks) {
 
                         // // Create ring configuration entity and set ring parameters
                         // Entity ring_entity = ctx.makeEntity<RingConfigEntity>();
@@ -778,11 +709,105 @@ namespace madsimple::llm_system {
                         }
                         // setFlow(Engine &ctx, uint64_t comm_src, uint64_t comm_dst, uint64_t comm_size, uint32_t flow_id)
                         // setFlow(ctx, 0, 1, 1000, flow_id);
-                        break;
+    }
+
+    void sys_processChakraNodes(Engine & ctx,    // dispatcher: switch per node type to MADRONA_NO_INLINE helpers
+        NpuID & id,
+        ChakraNodes & chakraNodes,
+        HardwareResource & hardwareResource,
+        ProcessingCompTask & processingCompTask,
+        ProcessingCommTasks & processingCommTasks,
+        OneNPUFinishedFlag & oneNPUFinishedFlag,
+        ChakraNodesForNoDP & chakraNodesForNoDP) {
+
+        #if SYS_LOG
+        if (SYS_LOG_TARGET_NODE == id.value) {
+            LOG_SYS_HEADER("1", "Chakra Node Processing System");
+            LOG_TASK_START("Scanning no-dependency nodes and assigning tasks");
+        }
+        #endif
+
+        // append nodes
+        if (hardwareResource.one_task_finish) {
+            // ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
+            bool is_none_node = true;
+            int node_count = filterNoDependencyNodes(chakraNodes, chakraNodesForNoDP.current_exec_nodes, is_none_node);
+            
+            #if SIMPLE_LOG_MODE
+                // if (id.value >=392 && id.value <= 417) {
+                if (getCurrentTime(ctx) % (100*1000) == 0) {
+                // if (id.value == 706 || id.value == 714 || id.value == 722) {
+                    LOG_INFO("Simulation time: %ld, npu id [%d] found %d no-dependency nodes", getCurrentTime(ctx), id.value, node_count);
+                    if(node_count>0) {
+                        for(int i=0; i<node_count; i++) {
+                            // LOG_INFO("no-dependency node %d", current_exec_nodes[i].id);
+                            printf("Simulation time: %ld, npu id [%d]: no-dependency node %d\n", getCurrentTime(ctx), id.value, chakraNodesForNoDP.current_exec_nodes[i].id);
+                        }
                     }
-                    default:
-                        break;
+                    if (is_none_node) {
+                        LOG_INFO("npu id [%d], the operators of all chakra nodes are finished at time: %ld!", id.value, getCurrentTime(ctx)); 
+                    }
                 }
+                // }
+            #endif
+
+            if (is_none_node) {
+                oneNPUFinishedFlag.is_finished = true;
+            }
+            // process no np nodes
+            for (size_t i = 0; i < static_cast < size_t > (node_count); i++) {
+
+                
+                ChakraNode &node = chakraNodesForNoDP.current_exec_nodes[i];
+
+                // Skip if already being processed to avoid duplicate lookups
+                if (processingCommTasks.containsNodeId(node.id)) {
+                    #if SYS_LOG
+                        if (SYS_LOG_TARGET_NODE == id.value) {
+                            LOG_INFO("npu[%d] processingCommTasks containsNodeId: %d", id.value, node.id);
+                        }
+                    #endif
+                    continue;
+                }
+                #if SYS_LOG
+                    if (SYS_LOG_TARGET_NODE == id.value) {
+                        printf("#######process no-dependency node: %d, node_type: %d\n", node.id, node.type);
+                    }
+                #endif
+
+                #if TEST_RING_TOPO_LOG_FOR_CPU_ONLY
+                if (id.test_dim) {
+                    printf("[TEST DIM] process no-dependency node: %d, node_type: %d\n", node.id, node.type);
+                }
+                #endif
+
+                #if TEST_CHAKRA_NODE_LOG_FOR_CPU_ONLY
+                if (SYS_LOG_TARGET_NODE == id.value) {
+                    printf("[TEST CHAKRA NODE] process no-dependency node: %d, node_type: %d\n", node.id, node.type);
+                }
+                #endif
+                
+            
+            switch (node.type) {
+                case ChakraNodeType::COMP_NODE: {
+                    processCompNodeOne(ctx, id, node, hardwareResource, processingCompTask);
+                    break;
+                }
+                case ChakraNodeType::COMM_SEND_NODE: {
+                    processCommSendNodeOne(ctx, id, node, processingCommTasks);
+                    break;
+                }
+                case ChakraNodeType::COMM_RECV_NODE: {
+                    processCommRecvNodeOne(ctx, id, node, processingCommTasks);
+                    break;
+                }
+                case ChakraNodeType::COMM_COLL_NODE: {
+                    processCommCollNodeOne(ctx, id, node, processingCommTasks);
+                    break;
+                }
+                default:
+                    break;
+            }
             }
 
             // set flag

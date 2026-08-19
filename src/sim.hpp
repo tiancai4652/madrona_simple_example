@@ -139,6 +139,8 @@ struct FlowPairStateSlot {
 };
 
 static constexpr int32_t MAX_FLOW_PAIR_STATES = 16384;
+static_assert((MAX_FLOW_PAIR_STATES & (MAX_FLOW_PAIR_STATES - 1)) == 0,
+              "MAX_FLOW_PAIR_STATES must be a power of two");
 
 struct Sim : public madrona::WorldBase {
     struct Config {
@@ -196,7 +198,7 @@ struct Sim : public madrona::WorldBase {
     madrona::Entity findFlowMetaEntity(
         madrona::Context &ctx, FlowId flow_id) const;
     const FlowDef *getFlowDef(madrona::Context &ctx, FlowId flow_id) const;
-    int32_t getPath(NodeId src,
+    MADRONA_NO_INLINE int32_t getPath(NodeId src,
                     NodeId dst,
                     FlowId flow_id,
                     NodeId *out_path,
@@ -646,7 +648,6 @@ struct Sim : public madrona::WorldBase {
     bool sys_chakra_entities_created;
 
     FlowPairStateSlot flow_pair_states[MAX_FLOW_PAIR_STATES];
-    madrona::SpinLock flow_pair_lock;
 
     MADRONA_NO_INLINE int32_t findFlowPairStateSlot(uint64_t comm_para,
                                                     uint64_t comm_src,

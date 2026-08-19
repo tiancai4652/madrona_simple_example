@@ -1,6 +1,8 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
 
+#include <madrona/sync.hpp>
+
 #include <algorithm>
 #include <limits>
 
@@ -16,6 +18,25 @@ namespace madsimple {
 // fires after its SEND flow already completed can still match.
 // -------------------------------------------------------------------------
 
+namespace {
+
+constexpr uint64_t flowPairReserved = ~uint64_t { 0 };
+
+inline uint64_t flowPairHash(uint64_t comm_para,
+                             uint64_t comm_src,
+                             uint64_t comm_dst)
+{
+    uint64_t hash = comm_para;
+    hash ^= hash >> 33;
+    hash *= 0xff51afd7ed558ccdULL;
+    hash ^= hash >> 33;
+    hash ^= comm_src * 0x9e3779b97f4a7c15ULL;
+    hash ^= comm_dst * 0xbf58476d1ce4e5b9ULL;
+    return hash;
+}
+
+} // namespace
+
 int32_t Sim::findFlowPairStateSlot(uint64_t comm_para,
                                    uint64_t comm_src,
                                    uint64_t comm_dst) const
@@ -23,84 +44,110 @@ int32_t Sim::findFlowPairStateSlot(uint64_t comm_para,
     if (comm_para == 0) {
         return -1;
     }
-    uint64_t hash = comm_para;
-    hash ^= hash >> 33;
-    hash *= 0xff51afd7ed558ccdULL;
-    hash ^= hash >> 33;
-    hash ^= comm_src * 0x9e3779b97f4a7c15ULL;
-    hash ^= comm_dst * 0xbf58476d1ce4e5b9ULL;
-    int32_t start = (int32_t)(hash & (MAX_FLOW_PAIR_STATES - 1));
+    uint64_t hash = flowPairHash(comm_para, comm_src, comm_dst);
+    int32_t start = (int32_t)(hash & (uint64_t)(MAX_FLOW_PAIR_STATES - 1));
     for (int32_t probe = 0; probe < MAX_FLOW_PAIR_STATES; probe++) {
         int32_t slot = (start + probe) & (MAX_FLOW_PAIR_STATES - 1);
-        if (flow_pair_states[slot].comm_para == 0) {
-            return slot;   // empty slot (caller decides to insert)
+        uint64_t para = AtomicU64Ref(
+            const_cast<uint64_t&>(flow_pair_states[slot].comm_para))
+            .load<sync::acquire>();
+        if (para == flowPairReserved) {
+            return -2;
         }
-        if (flow_pair_states[slot].comm_para == comm_para &&
+        if (para == 0) {
+            return slot;
+        }
+        if (para == comm_para &&
             flow_pair_states[slot].comm_src == comm_src &&
             flow_pair_states[slot].comm_dst == comm_dst) {
             return slot;
         }
     }
-    return -1;   // table full
+    return -1;
 }
 
 // RECV side: return 1 if the flow's SEND has already completed (state 2) and
 // reset the slot; otherwise register this RECV as waiting (state 1) and
-// return 0. Keyed by the (comm_para, src, dst) triple so that workloads
-// without globally-unique comm_para (e.g. multiverse comm_para=3 constant)
-// still get one slot per (src,dst), while Huawei's unique flow_ids are
-// distinguished per flow.
+// return 0. Lock-free: Madrona's ParallelFor runs many NPUs in the same
+// warp, so a device SpinLock here is a SIMT deadlock (holder and spinner
+// diverge, spinner never lets the holder unlock). Failed CAS just leaves
+// this RECV pending; it is re-polled on a later step.
 int32_t Sim::claimRecvDone(uint64_t comm_para, uint64_t comm_src, uint64_t comm_dst)
 {
-    flow_pair_lock.lock();
-    int32_t slot = findFlowPairStateSlot(comm_para, comm_src, comm_dst);
-    int32_t result = 0;
-    if (slot >= 0) {
-        if (flow_pair_states[slot].comm_para != comm_para) {
-            flow_pair_states[slot] = FlowPairStateSlot {
-                .comm_para = comm_para,
-                .comm_src = comm_src,
-                .comm_dst = comm_dst,
-                .state = 1,
-            };
-        } else if (flow_pair_states[slot].state == 2) {
-            // Consumed: keep the key so the linear-probe chain is not
-            // broken by an empty hole shadowing later slots of this key.
-            flow_pair_states[slot].state = 0;
-            result = 1;
-        } else if (flow_pair_states[slot].state == 0) {
-            flow_pair_states[slot].state = 1;
-        }
+    if (comm_para == 0 || comm_para == flowPairReserved) {
+        return 0;
     }
-    flow_pair_lock.unlock();
-    return result;
+    for (int32_t attempt = 0; attempt < 8; attempt++) {
+        int32_t slot = findFlowPairStateSlot(comm_para, comm_src, comm_dst);
+        if (slot == -2) {
+            continue;
+        }
+        if (slot < 0) {
+            return 0;
+        }
+        FlowPairStateSlot &s = flow_pair_states[slot];
+        uint64_t para = AtomicU64Ref(s.comm_para).load<sync::acquire>();
+        if (para == comm_para &&
+            s.comm_src == comm_src &&
+            s.comm_dst == comm_dst) {
+            AtomicI32Ref st(s.state);
+            int32_t cur = st.load<sync::acquire>();
+            if (cur == 2) {
+                int32_t expected = 2;
+                if (st.compare_exchange_weak<sync::acq_rel, sync::relaxed>(
+                        expected, 0)) {
+                    return 1;
+                }
+                continue;
+            }
+            if (cur == 0) {
+                int32_t expected = 0;
+                st.compare_exchange_weak<sync::acq_rel, sync::relaxed>(
+                    expected, 1);
+            }
+            return 0;
+        }
+        if (para == 0) {
+            uint64_t expected = 0;
+            if (!AtomicU64Ref(s.comm_para)
+                    .compare_exchange_weak<sync::acq_rel, sync::relaxed>(
+                        expected, flowPairReserved)) {
+                continue;
+            }
+            s.comm_src = comm_src;
+            s.comm_dst = comm_dst;
+            AtomicI32Ref(s.state).store<sync::release>(1);
+            AtomicU64Ref(s.comm_para).store<sync::release>(comm_para);
+            return 0;
+        }
+        return 0;
+    }
+    return 0;
 }
 
-// SEND side: mark the flow as completed (state 2). If the RECV was already
-// waiting (state 1), it will be consumed by the RECV poll in the next system
-// phase.
+// SEND side: mark the flow as completed (state 2). Runs from the serial
+// createFlowsFromNpuRequests step, so it is never concurrent with itself or
+// with claimRecvDone (different task-graph nodes). Plain stores are enough.
 void Sim::markSendDone(uint64_t comm_para, uint64_t comm_src, uint64_t comm_dst)
 {
-    if (comm_para == 0) {
+    if (comm_para == 0 || comm_para == flowPairReserved) {
         return;
     }
-    flow_pair_lock.lock();
     int32_t slot = findFlowPairStateSlot(comm_para, comm_src, comm_dst);
-    if (slot >= 0) {
-        if (flow_pair_states[slot].comm_para != comm_para) {
-            flow_pair_states[slot] = FlowPairStateSlot {
-                .comm_para = comm_para,
-                .comm_src = comm_src,
-                .comm_dst = comm_dst,
-                .state = 2,
-            };
-        } else {
-            flow_pair_states[slot].comm_src = comm_src;
-            flow_pair_states[slot].comm_dst = comm_dst;
-            flow_pair_states[slot].state = 2;
-        }
+    if (slot < 0) {
+        return;
     }
-    flow_pair_lock.unlock();
+    FlowPairStateSlot &s = flow_pair_states[slot];
+    if (AtomicU64Ref(s.comm_para).load<sync::acquire>() != comm_para) {
+        s.comm_src = comm_src;
+        s.comm_dst = comm_dst;
+        AtomicI32Ref(s.state).store<sync::release>(2);
+        AtomicU64Ref(s.comm_para).store<sync::release>(comm_para);
+    } else {
+        s.comm_src = comm_src;
+        s.comm_dst = comm_dst;
+        AtomicI32Ref(s.state).store<sync::release>(2);
+    }
 }
 
 namespace {
@@ -566,6 +613,9 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequests(Context &ctx)
 
 MADRONA_NO_INLINE void Sim::pruneSystemEvents(Context &ctx)
 {
+    // Serial SimDriver step: drop expired time-skip events so addEvent's
+    // lock-free count stays bounded by live events (S4). Must not run in
+    // the same ParallelFor as skipTime_remove_time / addEvent.
     SystemEventQueue &events = ctx.singleton<SystemEventQueue>();
     uint64_t now_ns = (uint64_t)(now * 1000000.0 + 0.5);
     uint32_t out = 0;

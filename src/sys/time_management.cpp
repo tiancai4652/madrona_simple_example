@@ -99,9 +99,14 @@ namespace madsimple::llm_system
                 ctx.data().next_process_time_entity).times_abs[i];
             if (candidate == x_ns) {
                 candidate = 0;
-                return;
+                break;
             }
         }
+
+        // SystemEventQueue slots are NOT reclaimed here: this helper runs
+        // from sys_removeChakraNodes (ParallelFor over NPUs), so a swap-last
+        // decrement of the shared count would race across blocks. Expired
+        // events are compacted by the serial pruneSystemEvents step.
     }
 
     uint16_t frame_skiptime = 0;

@@ -348,11 +348,17 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
     }
 
     PortTagPool &pool = ctx.get<PortTagPool>(port_entity);
-    if (pool.free_count <= 0) {
-        return Entity::none();
+    Entity tag_entity;
+    if (pool.free_count > 0) {
+        tag_entity = pool.free_tags[--pool.free_count];
+        pool.free_tags[pool.free_count] = Entity::none();
+    } else {
+        // The warm pool is deliberately smaller than the hard per-port
+        // capacity so initWorlds does not perform tens of thousands of
+        // device-side makeEntity calls. Port systems serialize creation for
+        // each port, making this lazy allocation safe.
+        tag_entity = ctx.makeEntity<FlowTag>();
     }
-    Entity tag_entity = pool.free_tags[--pool.free_count];
-    pool.free_tags[pool.free_count] = Entity::none();
     FlowTagState tag {};
     tag.port_id = port_id;
     tag.flow_id = flow_id;

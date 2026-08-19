@@ -28,19 +28,26 @@ bool addEvent(Engine &ctx, uint64_t event_time_ns)
     SystemEventQueue &events = ctx.singleton<SystemEventQueue>();
 
     if (event_time_ns <= now_ns) {
-        events.overflow_count += 1;
         return false;
     }
 
-    events.lock.lock();
-    if (events.count >= MAX_SYSTEM_EVENTS) {
-        events.overflow_count += 1;
-        events.lock.unlock();
+    // Lock-free bounded append. Multiple NPUs call addEvent concurrently from
+    // the same ParallelForNode, so the old device SpinLock is replaced by an
+    // atomic slot claim. A stale read of a just-claimed slot is benign: the
+    // array is zero-initialized and readers skip 0, so the event is seen on
+    // a later scan. Compaction happens in the serial pruneSystemEvents step.
+    madrona::AtomicU32Ref count_ref(events.count);
+    uint32_t slot = count_ref.fetch_add_relaxed(1);
+    if (slot >= MAX_SYSTEM_EVENTS) {
+        count_ref.fetch_sub<madrona::sync::relaxed>(1);
+        madrona::AtomicU32Ref(events.overflow_count).fetch_add_relaxed(1);
         return false;
     }
 
-    events.times_ns[events.count++] = event_time_ns;
-    events.lock.unlock();
+    events.times_ns[slot] = event_time_ns;
+#ifdef __CUDA_ARCH__
+    __threadfence();
+#endif
     return true;
 }
 

@@ -11,5 +11,5 @@ namespace madsimple::llm_system
     // System initialization functions
     void registerTypes(ECSRegistry &registry);
     void init(Engine &ctx);
-    void sys_init(Engine &ctx, ChakraNodesData &chakra_nodes_data, ProcessParams &processParams);
+    MADRONA_NO_INLINE void sys_init(Engine &ctx, ChakraNodesData &chakra_nodes_data, ProcessParams &processParams);
 }

@@ -104,6 +104,10 @@ constexpr int32_t MAX_PORT_OUTBOX = 256;
 constexpr int32_t MAX_PORT_TAG_LOOKUP = 256;
 constexpr int32_t MAX_PORT_DELAYED_EVENTS = 256;
 constexpr int32_t MAX_TAGS_PER_PORT = 64;
+// Do not create FlowTag entities inside the single-threaded GPU initWorlds
+// kernel. Tags are allocated lazily by createTagOnPort and recycled through
+// PortTagPool after first use.
+constexpr int32_t INITIAL_TAGS_PER_PORT = 0;
 constexpr int32_t MAX_TAGS_PER_INGRESS = 192;
 constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 256;
 constexpr int32_t MAX_PORT_INBOX_BWUPD = 256;
@@ -113,7 +117,11 @@ constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
 constexpr int32_t MAX_PORT_COMPLETE = 320;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
-constexpr uint32_t MAX_SYSTEM_EVENTS = 1024;
+// Time-skip event queue (SystemEventQueue) capacity. Raised from 1024 so the
+// sys-layer COMP/COMM scheduling events can't silently fill the queue and be
+// dropped for realistic workloads; skipTime_remove_time now also reclaims
+// consumed slots so the count stays bounded by the number of active events.
+constexpr uint32_t MAX_SYSTEM_EVENTS = 16384;
 constexpr uint32_t MAX_FAKE_FINISHED_FLOWS = 16;
 
 // Per-NPU flow bookkeeping capacity constants. Unlike the old design
@@ -171,7 +179,6 @@ struct SystemEventQueue {
     uint64_t times_ns[MAX_SYSTEM_EVENTS] {};
     uint32_t count = 0;
     uint32_t overflow_count = 0;
-    madrona::SpinLock lock;
 };
 
 // ---------------------------------------------------------------------

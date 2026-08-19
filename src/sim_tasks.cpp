@@ -697,9 +697,6 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     for (int32_t i = 0; i < dyn_log.count && out_idx < n; i++) {
         buf.records[out_idx++] = dyn_log.records[i];
     }
-    for (int32_t i = out_idx; i < MAX_FLOW_COMPLETIONS; i++) {
-        buf.records[i] = FlowCompletionRecord {};
-    }
 }
 
 }  // inline namespace systems

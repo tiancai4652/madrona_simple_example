@@ -17,7 +17,9 @@ namespace madsimple::llm_system
 
         // Main system functions (implementations are distributed across sub-modules)
         // Core system processing function - remains in main file
-        void sys_processChakraNodes(Engine &ctx,
+        // MADRONA_NO_INLINE: keep this huge function (831 lines) out of the
+        // megakernel dispatch switch; LTO inlining it causes ptxas to blow up.
+        MADRONA_NO_INLINE void sys_processChakraNodes(Engine &ctx,
                                     NpuID &id,
                                     ChakraNodes &chakraNodes,
                                     HardwareResource &hardwareResource,
@@ -26,14 +28,14 @@ namespace madsimple::llm_system
                                     OneNPUFinishedFlag & oneNPUFinishedFlag,
                                     ChakraNodesForNoDP & chakraNodesForNoDP);
 
-        void sys_removeChakraNodes(Engine &ctx,
+        MADRONA_NO_INLINE void sys_removeChakraNodes(Engine &ctx,
                                    NpuID &id,
                                    ChakraNodes &chakraNodes,
                                    HardwareResource &hardwareResource,
                                    ProcessingCompTask &processingCompTask,
                                    ProcessingCommTasks &processingCommTasks);
 
-        void sys_checkNpuFinish(Engine &ctx, CheckNpuFinishFlag &checkNpuFinishFlag);
+        MADRONA_NO_INLINE void sys_checkNpuFinish(Engine &ctx, CheckNpuFinishFlag &checkNpuFinishFlag);
 
         // All other functions are declared in their respective sub-module headers:
         // - system_init.hpp: registerTypes, init, sys_init

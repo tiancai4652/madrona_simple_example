@@ -197,9 +197,6 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
             init_buf.records[out_idx++] = runtime.completion_record;
         }
     }
-    for (int32_t i = out_idx; i < MAX_FLOW_COMPLETIONS; i++) {
-        init_buf.records[i] = FlowCompletionRecord {};
-    }
 
     StepPhaseTimes &init_phase_times = ctx.singleton<StepPhaseTimes>();
     init_phase_times = StepPhaseTimes {};
