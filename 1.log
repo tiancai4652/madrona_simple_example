@@ -1,0 +1,661 @@
+=== GPU verify start: Mon Aug 17 02:50:30 UTC 2026 ===
+Mon Aug 17 02:50:30 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 595.45.04              Driver Version: 595.45.04      CUDA Version: 13.2     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA RTX A6000               Off |   00000000:3B:00.0 Off |                    0 |
+| 55%   81C    P2            275W /  300W |   36833MiB /  46068MiB |     88%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA RTX A6000               Off |   00000000:5E:00.0 Off |                    0 |
+| 43%   71C    P2            258W /  300W |   36709MiB /  46068MiB |     88%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+|   2  NVIDIA RTX A6000               Off |   00000000:B1:00.0 Off |                    0 |
+| 30%   35C    P2             65W /  300W |    4343MiB /  46068MiB |     26%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+|   3  NVIDIA RTX A6000               Off |   00000000:D9:00.0 Off |                    0 |
+| 30%   38C    P2             78W /  300W |    4343MiB /  46068MiB |      9%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+=== [1/2] Bootstrap(Debug) run: 打通 GPU 编译链路 ===
+=== 配置参数 ===
+dim0: 2
+dim1: 2
+dim2: 4
+npu_num: 16
+dev_mode: 2
+topology_file: /app/jiuding_dodsim/examples/leafspine128/leafspine_h128_topo.txt
+workload_path: /app/华为负载/20260715 - 九鼎仿真平台训练负载示例/test_16a2_8p_deepseekv3_671b_l2_train_gbs16_seq4096_tp2_ep4_pp2/workload_train1.1_chakra
+================
+chakra_nodes_data_length: 10000
+max_chakra_nodes_per_npu: 193
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_types.hpp
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_types.hpp (CHAKRA_NODES_DATA_LENGTH)
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_types.hpp (MAX_CHAKRA_NODES_PER_NPU)
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_config.hpp
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_config.hpp (日志开关: SIMPLE_LOG_MODE=0 SYS_LOG=0 SYS_LOG_SPECIAL=0 SYS_LOG_TARGET_NODE=0)
+✓ 已更新 /app/madrona_simple_example/src/madrona_simple_example/chakra/config.py
+✓ 已更新 /app/madrona_simple_example/src/madrona_simple_example/chakra/config.py (CHAKRA_NODES_DATA_LENGTH)
+
+gpu kernel cache: /app/madrona_simple_example/.cache/mw_megakernel_npu16_d10000_m193_dev2_log00_boot1_ec86c21.bin
+GPU compile bootstrap mode enabled (MADRONA_MWGPU_FORCE_DEBUG=1)
+
+=== building flow simulator (CPU) ===
+[ 17%] Built target meshoptimizer
+[ 19%] Built target madrona_err
+[ 21%] Built target madrona_std_mem
+[ 25%] Built target madrona_mem
+[ 26%] Built target simdjson
+[ 28%] Built target madrona_cuda
+[ 40%] Built target nanobind-static
+[ 48%] Built target madrona_common
+[ 50%] Built target madrona_python_utils
+[ 51%] Built target madrona_python_bindings
+[ 53%] Built target madrona_json
+[ 57%] Built target madrona_mw_core
+[ 63%] Built target madrona_importer
+[ 65%] Built target madrona_mw_cpu
+[ 71%] Built target madrona_mw_gpu
+[ 71%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim.cpp.o
+[ 71%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init.cpp.o
+[ 73%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init_state.cpp.o
+[ 75%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_tasks.cpp.o
+[ 76%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init_port.cpp.o
+[ 76%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init_topo.cpp.o
+[ 78%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_world.cpp.o
+[ 78%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_debug.cpp.o
+[ 80%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems.cpp.o
+[ 80%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_lifecycle.cpp.o
+[ 82%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_schedule.cpp.o
+[ 82%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_dispatch.cpp.o
+[ 84%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_progress.cpp.o
+[ 84%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_ingress.cpp.o
+[ 86%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_bandwidth.cpp.o
+[ 86%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_buffer.cpp.o
+[ 88%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_pfc.cpp.o
+[ 88%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/net_sys_interface.cpp.o
+[ 90%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/chakra_node_processing.cpp.o
+[ 90%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/system_init.cpp.o
+[ 90%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/time_management.cpp.o
+[ 92%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/communication_system.cpp.o
+[ 94%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/llm_system.cpp.o
+In file included from /app/madrona_simple_example/src/sim_tasks.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_world.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_lifecycle.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_init_topo.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_init_state.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_bandwidth.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_pfc.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_dispatch.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:240:17: [0m[0;1;35mwarning: [0m[1mdeclaration shadows a local variable [-Wshadow][0m
+  240 |         int32_t dst_slot = findNodeSlot(dst);[0m
+      | [0;1;32m                ^
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:157:13: [0m[0;1;36mnote: [0mprevious declaration is here[0m
+  157 |     int32_t dst_slot = findNodeSlot(dst);[0m
+      | [0;1;32m            ^
+[0mIn file included from /app/madrona_simple_example/src/sys/chakra_node_processing.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/chakra_node_processing.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_progress.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_ingress.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sys/system_init.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/system_init.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m[1m/app/madrona_simple_example/src/sys/system_init.cpp:158:16: [0m[0;1;35mwarning: [0m[1munused variable 'npu_data_num' [-Wunused-variable][0m
+  158 |         size_t npu_data_num = cols;[0m
+      | [0;1;32m               ^~~~~~~~~~~~
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:25:16: [0m[0;1;35mwarning: [0m[1munused function 'minI32' [-Wunused-function][0m
+   25 | inline int32_t minI32(int32_t a, int32_t b)[0m
+      | [0;1;32m               ^~~~~~
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:30:24: [0m[0;1;35mwarning: [0m[1munused function 'mergeDelayedEventRuns' [-Wunused-function][0m
+   30 | MADRONA_NO_INLINE void mergeDelayedEventRuns([0m
+      | [0;1;32m                       ^~~~~~~~~~~~~~~~~~~~~
+[0m1 warning generated.
+In file included from /app/madrona_simple_example/src/sim_init_port.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_debug.cpp:1:
+In file included from /app/madrona_simple_example/src/sim_debug.hpp:5:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+1 warning generated.
+In file included from /app/madrona_simple_example/src/sys/llm_system.cpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sys/net_sys_interface.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/net_sys_interface.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:148:31: [0m[0;1;35mwarning: [0m[1munused parameter 'id' [-Wunused-parameter][0m
+  148 |         Engine & ctx, NpuID & id, ChakraNode & node,[0m
+      | [0;1;32m                              ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:593:51: [0m[0;1;35mwarning: [0m[1mvariable 'dimension' set but not used [-Wunused-but-set-variable][0m
+  593 |                                         Dimension dimension = Dimension::Local;[0m
+      | [0;1;32m                                                  ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:589:41: [0m[0;1;35mwarning: [0m[1mvariable 'offset' set but not used [-Wunused-but-set-variable][0m
+  589 |                                     int offset = 1;[0m
+      | [0;1;32m                                        ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:515:33: [0m[0;1;35mwarning: [0m[1menumeration value 'Tree' not handled in switch [-Wswitch][0m
+  515 |                         switch (comm_implementation_type) {[0m
+      | [0;1;32m                                ^~~~~~~~~~~~~~~~~~~~~~~~
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:984:23: [0m[0;1;35mwarning: [0m[1munused parameter 'chakraNodes' [-Wunused-parameter][0m
+  984 |         ChakraNodes & chakraNodes,[0m
+      | [0;1;32m                      ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:985:28: [0m[0;1;35mwarning: [0m[1munused parameter 'hardwareResource' [-Wunused-parameter][0m
+  985 |         HardwareResource & hardwareResource,[0m
+      | [0;1;32m                           ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:986:30: [0m[0;1;35mwarning: [0m[1munused parameter 'processingCompTask' [-Wunused-parameter][0m
+  986 |         ProcessingCompTask & processingCompTask,[0m
+      | [0;1;32m                             ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:987:31: [0m[0;1;35mwarning: [0m[1munused parameter 'processingCommTasks' [-Wunused-parameter][0m
+  987 |         ProcessingCommTasks & processingCommTasks,[0m
+      | [0;1;32m                              ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:988:30: [0m[0;1;35mwarning: [0m[1munused parameter 'oneNPUFinishedFlag' [-Wunused-parameter][0m
+  988 |         OneNPUFinishedFlag & oneNPUFinishedFlag,[0m
+      | [0;1;32m                             ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:989:30: [0m[0;1;35mwarning: [0m[1munused parameter 'chakraNodesForNoDP' [-Wunused-parameter][0m
+  989 |         ChakraNodesForNoDP & chakraNodesForNoDP){[0m
+      | [0;1;32m                             ^
+[0m4 warnings generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+In file included from /app/madrona_simple_example/src/sim_systems_buffer.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_schedule.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+In file included from /app/madrona_simple_example/src/sim_init.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sys/communication_system.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/communication_system.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m11 warnings generated.
+In file included from /app/madrona_simple_example/src/sim_systems.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sys/time_management.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/time_management.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+1 warning generated.
+2 warnings generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+[ 94%] Linking CXX static library libmadrona_simple_ex_cpu_impl.a
+[ 94%] Built target madrona_simple_ex_cpu_impl
+[ 96%] Building CXX object src/CMakeFiles/madrona_simple_ex_mgr.dir/mgr.cpp.o
+In file included from /app/madrona_simple_example/src/mgr.cpp:2:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+[ 98%] Linking CXX shared library ../libmadrona_simple_ex_mgr.so
+[ 98%] Built target madrona_simple_ex_mgr
+[ 98%] Building CXX object src/CMakeFiles/_madrona_simple_example_cpp.dir/bindings.cpp.o
+In file included from /app/madrona_simple_example/src/bindings.cpp:2:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+[100%] Linking CXX shared module ../_madrona_simple_example_cpp.cpython-310-x86_64-linux-gnu.so
+[100%] Built target _madrona_simple_example_cpp
+=== running flow simulator ===
+Compiler Flags:
+-I/app/madrona_simple_example/external/madrona/src/mw/device/include
+-I/app/madrona_simple_example/external/madrona/src/common/../../include
+-I/usr/local/cuda-12.5/include
+-std=c++20
+-default-device
+-rdc=true
+-use_fast_math
+-DMADRONA_GPU_MODE=1
+-DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CPP
+-DCCCL_DISABLE_BF16_SUPPORT=1
+-DCUB_DISABLE_BF16_SUPPORT=1
+-arch
+sm_86
+-DMADRONA_MWGPU_NUM_SMS=(84_i32)
+-DMADRONA_MWGPU_MAX_BLOCKS_PER_SM=(1_i32)
+--device-debug
+-DMADRONA_MWGPU_TASKGRAPH=1
+
+Linker Flags:
+-arch=sm_86
+-ftz=1
+-prec-div=0
+-prec-sqrt=0
+-fma=1
+-optimize-unused-variables
+-g
+-verbose
+
+Terminated
+bootstrap exit code = 143
+
+=== 缓存检查 ===
+total 12
+drwxr-xr-x  2 root root 4096 Aug 17 02:48 .
+drwxrwxr-x+ 1 1041 1041 4096 Aug 17 02:50 ..
+WARN: bootstrap 缓存缺失或为空 —— 编译未成功
+
+=== 编译卡点定位（最后一个被编译的 .cpp）===
+src/bindings.cpp
+
+=== [2/2] LTO run: 正式冷编译 + 运行 ===
+       （这一步最慢：预计 10~60 分钟。看 1.log 里'Compiling GPU engine code:'
+         之后长时间无新 .cpp 打印，说明某个文件在卡）
+=== 配置参数 ===
+dim0: 2
+dim1: 2
+dim2: 4
+npu_num: 16
+dev_mode: 2
+topology_file: /app/jiuding_dodsim/examples/leafspine128/leafspine_h128_topo.txt
+workload_path: /app/华为负载/20260715 - 九鼎仿真平台训练负载示例/test_16a2_8p_deepseekv3_671b_l2_train_gbs16_seq4096_tp2_ep4_pp2/workload_train1.1_chakra
+================
+chakra_nodes_data_length: 10000
+max_chakra_nodes_per_npu: 193
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_types.hpp
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_types.hpp (CHAKRA_NODES_DATA_LENGTH)
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_types.hpp (MAX_CHAKRA_NODES_PER_NPU)
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_config.hpp
+✓ 已更新 /app/madrona_simple_example/src/sys/sys_config.hpp (日志开关: SIMPLE_LOG_MODE=0 SYS_LOG=0 SYS_LOG_SPECIAL=0 SYS_LOG_TARGET_NODE=0)
+✓ 已更新 /app/madrona_simple_example/src/madrona_simple_example/chakra/config.py
+✓ 已更新 /app/madrona_simple_example/src/madrona_simple_example/chakra/config.py (CHAKRA_NODES_DATA_LENGTH)
+
+gpu kernel cache: /app/madrona_simple_example/.cache/mw_megakernel_npu16_d10000_m193_dev2_log00_boot0_ec86c21.bin
+
+=== building flow simulator (CPU) ===
+[ 17%] Built target meshoptimizer
+[ 19%] Built target madrona_err
+[ 21%] Built target madrona_std_mem
+[ 25%] Built target madrona_mem
+[ 26%] Built target simdjson
+[ 28%] Built target madrona_cuda
+[ 40%] Built target nanobind-static
+[ 42%] Built target madrona_python_utils
+[ 50%] Built target madrona_common
+[ 51%] Built target madrona_python_bindings
+[ 55%] Built target madrona_mw_core
+[ 57%] Built target madrona_json
+[ 59%] Built target madrona_mw_cpu
+[ 65%] Built target madrona_mw_gpu
+[ 71%] Built target madrona_importer
+[ 71%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim.cpp.o
+[ 73%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_tasks.cpp.o
+[ 73%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init.cpp.o
+[ 75%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init_state.cpp.o
+[ 76%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init_port.cpp.o
+[ 76%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_init_topo.cpp.o
+[ 78%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_world.cpp.o
+[ 78%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_debug.cpp.o
+[ 80%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems.cpp.o
+[ 80%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_lifecycle.cpp.o
+[ 82%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_schedule.cpp.o
+[ 82%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_dispatch.cpp.o
+[ 84%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_progress.cpp.o
+[ 84%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_ingress.cpp.o
+[ 86%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_bandwidth.cpp.o
+[ 86%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_buffer.cpp.o
+[ 88%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sim_systems_pfc.cpp.o
+[ 88%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/net_sys_interface.cpp.o
+[ 90%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/chakra_node_processing.cpp.o
+[ 90%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/system_init.cpp.o
+[ 92%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/communication_system.cpp.o
+[ 92%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/time_management.cpp.o
+[ 94%] Building CXX object src/CMakeFiles/madrona_simple_ex_cpu_impl.dir/sys/llm_system.cpp.o
+In file included from /app/madrona_simple_example/src/sim_init_state.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_debug.cpp:1:
+In file included from /app/madrona_simple_example/src/sim_debug.hpp:5:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_lifecycle.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_progress.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_dispatch.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_world.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:240:17: [0m[0;1;35mwarning: [0m[1mdeclaration shadows a local variable [-Wshadow][0m
+  240 |         int32_t dst_slot = findNodeSlot(dst);[0m
+      | [0;1;32m                ^
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:157:13: [0m[0;1;36mnote: [0mprevious declaration is here[0m
+  157 |     int32_t dst_slot = findNodeSlot(dst);[0m
+      | [0;1;32m            ^
+[0m1 warning generated.
+In file included from /app/madrona_simple_example/src/sim_init.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_tasks.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:25:16: [0m[0;1;35mwarning: [0m[1munused function 'minI32' [-Wunused-function][0m
+   25 | inline int32_t minI32(int32_t a, int32_t b)[0m
+      | [0;1;32m               ^~~~~~
+[0m[1m/app/madrona_simple_example/src/sim_world.cpp:30:24: [0m[0;1;35mwarning: [0m[1munused function 'mergeDelayedEventRuns' [-Wunused-function][0m
+   30 | MADRONA_NO_INLINE void mergeDelayedEventRuns([0m
+      | [0;1;32m                       ^~~~~~~~~~~~~~~~~~~~~
+[0mIn file included from /app/madrona_simple_example/src/sim_init_topo.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sys/system_init.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/system_init.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_buffer.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_bandwidth.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m[1m/app/madrona_simple_example/src/sys/system_init.cpp:158:16: [0m[0;1;35mwarning: [0m[1munused variable 'npu_data_num' [-Wunused-variable][0m
+  158 |         size_t npu_data_num = cols;[0m
+      | [0;1;32m               ^~~~~~~~~~~~
+[0mIn file included from /app/madrona_simple_example/src/sys/communication_system.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/communication_system.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sys/chakra_node_processing.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/chakra_node_processing.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+1 warning generated.
+In file included from /app/madrona_simple_example/src/sim_init_port.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+4 warnings generated.
+1 warning generated.
+1 warning generated.
+In file included from /app/madrona_simple_example/src/sys/llm_system.cpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sys/net_sys_interface.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/net_sys_interface.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:148:31: [0m[0;1;35mwarning: [0m[1munused parameter 'id' [-Wunused-parameter][0m
+  148 |         Engine & ctx, NpuID & id, ChakraNode & node,[0m
+      | [0;1;32m                              ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:593:51: [0m[0;1;35mwarning: [0m[1mvariable 'dimension' set but not used [-Wunused-but-set-variable][0m
+  593 |                                         Dimension dimension = Dimension::Local;[0m
+      | [0;1;32m                                                  ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:589:41: [0m[0;1;35mwarning: [0m[1mvariable 'offset' set but not used [-Wunused-but-set-variable][0m
+  589 |                                     int offset = 1;[0m
+      | [0;1;32m                                        ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:515:33: [0m[0;1;35mwarning: [0m[1menumeration value 'Tree' not handled in switch [-Wswitch][0m
+  515 |                         switch (comm_implementation_type) {[0m
+      | [0;1;32m                                ^~~~~~~~~~~~~~~~~~~~~~~~
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:984:23: [0m[0;1;35mwarning: [0m[1munused parameter 'chakraNodes' [-Wunused-parameter][0m
+  984 |         ChakraNodes & chakraNodes,[0m
+      | [0;1;32m                      ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:985:28: [0m[0;1;35mwarning: [0m[1munused parameter 'hardwareResource' [-Wunused-parameter][0m
+  985 |         HardwareResource & hardwareResource,[0m
+      | [0;1;32m                           ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:986:30: [0m[0;1;35mwarning: [0m[1munused parameter 'processingCompTask' [-Wunused-parameter][0m
+  986 |         ProcessingCompTask & processingCompTask,[0m
+      | [0;1;32m                             ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:987:31: [0m[0;1;35mwarning: [0m[1munused parameter 'processingCommTasks' [-Wunused-parameter][0m
+  987 |         ProcessingCommTasks & processingCommTasks,[0m
+      | [0;1;32m                              ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:988:30: [0m[0;1;35mwarning: [0m[1munused parameter 'oneNPUFinishedFlag' [-Wunused-parameter][0m
+  988 |         OneNPUFinishedFlag & oneNPUFinishedFlag,[0m
+      | [0;1;32m                             ^
+[0m[1m/app/madrona_simple_example/src/sys/llm_system.cpp:989:30: [0m[0;1;35mwarning: [0m[1munused parameter 'chakraNodesForNoDP' [-Wunused-parameter][0m
+  989 |         ChakraNodesForNoDP & chakraNodesForNoDP){[0m
+      | [0;1;32m                             ^
+[0m1 warning generated.
+In file included from /app/madrona_simple_example/src/sim_systems.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_pfc.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+In file included from /app/madrona_simple_example/src/sim_systems_schedule.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+1 warning generated.
+In file included from /app/madrona_simple_example/src/sys/time_management.cpp:1:
+In file included from /app/madrona_simple_example/src/sys/time_management.hpp:3:
+In file included from /app/madrona_simple_example/src/sys/../sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/../sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0mIn file included from /app/madrona_simple_example/src/sim_systems_ingress.cpp:1:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+1 warning generated.
+1 warning generated.
+2 warnings generated.
+11 warnings generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+[ 94%] Linking CXX static library libmadrona_simple_ex_cpu_impl.a
+[ 94%] Built target madrona_simple_ex_cpu_impl
+[ 96%] Building CXX object src/CMakeFiles/madrona_simple_ex_mgr.dir/mgr.cpp.o
+In file included from /app/madrona_simple_example/src/mgr.cpp:2:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+[ 98%] Linking CXX shared library ../libmadrona_simple_ex_mgr.so
+[ 98%] Built target madrona_simple_ex_mgr
+[ 98%] Building CXX object src/CMakeFiles/_madrona_simple_example_cpp.dir/bindings.cpp.o
+In file included from /app/madrona_simple_example/src/bindings.cpp:2:
+In file included from /app/madrona_simple_example/src/sim.hpp:12:
+[1m/app/madrona_simple_example/src/sys/sys_types.hpp:707:73: [0m[0;1;35mwarning: [0m[1munused parameter 'npu_id' [-Wunused-parameter][0m
+  707 |         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)[0m
+      | [0;1;32m                                                                        ^
+[0m1 warning generated.
+[100%] Linking CXX shared module ../_madrona_simple_example_cpp.cpython-310-x86_64-linux-gnu.so
+[100%] Built target _madrona_simple_example_cpp
+=== running flow simulator ===
+Compiler Flags:
+-I/app/madrona_simple_example/external/madrona/src/mw/device/include
+-I/app/madrona_simple_example/external/madrona/src/common/../../include
+-I/usr/local/cuda-12.5/include
+-std=c++20
+-default-device
+-rdc=true
+-use_fast_math
+-DMADRONA_GPU_MODE=1
+-DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CPP
+-DCCCL_DISABLE_BF16_SUPPORT=1
+-DCUB_DISABLE_BF16_SUPPORT=1
+-arch
+sm_86
+-DMADRONA_MWGPU_NUM_SMS=(84_i32)
+-DMADRONA_MWGPU_MAX_BLOCKS_PER_SM=(1_i32)
+-dopt=on
+--extra-device-vectorization
+-lineinfo
+-dlto
+-DMADRONA_MWGPU_LTO_MODE=1
+-DMADRONA_MWGPU_TASKGRAPH=1
+
+Linker Flags:
+-arch=sm_86
+-ftz=1
+-prec-div=0
+-prec-sqrt=0
+-fma=1
+-optimize-unused-variables
+-lineinfo
+-lto
+-verbose
+
+Terminated
+LTO exit code = 143
+
+=== [3/3] 汇总 ===
+bootstrap: FAIL
+LTO:       FAIL
+存在失败，见上面的输出。若卡在某个 .cpp，把 1.log 里最后一个 src/xxx.cpp 发给我。

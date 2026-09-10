@@ -23,6 +23,11 @@ set(SIMULATOR_SRCS
     sys/communication_system.cpp
     sys/time_management.cpp
     sys/llm_system.cpp
+    sys/serving_runtime.cpp
+    sys/serving_scheduler.cpp
+    sys/pd_router.cpp
+    sys/op_resolver.cpp
+    sys/kv_transfer.cpp
 )
 
 add_library(madrona_simple_ex_cpu_impl STATIC

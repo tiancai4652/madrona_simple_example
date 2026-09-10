@@ -21,6 +21,7 @@
 #include "time_management.hpp"
 
 #include "sys_config.hpp"
+#include "op_resolver.hpp"
 
 using namespace madrona;
 using namespace madrona::math;
@@ -719,7 +720,8 @@ namespace madsimple::llm_system {
         ProcessingCompTask & processingCompTask,
         ProcessingCommTasks & processingCommTasks,
         OneNPUFinishedFlag & oneNPUFinishedFlag,
-        ChakraNodesForNoDP & chakraNodesForNoDP) {
+        ChakraNodesForNoDP & chakraNodesForNoDP,
+        ServingNpuExecution &servingExecution) {
 
         #if SYS_LOG
         if (SYS_LOG_TARGET_NODE == id.value) {
@@ -760,6 +762,10 @@ namespace madsimple::llm_system {
 
                 
                 ChakraNode &node = chakraNodesForNoDP.current_exec_nodes[i];
+                resolveServingOp(
+                    ctx.get<InferenceConfigData>(ctx.data().init_entity),
+                    ctx.get<WorkloadParamsTableData>(ctx.data().init_entity),
+                    servingExecution, node);
 
                 // Skip if already being processed to avoid duplicate lookups
                 if (processingCommTasks.containsNodeId(node.id)) {
@@ -970,7 +976,9 @@ namespace madsimple::llm_system {
                     break;
                 }
             }
-            if(is_finish)
+            if(is_finish &&
+               ctx.get<InferenceConfigData>(ctx.data().init_entity)
+                   .data[IC_ENABLED] == 0)
             {
                 ctx.get<ProcessParams>(ctx.data().init_entity).params[999]=1;
             }

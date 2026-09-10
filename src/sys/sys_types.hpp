@@ -6,6 +6,7 @@
 #include <madrona/rand.hpp>
 #include <madrona/render/ecs.hpp>
 
+#include "serving_types.hpp"
 
 // // ----------- for llm sys -------------------------
 
@@ -582,10 +583,18 @@ namespace madsimple
 
     struct SysInputArch : public madrona::Archetype<
         ChakraNodesData,
-        ProcessParams>
+        ProcessParams,
+        InferenceConfigData,
+        ServingRequestData,
+        WorkloadParamsTableData>
     {};
 
     struct ChakraNodes
+    {
+        ChakraNode nodes[MAX_CHAKRA_NODES_PER_NPU];
+    };
+
+    struct ChakraTemplateNodes
     {
         ChakraNode nodes[MAX_CHAKRA_NODES_PER_NPU];
     };
@@ -801,6 +810,8 @@ namespace madsimple
     struct NpuNode : public madrona::Archetype<
                          NpuID,
                          ChakraNodes,
+                         ChakraTemplateNodes,
+                         ServingNpuExecution,
                          HardwareResource,
                          ProcessingCompTask,
                          ProcessingCommTasks,

@@ -26,6 +26,10 @@ enum class ExportID : uint32_t {
     ChakraNodesData,
     ProcessParams,
     SystemStatus,
+    InferenceConfigData,
+    ServingRequestData,
+    WorkloadParamsTableData,
+    ServingStatsData,
     NumExports,
 };
 

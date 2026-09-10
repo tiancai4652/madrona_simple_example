@@ -2,6 +2,8 @@
 #include "sim_debug.hpp"
 #include "sys/llm_system.hpp"
 #include "sys/net_sys_interface.hpp"
+#include "sys/kv_transfer.hpp"
+#include "sys/serving_runtime.hpp"
 
 #ifndef MADRONA_GPU_MODE
 #include <chrono>
@@ -118,6 +120,21 @@ MADRONA_NO_INLINE void clearNpuFlowFinishStepSystem(
     finished.count = 0;
 }
 
+MADRONA_NO_INLINE void servingPreStepSystem(Engine &ctx, SimDriver &)
+{
+    servingPreUpdate(ctx);
+}
+
+MADRONA_NO_INLINE void collectServingKvStepSystem(Engine &ctx, SimDriver &)
+{
+    collectServingKvCompletions(ctx);
+}
+
+MADRONA_NO_INLINE void servingPostStepSystem(Engine &ctx, SimDriver &)
+{
+    servingPostUpdate(ctx);
+}
+
 MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
                                                     SimDriver &)
 {
@@ -147,8 +164,16 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
     }
     status.finished_npus = finished_npus;
     status.total_npus = ctx.data().numNpus;
-    status.finished = ctx.data().numNpus > 0 &&
-        finished_npus == ctx.data().numNpus;
+    const InferenceConfigData &inference_config =
+        ctx.get<InferenceConfigData>(ctx.data().init_entity);
+    if (inference_config.data[IC_ENABLED] != 0) {
+        const ServingRuntime &serving = ctx.singleton<ServingRuntime>();
+        status.finished = serving.initialized != 0 &&
+            servingIsFinished(serving, inference_config);
+    } else {
+        status.finished = ctx.data().numNpus > 0 &&
+            finished_npus == ctx.data().numNpus;
+    }
     const SystemEventQueue &events = ctx.singleton<SystemEventQueue>();
     uint64_t next_event = 0;
     uint64_t now_ns = net_sys_interface::msToNs(ctx.data().now);
@@ -522,11 +547,20 @@ MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.snapshotDirtyPorts(ctx);
     runtime.nextDT = sim.chooseDT(ctx);
-    bool system_finished = sim.sys_chakra_entities_created && sim.numNpus > 0;
-    for (int32_t i = 0; system_finished && i < sim.numNpus; i++) {
-        Entity npu = sim.npuEntities[i];
-        system_finished = npu != Entity::none() &&
-            ctx.get<OneNPUFinishedFlag>(npu).is_finished;
+    const InferenceConfigData &inference_config =
+        ctx.get<InferenceConfigData>(sim.init_entity);
+    bool system_finished = false;
+    if (inference_config.data[IC_ENABLED] != 0) {
+        const ServingRuntime &serving = ctx.singleton<ServingRuntime>();
+        system_finished = serving.initialized != 0 &&
+            servingIsFinished(serving, inference_config);
+    } else {
+        system_finished = sim.sys_chakra_entities_created && sim.numNpus > 0;
+        for (int32_t i = 0; system_finished && i < sim.numNpus; i++) {
+            Entity npu = sim.npuEntities[i];
+            system_finished = npu != Entity::none() &&
+                ctx.get<OneNPUFinishedFlag>(npu).is_finished;
+        }
     }
     if (system_finished) {
         runtime.nextDT = 0.0;
@@ -723,15 +757,19 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         pruneSystemEventsStepSystem, SimDriver>>({n0begin});
     auto n0sysinit = builder.addToGraph<ParallelForNode<Engine,
         llm_system::sys_init, ChakraNodesData, ProcessParams>>({n0prune});
+    auto n0servingpre = builder.addToGraph<ParallelForNode<Engine,
+        servingPreStepSystem, SimDriver>>({n0sysinit});
     auto n0checkflow = builder.addToGraph<ParallelForNode<Engine,
         llm_system::sys_checkFlow,
-        NpuID, NodeID, TaskFlows>>({n0sysinit});
+        NpuID, NodeID, TaskFlows>>({n0servingpre});
     auto n0checkrecv = builder.addToGraph<ParallelForNode<Engine,
         llm_system::sys_checkRecvFlow,
         NpuID, NodeID, RecvNodeFlag>>({n0checkflow});
+    auto n0collectkv = builder.addToGraph<ParallelForNode<Engine,
+        collectServingKvStepSystem, SimDriver>>({n0checkrecv});
     auto n0clearfinished = builder.addToGraph<ParallelForNode<Engine,
         clearNpuFlowFinishStepSystem,
-        NpuID, NpuFlowFinishedList>>({n0checkrecv});
+        NpuID, NpuFlowFinishedList>>({n0collectkv});
     auto n0remove = builder.addToGraph<ParallelForNode<Engine,
         llm_system::sys_removeChakraNodes,
         NpuID, ChakraNodes, HardwareResource, ProcessingCompTask,
@@ -740,12 +778,14 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         llm_system::sys_processChakraNodes,
         NpuID, ChakraNodes, HardwareResource, ProcessingCompTask,
         ProcessingCommTasks, OneNPUFinishedFlag,
-        ChakraNodesForNoDP>>({n0remove});
+        ChakraNodesForNoDP, ServingNpuExecution>>({n0remove});
+    auto n0servingpost = builder.addToGraph<ParallelForNode<Engine,
+        servingPostStepSystem, SimDriver>>({n0process});
     // Serial, but O(active NPUs' own pending counts), not O(total flows
     // ever materialized) -- replaces the old single global
     // PendingSetFlowQueue drain.
     auto n0createFlows = builder.addToGraph<ParallelForNode<Engine,
-        createFlowsFromNpuRequestsStepSystem, SimDriver>>({n0process});
+        createFlowsFromNpuRequestsStepSystem, SimDriver>>({n0servingpost});
     auto n0prepare = builder.addToGraph<ParallelForNode<Engine,
         preparePendingFlowMetaStepSystem,
         FlowDef, FlowRuntimeState, FlowScheduleState>>({n0createFlows});

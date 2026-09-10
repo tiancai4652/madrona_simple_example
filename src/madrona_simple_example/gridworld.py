@@ -3,6 +3,14 @@ import numpy as np
 import torch
 from ._madrona_simple_example_cpp import SimpleGridworldSimulator, madrona
 from .chakra import build_process_params, load_chakra_workload
+from .serving import (
+    SERVING_STATS_OUTPUT_FIELDS,
+    load_request_trace,
+    load_workload_params_table,
+    pack_request_trace,
+    pack_workload_params_table,
+    parse_serving_stats,
+)
 
 __all__ = [
     'GridWorld',
@@ -224,6 +232,9 @@ class GridWorld:
                  prior_weights = None,
                  system_workload = None,
                  system_config = None,
+                 inference_config = None,
+                 request_trace = None,
+                 workload_params_table = None,
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -235,6 +246,12 @@ class GridWorld:
         if (system_workload is None) != (system_config is None):
             raise ValueError(
                 "system_workload and system_config must be provided together")
+        if (inference_config is None) != (request_trace is None):
+            raise ValueError(
+                "inference_config and request_trace must be provided together")
+        if inference_config is not None and system_config is None:
+            raise ValueError(
+                "inference_config requires system_workload and system_config")
         if system_config is not None:
             system_config.validate()
             node_ids = np.asarray(self.network_inputs['node_ids'])
@@ -245,6 +262,13 @@ class GridWorld:
             if missing:
                 raise ValueError(
                     f"network topology is missing NPU host ids: {missing[:8]}")
+
+        serving_trace = None
+        serving_profiles = None
+        if inference_config is not None:
+            serving_trace = load_request_trace(request_trace)
+            serving_profiles = load_workload_params_table(workload_params_table)
+            inference_config.validate(system_config.npu_count)
 
         if prior_weights is None:
             prior_weights = np.zeros(8, dtype=np.float64)
@@ -293,6 +317,9 @@ class GridWorld:
         self.dones = self.sim.done_tensor().to_torch()
 
         self._system_enabled = system_workload is not None
+        self._inference_enabled = inference_config is not None
+        self._num_serving_requests = (
+            len(serving_trace) if serving_trace is not None else 0)
         if self._system_enabled:
             chakra_data = load_chakra_workload(
                 system_workload, system_config.npu_count)
@@ -304,6 +331,20 @@ class GridWorld:
             for world_idx in range(num_worlds):
                 chakra_tensor[world_idx].copy_(chakra_row)
                 params_tensor[world_idx].copy_(params_row)
+
+        if self._inference_enabled:
+            config_tensor = self.sim.inference_config_tensor().to_torch()
+            request_tensor = self.sim.serving_request_tensor().to_torch()
+            profile_tensor = self.sim.workload_params_table_tensor().to_torch()
+            config_row = torch.from_numpy(inference_config.pack(
+                self._num_serving_requests, system_config.npu_count,
+                len(serving_profiles)))
+            request_row = torch.from_numpy(pack_request_trace(serving_trace))
+            profile_row = torch.from_numpy(pack_workload_params_table(serving_profiles))
+            for world_idx in range(num_worlds):
+                config_tensor[world_idx].copy_(config_row)
+                request_tensor[world_idx].copy_(request_row)
+                profile_tensor[world_idx].copy_(profile_row)
 
     def step(self):
         self.sim.step()
@@ -354,6 +395,19 @@ class GridWorld:
             self.sim.flow_completion(i)
             for i in range(self.sim.num_flow_completions())
         ]
+
+    def serving_stats(self):
+        if not self._inference_enabled:
+            return []
+        raw = self.sim.serving_stats_tensor().to_torch()[0].cpu().numpy()
+        return parse_serving_stats(raw, self._num_serving_requests)
+
+    def write_serving_stats_csv(self, output_path):
+        rows = self.serving_stats()
+        with open(output_path, 'w', encoding='utf-8', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=SERVING_STATS_OUTPUT_FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
 
     def write_flow_completion_csv(self, output_path):
         rows = sorted(self.flow_completions(), key=lambda row: row['flow_id'])

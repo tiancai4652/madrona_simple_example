@@ -72,6 +72,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerSingleton<SystemEventQueue>();
     registry.registerSingleton<DynamicFlowCompletionLog>();
     registry.registerSingleton<SystemStatus>();
+    registry.registerSingleton<ServingRuntime>();
+    registry.registerSingleton<ServingStatsData>();
 
     registry.registerComponent<NpuFlowInbox>();
     registry.registerComponent<NpuFlowPool>();
@@ -82,6 +84,9 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerArchetype<SimDriverArch>();
     registry.registerComponent<ChakraNodesData>();
     registry.registerComponent<ProcessParams>();
+    registry.registerComponent<InferenceConfigData>();
+    registry.registerComponent<ServingRequestData>();
+    registry.registerComponent<WorkloadParamsTableData>();
     registry.registerArchetype<SysInputArch>();
     llm_system::registerTypes(registry);
     registry.registerArchetype<Port>();
@@ -105,6 +110,14 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
         (uint32_t)ExportID::ProcessParams);
     registry.exportSingleton<SystemStatus>(
         (uint32_t)ExportID::SystemStatus);
+    registry.exportColumn<SysInputArch, InferenceConfigData>(
+        (uint32_t)ExportID::InferenceConfigData);
+    registry.exportColumn<SysInputArch, ServingRequestData>(
+        (uint32_t)ExportID::ServingRequestData);
+    registry.exportColumn<SysInputArch, WorkloadParamsTableData>(
+        (uint32_t)ExportID::WorkloadParamsTableData);
+    registry.exportSingleton<ServingStatsData>(
+        (uint32_t)ExportID::ServingStatsData);
 }
 
 Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
@@ -151,8 +164,13 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
 
     Entity sys_input = ctx.makeEntity<SysInputArch>();
     ctx.get<ProcessParams>(sys_input) = ProcessParams {};
+    ctx.get<InferenceConfigData>(sys_input) = InferenceConfigData {};
+    ctx.get<ServingRequestData>(sys_input) = ServingRequestData {};
+    ctx.get<WorkloadParamsTableData>(sys_input) = WorkloadParamsTableData {};
     init_entity = sys_input;
     ctx.singleton<SystemStatus>() = SystemStatus {};
+    ctx.singleton<ServingRuntime>() = ServingRuntime {};
+    ctx.singleton<ServingStatsData>() = ServingStatsData {};
     llm_system::init(ctx);
 
     initTrace("Sim::Sim before loadTopo", trace_mode_enabled);

@@ -652,6 +652,36 @@ Tensor Manager::systemStatusTensor() const
         TensorElementType::Int32, {impl_->cfg.numWorlds, 8});
 }
 
+Tensor Manager::inferenceConfigTensor() const
+{
+    return impl_->exportTensor(ExportID::InferenceConfigData,
+        TensorElementType::Int64,
+        {impl_->cfg.numWorlds, INFERENCE_CONFIG_LENGTH});
+}
+
+Tensor Manager::servingRequestTensor() const
+{
+    return impl_->exportTensor(ExportID::ServingRequestData,
+        TensorElementType::Int64,
+        {impl_->cfg.numWorlds, MAX_SERVING_REQUESTS,
+         SERVING_REQUEST_FIELDS});
+}
+
+Tensor Manager::workloadParamsTableTensor() const
+{
+    return impl_->exportTensor(ExportID::WorkloadParamsTableData,
+        TensorElementType::Int64,
+        {impl_->cfg.numWorlds, MAX_WORKLOAD_PARAMS_TABLE_ENTRIES, WORKLOAD_PARAMS_TABLE_FIELDS});
+}
+
+Tensor Manager::servingStatsTensor() const
+{
+    return impl_->exportTensor(ExportID::ServingStatsData,
+        TensorElementType::Int64,
+        {impl_->cfg.numWorlds, MAX_SERVING_REQUESTS,
+         SERVING_STATS_FIELDS});
+}
+
 double Manager::simulationTime()
 {
     return impl_->simulationTime();
