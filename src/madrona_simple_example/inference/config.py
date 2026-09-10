@@ -6,9 +6,9 @@ import numpy as np
 
 
 INFERENCE_CONFIG_LENGTH = 256
-MAX_SERVING_WORKERS = 16
-MAX_SERVING_WORKER_RANKS = 16
-MAX_SERVING_BATCH = 128
+MAX_INFERENCE_WORKERS = 16
+MAX_INFERENCE_WORKER_RANKS = 16
+MAX_INFERENCE_BATCH = 128
 
 IC_ENABLED = 0
 IC_NUM_REQUESTS = 1
@@ -145,14 +145,14 @@ class InferenceConfig:
                 rank for rank in p_ranks | d_ranks if rank >= npu_count)
             if invalid:
                 raise ValueError(
-                    f"serving worker ranks exceed npu_count: {invalid[:8]}")
+                    f"inference worker ranks exceed npu_count: {invalid[:8]}")
 
-        if not 0 < self.p_max_batch <= MAX_SERVING_BATCH:
+        if not 0 < self.p_max_batch <= MAX_INFERENCE_BATCH:
             raise ValueError(
-                f"p_max_batch must be in [1, {MAX_SERVING_BATCH}]")
-        if not 0 < self.d_max_batch <= MAX_SERVING_BATCH:
+                f"p_max_batch must be in [1, {MAX_INFERENCE_BATCH}]")
+        if not 0 < self.d_max_batch <= MAX_INFERENCE_BATCH:
             raise ValueError(
-                f"d_max_batch must be in [1, {MAX_SERVING_BATCH}]")
+                f"d_max_batch must be in [1, {MAX_INFERENCE_BATCH}]")
         for name in (
                 "p_max_tokens", "d_max_tokens", "num_layers",
                 "num_kv_heads", "head_dim", "bytes_per_elem",
@@ -271,17 +271,13 @@ class InferenceConfig:
             worker_start += 2
         return packed
 
-# Backwards-compatible alias (kept for one release; remove after tests
-# and scripts migrate).
-ServingConfig = InferenceConfig
-
 
 def _validate_pool(workers, name):
     if not workers:
         raise ValueError(f"{name} must contain at least one worker")
-    if len(workers) > MAX_SERVING_WORKERS:
+    if len(workers) > MAX_INFERENCE_WORKERS:
         raise ValueError(
-            f"{name} exceeds the {MAX_SERVING_WORKERS} worker limit")
+            f"{name} exceeds the {MAX_INFERENCE_WORKERS} worker limit")
 
     widths = []
     expected_start = workers[0][0] if workers[0] else -1
@@ -290,10 +286,10 @@ def _validate_pool(workers, name):
     pool_start = expected_start
     for worker_idx, worker in enumerate(workers):
         width = len(worker)
-        if not 0 < width <= MAX_SERVING_WORKER_RANKS:
+        if not 0 < width <= MAX_INFERENCE_WORKER_RANKS:
             raise ValueError(
                 f"{name}[{worker_idx}] rank count must be in [1, "
-                f"{MAX_SERVING_WORKER_RANKS}]")
+                f"{MAX_INFERENCE_WORKER_RANKS}]")
         expected = tuple(range(expected_start, expected_start + width))
         if worker != expected:
             raise ValueError(

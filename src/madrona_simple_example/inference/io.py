@@ -1,4 +1,4 @@
-"""Request trace loading, tensor packing, and serving statistics parsing."""
+"""Request trace loading, tensor packing, and inference statistics parsing."""
 
 import csv
 import json
@@ -13,8 +13,8 @@ REQUEST_FIELDS = (
     "prompt_len",
     "output_len",
 )
-MAX_SERVING_REQUESTS = 1024
-SERVING_STATS_FIELDS = 19
+MAX_INFERENCE_REQUESTS = 1024
+INFERENCE_STATS_FIELDS = 19
 MAX_WORKLOAD_PARAMS_TABLE_ENTRIES = 1024
 WORKLOAD_PARAMS_TABLE_FIELDS = (
     "stage",
@@ -53,7 +53,7 @@ _RAW_STATS_FIELDS = (
     "kv_shards_done",
     "first_token_ns",
 )
-SERVING_STATS_OUTPUT_FIELDS = _RAW_STATS_FIELDS + (
+INFERENCE_STATS_OUTPUT_FIELDS = _RAW_STATS_FIELDS + (
     "ttft_ns",
     "tpot_ns",
     "e2e_ns",
@@ -72,9 +72,9 @@ def load_request_trace(source):
         raise TypeError(
             "request trace must be a list of dicts, numpy array, or path")
 
-    if len(rows) > MAX_SERVING_REQUESTS:
+    if len(rows) > MAX_INFERENCE_REQUESTS:
         raise ValueError(
-            f"request trace exceeds {MAX_SERVING_REQUESTS} requests")
+            f"request trace exceeds {MAX_INFERENCE_REQUESTS} requests")
 
     normalized = [_normalize_request(row, idx)
                   for idx, row in enumerate(rows)]
@@ -94,7 +94,7 @@ def pack_request_trace(source):
     """Pack a trace into the fixed int64[1024,4] C++ input tensor."""
     trace = load_request_trace(source)
     packed = np.zeros(
-        (MAX_SERVING_REQUESTS, len(REQUEST_FIELDS)), dtype=np.int64)
+        (MAX_INFERENCE_REQUESTS, len(REQUEST_FIELDS)), dtype=np.int64)
     packed[:len(trace)] = trace
     return packed
 
@@ -142,14 +142,14 @@ def pack_workload_params_table(source):
     return packed
 
 
-def parse_serving_stats(stats, num_requests=None):
+def parse_inference_stats(stats, num_requests=None):
     """Convert an int64[N,18] stats tensor to dictionaries with metrics."""
     array = np.asarray(stats)
-    if array.ndim != 2 or array.shape[1] != SERVING_STATS_FIELDS:
+    if array.ndim != 2 or array.shape[1] != INFERENCE_STATS_FIELDS:
         raise ValueError(
-            f"serving stats must have shape [N, {SERVING_STATS_FIELDS}]")
+            f"inference stats must have shape [N, {INFERENCE_STATS_FIELDS}]")
     if not np.issubdtype(array.dtype, np.integer):
-        raise ValueError("serving stats must contain integers")
+        raise ValueError("inference stats must contain integers")
     if num_requests is None:
         num_requests = array.shape[0]
     if not 0 <= num_requests <= array.shape[0]:

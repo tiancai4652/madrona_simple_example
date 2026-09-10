@@ -721,7 +721,7 @@ namespace madsimple::llm_system {
         ProcessingCommTasks & processingCommTasks,
         OneNPUFinishedFlag & oneNPUFinishedFlag,
         ChakraNodesForNoDP & chakraNodesForNoDP,
-        ServingNpuExecution &servingExecution) {
+        InferenceNpuExecution &inferenceExecution) {
 
         #if SYS_LOG
         if (SYS_LOG_TARGET_NODE == id.value) {
@@ -762,10 +762,10 @@ namespace madsimple::llm_system {
 
                 
                 ChakraNode &node = chakraNodesForNoDP.current_exec_nodes[i];
-                resolveServingOp(
+                resolveInferenceOp(
                     ctx.get<InferenceConfigData>(ctx.data().init_entity),
                     ctx.get<WorkloadParamsTableData>(ctx.data().init_entity),
-                    servingExecution, node);
+                    inferenceExecution, node);
 
                 // Skip if already being processed to avoid duplicate lookups
                 if (processingCommTasks.containsNodeId(node.id)) {

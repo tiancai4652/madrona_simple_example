@@ -11,17 +11,17 @@ except ImportError:
     GridWorld = None
 
 
-SERVING_KV_FLOW_BIT = 0x80000000
+INFERENCE_KV_FLOW_BIT = 0x80000000
 
 
-def serving_kv_flows(world):
-    """Decode serving KV flows into (request_slot, shard, src, dst, size)."""
+def inference_kv_flows(world):
+    """Decode inference KV flows into (request_slot, shard, src, dst, size)."""
     flows = []
     for record in world.flow_completions():
         flow_id = record["flow_id"]
-        if not flow_id & SERVING_KV_FLOW_BIT:
+        if not flow_id & INFERENCE_KV_FLOW_BIT:
             continue
-        slot = (flow_id & ~SERVING_KV_FLOW_BIT) >> 4
+        slot = (flow_id & ~INFERENCE_KV_FLOW_BIT) >> 4
         shard = flow_id & 0xF
         flows.append((slot, shard, record["src_node"],
                       record["dst_node"], record["size_bytes"]))
@@ -29,7 +29,7 @@ def serving_kv_flows(world):
 
 
 @unittest.skipIf(GridWorld is None, "Madrona extension is not built")
-class ServingIntegrationTests(unittest.TestCase):
+class InferenceIntegrationTests(unittest.TestCase):
     def _make_world(self, requests,
                     workload_params_table=None, inference_config=None,
                     npu_count=4):
@@ -99,8 +99,8 @@ class ServingIntegrationTests(unittest.TestCase):
             status = world.system_status()
             self.assertFalse(status["failed"], status)
             if status["finished"]:
-                return world.serving_stats()
-        self.fail("serving simulation did not finish")
+                return world.inference_stats()
+        self.fail("inference simulation did not finish")
 
     def test_single_request_runs_prefill_kv_and_decode(self):
         rows = self._run_to_completion(self._make_world([{
@@ -230,7 +230,7 @@ class ServingIntegrationTests(unittest.TestCase):
             (slot, shard, src, 2, 2.0)
             for slot in (0, 1) for shard, src in ((0, 0), (1, 1))
         }
-        self.assertEqual(set(serving_kv_flows(world)), expected)
+        self.assertEqual(set(inference_kv_flows(world)), expected)
 
     def test_gqa_same_head_pairing_wide_p_narrow_d(self):
         # Same-head pairing (p>d): P worker with 4 ranks, D worker with 2
@@ -270,7 +270,7 @@ class ServingIntegrationTests(unittest.TestCase):
             (0, shard, shard, 4 + shard // 2, 2.0)
             for shard in range(4)
         }
-        self.assertEqual(set(serving_kv_flows(world)), expected)
+        self.assertEqual(set(inference_kv_flows(world)), expected)
 
     def test_gqa_same_head_pairing_narrow_p_wide_d(self):
         # Same-head pairing (p<d): P worker with 2 ranks, D worker with 4
@@ -311,7 +311,7 @@ class ServingIntegrationTests(unittest.TestCase):
             (0, shard, shard, 2 + shard * 2, 2.0)
             for shard in range(2)
         }
-        self.assertEqual(set(serving_kv_flows(world)), expected)
+        self.assertEqual(set(inference_kv_flows(world)), expected)
 
     def test_gqa_replication_silent_duplicate_ranks(self):
         # Replication dedup (p_width > kv_heads): P worker with 4 ranks,
@@ -352,7 +352,7 @@ class ServingIntegrationTests(unittest.TestCase):
             (0, shard, shard * 2, 4 + shard, 2.0)
             for shard in range(2)
         }
-        self.assertEqual(set(serving_kv_flows(world)), expected)
+        self.assertEqual(set(inference_kv_flows(world)), expected)
 
     def test_gqa_per_rank_head_share_bytes(self):
         # Head-share byte accounting: P and D both 2 ranks with
@@ -393,7 +393,7 @@ class ServingIntegrationTests(unittest.TestCase):
             (0, shard, shard, 2 + shard, 96.0)
             for shard in range(2)
         }
-        self.assertEqual(set(serving_kv_flows(world)), expected)
+        self.assertEqual(set(inference_kv_flows(world)), expected)
 
     def test_mla_point_to_point_wide_p_narrow_d(self):
         # MLA (kv_mode=1) point-to-point replication (form B): the P
@@ -434,14 +434,14 @@ class ServingIntegrationTests(unittest.TestCase):
         self.assertEqual(rows[0]["kv_shards"], 2)
         self.assertEqual(rows[0]["kv_shards_done"], 2)
         self.assertEqual(rows[0]["kv_bytes"], 72)
-        flows = serving_kv_flows(world)
+        flows = inference_kv_flows(world)
         self.assertEqual(set(flows),
                           {(0, 0, 0, 4, 72.0), (0, 1, 0, 5, 72.0)})
         # kv_done fires only after the last of the d_width streams lands.
         latest_flow_end_ns = max(
             record["end_time_ms"] * 1e6
             for record in world.flow_completions()
-            if record["flow_id"] & SERVING_KV_FLOW_BIT)
+            if record["flow_id"] & INFERENCE_KV_FLOW_BIT)
         self.assertGreaterEqual(rows[0]["kv_done_ns"] + 1,
                                 latest_flow_end_ns)
 
@@ -481,13 +481,13 @@ class ServingIntegrationTests(unittest.TestCase):
         self.assertEqual(rows[0]["kv_shards"], 4)
         self.assertEqual(rows[0]["kv_shards_done"], 4)
         self.assertEqual(rows[0]["kv_bytes"], 72)
-        self.assertEqual(set(serving_kv_flows(world)),
+        self.assertEqual(set(inference_kv_flows(world)),
                           {(0, shard, 0, 2 + shard, 72.0)
                            for shard in range(4)})
         latest_flow_end_ns = max(
             record["end_time_ms"] * 1e6
             for record in world.flow_completions()
-            if record["flow_id"] & SERVING_KV_FLOW_BIT)
+            if record["flow_id"] & INFERENCE_KV_FLOW_BIT)
         self.assertGreaterEqual(rows[0]["kv_done_ns"] + 1,
                                 latest_flow_end_ns)
 
@@ -525,7 +525,7 @@ class ServingIntegrationTests(unittest.TestCase):
         self.assertEqual({row["state"] for row in rows}, {7})
         self.assertEqual({row["kv_shards"] for row in rows}, {2})
         self.assertEqual(
-            set(serving_kv_flows(world)),
+            set(inference_kv_flows(world)),
             {(slot, shard, 0, 4 + shard, 72.0)
              for slot in (0, 1) for shard in (0, 1)})
 

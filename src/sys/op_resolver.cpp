@@ -25,9 +25,9 @@ inline uint64_t saturatingScale(uint64_t value, uint64_t tokens,
 
 }
 
-void resolveServingOp(const InferenceConfigData &config,
+void resolveInferenceOp(const InferenceConfigData &config,
                       const WorkloadParamsTableData &profiles,
-                      const ServingNpuExecution &execution,
+                      const InferenceNpuExecution &execution,
                       ChakraNode &node)
 {
     if (config.data[IC_ENABLED] == 0 || execution.active == 0) {
@@ -80,7 +80,7 @@ void resolveServingOp(const InferenceConfigData &config,
     }
 
     int64_t reference = execution.stage ==
-        static_cast<int32_t>(ServingStage::Prefill)
+        static_cast<int32_t>(InferenceStage::Prefill)
         ? config.data[IC_PREFILL_REFERENCE_TOKENS]
         : config.data[IC_DECODE_REFERENCE_TOKENS];
     if (reference <= 0) {

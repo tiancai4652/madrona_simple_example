@@ -22,7 +22,7 @@
 | 场景 | 状态 | 说明 |
 | --- | --- | --- |
 | **训练仿真** | ✅ 已支持 | 输入 Chakra 训练 workload（如 deepseek-671B 2TP/4EP/2PP 训练） + 拓扑文件，仿真到全部 NPU 完成 |
-| **推理仿真** | 🔜 规划中 | 新增 serving runtime 层（Prefill/Decode 分离、PD Router、KV Transfer），DAG 遍历与网络 DES 完全复用 |
+| **推理仿真** | 🔜 规划中 | 新增 inference runtime 层（Prefill/Decode 分离、PD Router、KV Transfer），DAG 遍历与网络 DES 完全复用 |
 
 ### 2.1 训练仿真是怎么跑的
 
@@ -36,13 +36,13 @@
 
 ### 2.2 推理仿真要做什么（规划中）
 
-推理与训练的执行结构相同（都是 forward 算子依赖图），只是算子的 `duration` / `comm_size` 从**静态 trace** 变为**由 serving batch 动态解析**。规划方案是：
+推理与训练的执行结构相同（都是 forward 算子依赖图），只是算子的 `duration` / `comm_size` 从**静态 trace** 变为**由 inference batch 动态解析**。规划方案是：
 
 ```
 原来训练:  ready node → 读 trace 里的 duration/comm_size → 创建 task
-推理:      ready node → 查 serving batch context → 动态算 duration/comm_size → 创建 task
+推理:      ready node → 查 inference batch context → 动态算 duration/comm_size → 创建 task
                           ↑
-                  新增 serving runtime 层（PD Router / Continuous Batching / KV Transfer Planner）
+                  新增 inference runtime 层（PD Router / Continuous Batching / KV Transfer Planner）
 ```
 
 KV Transfer（P 池 prefill 完成后把 KV cache 发给 D 池）就是一次普通的 `setFlow()` 调用，直接复用网络层。

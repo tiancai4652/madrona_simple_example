@@ -659,12 +659,12 @@ Tensor Manager::inferenceConfigTensor() const
         {impl_->cfg.numWorlds, INFERENCE_CONFIG_LENGTH});
 }
 
-Tensor Manager::servingRequestTensor() const
+Tensor Manager::inferenceRequestTensor() const
 {
-    return impl_->exportTensor(ExportID::ServingRequestData,
+    return impl_->exportTensor(ExportID::InferenceRequestData,
         TensorElementType::Int64,
-        {impl_->cfg.numWorlds, MAX_SERVING_REQUESTS,
-         SERVING_REQUEST_FIELDS});
+        {impl_->cfg.numWorlds, MAX_INFERENCE_REQUESTS,
+         INFERENCE_REQUEST_FIELDS});
 }
 
 Tensor Manager::workloadParamsTableTensor() const
@@ -674,12 +674,12 @@ Tensor Manager::workloadParamsTableTensor() const
         {impl_->cfg.numWorlds, MAX_WORKLOAD_PARAMS_TABLE_ENTRIES, WORKLOAD_PARAMS_TABLE_FIELDS});
 }
 
-Tensor Manager::servingStatsTensor() const
+Tensor Manager::inferenceStatsTensor() const
 {
-    return impl_->exportTensor(ExportID::ServingStatsData,
+    return impl_->exportTensor(ExportID::InferenceStatsData,
         TensorElementType::Int64,
-        {impl_->cfg.numWorlds, MAX_SERVING_REQUESTS,
-         SERVING_STATS_FIELDS});
+        {impl_->cfg.numWorlds, MAX_INFERENCE_REQUESTS,
+         INFERENCE_STATS_FIELDS});
 }
 
 double Manager::simulationTime()

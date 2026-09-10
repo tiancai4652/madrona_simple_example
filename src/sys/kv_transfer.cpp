@@ -9,7 +9,7 @@ namespace madsimple {
 
 namespace {
 
-inline void failServing(Engine &ctx, ServingError error)
+inline void failInference(Engine &ctx, InferenceError error)
 {
     SystemStatus &status = ctx.singleton<SystemStatus>();
     status.failed = 1;
@@ -40,20 +40,20 @@ inline bool gqaLayoutValid(int64_t p_width, int64_t d_width,
 
 }
 
-bool gqaServingLayoutValid(int64_t p_width, int64_t d_width,
+bool gqaInferenceLayoutValid(int64_t p_width, int64_t d_width,
                            int64_t kv_heads)
 {
     return gqaLayoutValid(p_width, d_width, kv_heads);
 }
 
-bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
+bool beginInferenceKvTransfer(Engine &ctx, InferenceRuntime &runtime,
                             const InferenceConfigData &config, int32_t slot)
 {
-    ServingRequestRecord &request = runtime.requests[slot];
+    InferenceRequestRecord &request = runtime.requests[slot];
     const int32_t d_worker =
-        selectServingWorker(runtime, config, ServingStage::Decode);
+        selectInferenceWorker(runtime, config, InferenceStage::Decode);
     if (d_worker < 0) {
-        failServing(ctx, ServingError::InvalidConfig);
+        failInference(ctx, InferenceError::InvalidConfig);
         return false;
     }
     request.d_worker = d_worker;
@@ -69,8 +69,8 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
     const int64_t kv_mode = config.data[IC_KV_MODE];
     const int64_t kv_latent_dim = config.data[IC_KV_LATENT_DIM];
 
-    const ServingWorker &p = runtime.p_workers[request.p_worker];
-    const ServingWorker &d = runtime.d_workers[d_worker];
+    const InferenceWorker &p = runtime.p_workers[request.p_worker];
+    const InferenceWorker &d = runtime.d_workers[d_worker];
 
     if (kv_mode == 1) {
         // MLA layout: the KV cache is a single compressed latent vector
@@ -82,7 +82,7 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
         // shard (1).
         const int64_t kv_factor = config.data[IC_KV_PARTITION_FACTOR];
         if (kv_latent_dim <= 0 || kv_factor < 0 || kv_factor > 1) {
-            failServing(ctx, ServingError::InvalidConfig);
+            failInference(ctx, InferenceError::InvalidConfig);
             return false;
         }
         int64_t latent_bytes = layers;
@@ -90,7 +90,7 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
                              latent_bytes) ||
             !checkedMultiply(latent_bytes, kv_latent_dim, latent_bytes) ||
             !checkedMultiply(latent_bytes, elem_bytes, latent_bytes)) {
-            failServing(ctx, ServingError::CapacityExceeded);
+            failInference(ctx, InferenceError::CapacityExceeded);
             return false;
         }
         request.kv_bytes = latent_bytes;
@@ -102,18 +102,18 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
         // The P0 egress and scaleout links carry d_width competing
         // streams, which the network layer models natively. kv_done
         // fires once all d_width shards arrive, reusing the existing
-        // shard-completion bitmap (d_width <= MAX_SERVING_WORKER_RANKS
+        // shard-completion bitmap (d_width <= MAX_INFERENCE_WORKER_RANKS
         // = 16 < 32, so the mask is safe).
         const int32_t shards = static_cast<int32_t>(d.rank_count);
-        if (shards <= 0 || shards > MAX_SERVING_WORKER_RANKS ||
+        if (shards <= 0 || shards > MAX_INFERENCE_WORKER_RANKS ||
             shards >= 32) {
-            failServing(ctx, ServingError::InvalidConfig);
+            failInference(ctx, InferenceError::InvalidConfig);
             return false;
         }
         request.kv_shards = shards;
         request.kv_done = 0;
         request.kv_done_mask = 0;
-        request.state = ServingRequestState::KvTransferring;
+        request.state = InferenceRequestState::KvTransferring;
         runtime.inflight_kv += shards;
         for (int32_t shard = 0; shard < shards; shard++) {
             net_sys_interface::setFlow(ctx,
@@ -121,17 +121,17 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
                 static_cast<uint64_t>(p.rank_start),
                 static_cast<uint64_t>(d.rank_start + shard),
                 latent_bytes > 0 ? static_cast<uint64_t>(latent_bytes) : 1,
-                makeServingKvFlowID(static_cast<uint32_t>(slot),
+                makeInferenceKvFlowID(static_cast<uint32_t>(slot),
                                     static_cast<uint32_t>(shard)),
                 0);
         }
         return true;
     }
 
-    // Runtime fallback for the GQA head-layout checks (initializeServing
+    // Runtime fallback for the GQA head-layout checks (initializeInference
     // pre-validates every P/D worker pair at startup).
     if (!gqaLayoutValid(p.rank_count, d.rank_count, kv_heads)) {
-        failServing(ctx, ServingError::InvalidConfig);
+        failInference(ctx, InferenceError::InvalidConfig);
         return false;
     }
 
@@ -148,7 +148,7 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
         !checkedMultiply(kv_bytes, heads_per_p_rank, kv_bytes) ||
         !checkedMultiply(kv_bytes, head_dim, kv_bytes) ||
         !checkedMultiply(kv_bytes, elem_bytes, kv_bytes)) {
-        failServing(ctx, ServingError::CapacityExceeded);
+        failInference(ctx, InferenceError::CapacityExceeded);
         return false;
     }
     request.kv_bytes = kv_bytes;
@@ -163,21 +163,21 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
     // (MLA configures kv_mode=1 instead and skips this branch).
     const int64_t kv_factor = config.data[IC_KV_PARTITION_FACTOR];
     if (kv_factor > 0 && kv_factor != p.rank_count) {
-        failServing(ctx, ServingError::InvalidConfig);
+        failInference(ctx, InferenceError::InvalidConfig);
         return false;
     }
     int32_t shards = static_cast<int32_t>(
         heads_per_p_rank > 1 ? p.rank_count : kv_heads);
     if (shards <= 0 || shards > p.rank_count ||
-        shards > MAX_SERVING_WORKER_RANKS) {
-        failServing(ctx, ServingError::InvalidConfig);
+        shards > MAX_INFERENCE_WORKER_RANKS) {
+        failInference(ctx, InferenceError::InvalidConfig);
         return false;
     }
 
     request.kv_shards = shards;
     request.kv_done = 0;
     request.kv_done_mask = 0;
-    request.state = ServingRequestState::KvTransferring;
+    request.state = InferenceRequestState::KvTransferring;
     runtime.inflight_kv += shards;
 
     // Copy factor between consecutive emitting P ranks (1 = no
@@ -204,21 +204,21 @@ bool beginServingKvTransfer(Engine &ctx, ServingRuntime &runtime,
             static_cast<uint64_t>(
                 d.rank_start + first_head * d.rank_count / kv_heads),
             bytes > 0 ? bytes : 1,
-            makeServingKvFlowID(static_cast<uint32_t>(slot),
+            makeInferenceKvFlowID(static_cast<uint32_t>(slot),
                                 static_cast<uint32_t>(shard)),
             0);
     }
     return true;
 }
 
-void collectServingKvCompletions(Engine &ctx)
+void collectInferenceKvCompletions(Engine &ctx)
 {
     const InferenceConfigData &config =
         ctx.get<InferenceConfigData>(ctx.data().init_entity);
     if (config.data[IC_ENABLED] == 0) {
         return;
     }
-    ServingRuntime &runtime = ctx.singleton<ServingRuntime>();
+    InferenceRuntime &runtime = ctx.singleton<InferenceRuntime>();
     if (runtime.initialized == 0) {
         return;
     }
@@ -232,18 +232,18 @@ void collectServingKvCompletions(Engine &ctx)
             ctx.get<NpuFlowFinishedList>(entity);
         for (uint32_t i = 0; i < finished.count; i++) {
             const uint32_t flow_id = finished.flows[i].flow_id;
-            if (!isServingKvFlowID(flow_id)) {
+            if (!isInferenceKvFlowID(flow_id)) {
                 continue;
             }
-            const uint32_t slot = servingKvRequestSlot(flow_id);
-            const uint32_t shard = servingKvShard(flow_id);
+            const uint32_t slot = inferenceKvRequestSlot(flow_id);
+            const uint32_t shard = inferenceKvShard(flow_id);
             if (slot >= static_cast<uint32_t>(runtime.num_requests) ||
                 shard >= 32) {
                 continue;
             }
-            ServingRequestRecord &request = runtime.requests[slot];
+            InferenceRequestRecord &request = runtime.requests[slot];
             const uint32_t bit = 1u << shard;
-            if (request.state != ServingRequestState::KvTransferring ||
+            if (request.state != InferenceRequestState::KvTransferring ||
                 (request.kv_done_mask & bit) != 0) {
                 continue;
             }
@@ -258,7 +258,7 @@ void collectServingKvCompletions(Engine &ctx)
             if (request.kv_done != request.kv_shards) {
                 continue;
             }
-            ServingWorker &worker = runtime.d_workers[request.d_worker];
+            InferenceWorker &worker = runtime.d_workers[request.d_worker];
             worker.pending_kv_tokens -= request.prompt_len;
             if (worker.pending_kv_tokens < 0) {
                 worker.pending_kv_tokens = 0;
@@ -267,14 +267,14 @@ void collectServingKvCompletions(Engine &ctx)
                 request.t_d_start_ns = request.t_kv_done_ns;
                 request.t_first_token_ns = request.t_kv_done_ns;
                 request.t_finish_ns = request.t_kv_done_ns;
-                request.state = ServingRequestState::Finished;
+                request.state = InferenceRequestState::Finished;
                 runtime.finished_requests++;
                 continue;
             }
-            request.state = ServingRequestState::WaitingDecode;
-            if (!enqueueServingRequest(worker, static_cast<int32_t>(slot),
+            request.state = InferenceRequestState::WaitingDecode;
+            if (!enqueueInferenceRequest(worker, static_cast<int32_t>(slot),
                                        request.prompt_len)) {
-                failServing(ctx, ServingError::QueueOverflow);
+                failInference(ctx, InferenceError::QueueOverflow);
             }
         }
     }

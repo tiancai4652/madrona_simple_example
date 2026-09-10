@@ -49,9 +49,9 @@ public:
     MGR_EXPORT madrona::py::Tensor processParamsTensor() const;
     MGR_EXPORT madrona::py::Tensor systemStatusTensor() const;
     MGR_EXPORT madrona::py::Tensor inferenceConfigTensor() const;
-    MGR_EXPORT madrona::py::Tensor servingRequestTensor() const;
+    MGR_EXPORT madrona::py::Tensor inferenceRequestTensor() const;
     MGR_EXPORT madrona::py::Tensor workloadParamsTableTensor() const;
-    MGR_EXPORT madrona::py::Tensor servingStatsTensor() const;
+    MGR_EXPORT madrona::py::Tensor inferenceStatsTensor() const;
 
     MGR_EXPORT double simulationTime();
     MGR_EXPORT int32_t numFlowDefs();

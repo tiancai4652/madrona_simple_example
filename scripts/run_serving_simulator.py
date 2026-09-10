@@ -178,7 +178,7 @@ def main():
                 flush=True)
         if status["failed"]:
             sys.exit(
-                f"error: serving simulation failed at step {step}, "
+                f"error: inference simulation failed at step {step}, "
                 f"error_code={status['error_code']}")
         if status["finished"]:
             finished_step = step
@@ -186,10 +186,10 @@ def main():
 
     if not finished_step:
         sys.exit(
-            f"error: serving simulation did not finish in "
+            f"error: inference simulation did not finish in "
             f"{args.max_steps} steps")
     if args.out_csv:
-        world.write_serving_stats_csv(args.out_csv)
+        world.write_inference_stats_csv(args.out_csv)
         print(f"[serving] wrote statistics to {args.out_csv}")
     print(
         f"[serving] finished at step {finished_step}, "

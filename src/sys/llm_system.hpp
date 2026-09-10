@@ -27,7 +27,7 @@ namespace madsimple::llm_system
                                     ProcessingCommTasks &processingCommTasks,
                                     OneNPUFinishedFlag & oneNPUFinishedFlag,
                                     ChakraNodesForNoDP & chakraNodesForNoDP,
-                                    ServingNpuExecution &servingExecution);
+                                    InferenceNpuExecution &inferenceExecution);
 
         MADRONA_NO_INLINE void sys_removeChakraNodes(Engine &ctx,
                                    NpuID &id,

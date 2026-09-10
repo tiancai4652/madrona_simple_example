@@ -1,15 +1,15 @@
-#include "serving_runtime.hpp"
+#include "inference_runtime.hpp"
 
 #include "kv_transfer.hpp"
 #include "net_sys_interface.hpp"
 #include "pd_router.hpp"
-#include "serving_scheduler.hpp"
+#include "inference_scheduler.hpp"
 
 namespace madsimple {
 
 namespace {
 
-inline void failServing(Engine &ctx, ServingError error)
+inline void failInference(Engine &ctx, InferenceError error)
 {
     SystemStatus &status = ctx.singleton<SystemStatus>();
     status.failed = 1;
@@ -39,7 +39,7 @@ MADRONA_NO_INLINE bool readWorkerSpans(
         const int64_t rank_start = config.data[base + 2 * i];
         const int64_t rank_count = config.data[base + 2 * i + 1];
         if (rank_start < 0 || rank_count <= 0 ||
-            rank_count > MAX_SERVING_WORKER_RANKS ||
+            rank_count > MAX_INFERENCE_WORKER_RANKS ||
             rank_start + rank_count > ctx.data().numNpus) {
             return false;
         }
@@ -51,12 +51,12 @@ MADRONA_NO_INLINE bool readWorkerSpans(
     return true;
 }
 
-MADRONA_NO_INLINE bool initializeServing(
-    Engine &ctx, ServingRuntime &runtime,
+MADRONA_NO_INLINE bool initializeInference(
+    Engine &ctx, InferenceRuntime &runtime,
     const InferenceConfigData &config,
-    const ServingRequestData &input)
+    const InferenceRequestData &input)
 {
-    runtime = ServingRuntime {};
+    runtime = InferenceRuntime {};
     runtime.enabled = config.data[IC_ENABLED] != 0;
     if (runtime.enabled == 0) {
         runtime.initialized = 1;
@@ -65,13 +65,13 @@ MADRONA_NO_INLINE bool initializeServing(
     const int32_t nr = static_cast<int32_t>(config.data[IC_NUM_REQUESTS]);
     const int32_t np = static_cast<int32_t>(config.data[IC_NUM_P_WORKERS]);
     const int32_t nd = static_cast<int32_t>(config.data[IC_NUM_D_WORKERS]);
-    if (nr < 0 || nr > MAX_SERVING_REQUESTS ||
-        np <= 0 || np > MAX_SERVING_WORKERS ||
-        nd <= 0 || nd > MAX_SERVING_WORKERS ||
+    if (nr < 0 || nr > MAX_INFERENCE_REQUESTS ||
+        np <= 0 || np > MAX_INFERENCE_WORKERS ||
+        nd <= 0 || nd > MAX_INFERENCE_WORKERS ||
         config.data[IC_P_MAX_BATCH] <= 0 ||
-        config.data[IC_P_MAX_BATCH] > MAX_SERVING_BATCH ||
+        config.data[IC_P_MAX_BATCH] > MAX_INFERENCE_BATCH ||
         config.data[IC_D_MAX_BATCH] <= 0 ||
-        config.data[IC_D_MAX_BATCH] > MAX_SERVING_BATCH ||
+        config.data[IC_D_MAX_BATCH] > MAX_INFERENCE_BATCH ||
         config.data[IC_KV_PARTITION_FACTOR] < 0 ||
         (config.data[IC_KV_MODE] != 0 && config.data[IC_KV_MODE] != 1) ||
         config.data[IC_KV_LATENT_DIM] < 0 ||
@@ -82,15 +82,15 @@ MADRONA_NO_INLINE bool initializeServing(
         config.data[IC_NUM_KV_HEADS] <= 0 ||
         config.data[IC_HEAD_DIM] <= 0 ||
         config.data[IC_BYTES_PER_ELEM] <= 0) {
-        failServing(ctx, ServingError::InvalidConfig);
+        failInference(ctx, InferenceError::InvalidConfig);
         return false;
     }
 
-    WorkerSpan p_spans[MAX_SERVING_WORKERS] {};
-    WorkerSpan d_spans[MAX_SERVING_WORKERS] {};
+    WorkerSpan p_spans[MAX_INFERENCE_WORKERS] {};
+    WorkerSpan d_spans[MAX_INFERENCE_WORKERS] {};
     if (!readWorkerSpans(ctx, config, IC_P_WORKERS_BASE, np, p_spans) ||
         !readWorkerSpans(ctx, config, IC_D_WORKERS_BASE, nd, d_spans)) {
-        failServing(ctx, ServingError::InvalidRankRange);
+        failInference(ctx, InferenceError::InvalidRankRange);
         return false;
     }
 
@@ -98,7 +98,7 @@ MADRONA_NO_INLINE bool initializeServing(
     for (int32_t i = 0; i < np; i++) {
         for (int32_t j = i + 1; j < np; j++) {
             if (spansOverlap(p_spans[i], p_spans[j])) {
-                failServing(ctx, ServingError::InvalidRankRange);
+                failInference(ctx, InferenceError::InvalidRankRange);
                 return false;
             }
         }
@@ -106,7 +106,7 @@ MADRONA_NO_INLINE bool initializeServing(
     for (int32_t i = 0; i < nd; i++) {
         for (int32_t j = i + 1; j < nd; j++) {
             if (spansOverlap(d_spans[i], d_spans[j])) {
-                failServing(ctx, ServingError::InvalidRankRange);
+                failInference(ctx, InferenceError::InvalidRankRange);
                 return false;
             }
         }
@@ -114,35 +114,35 @@ MADRONA_NO_INLINE bool initializeServing(
     for (int32_t i = 0; i < np; i++) {
         for (int32_t j = 0; j < nd; j++) {
             if (spansOverlap(p_spans[i], d_spans[j])) {
-                failServing(ctx, ServingError::InvalidRankRange);
+                failInference(ctx, InferenceError::InvalidRankRange);
                 return false;
             }
         }
     }
     // GQA same-head pairing pre-validation: every P/D worker pair must
-    // satisfy the head-multiple layout rules (initializeServing runs once
+    // satisfy the head-multiple layout rules (initializeInference runs once
     // per world; per-worker widths vary, so all pairs are checked here).
-    // beginServingKvTransfer re-checks the selected pair at runtime.
+    // beginInferenceKvTransfer re-checks the selected pair at runtime.
     // MLA (kv_mode == 1) has no KV heads to pair: the divisibility matrix
     // is skipped entirely and only the latent width is required.
     const int64_t kv_heads = config.data[IC_NUM_KV_HEADS];
     const int64_t kv_latent_dim = config.data[IC_KV_LATENT_DIM];
     if (config.data[IC_KV_MODE] == 1) {
         if (kv_latent_dim <= 0) {
-            failServing(ctx, ServingError::InvalidConfig);
+            failInference(ctx, InferenceError::InvalidConfig);
             return false;
         }
     } else {
         if (kv_latent_dim != 0) {
-            failServing(ctx, ServingError::InvalidConfig);
+            failInference(ctx, InferenceError::InvalidConfig);
             return false;
         }
         for (int32_t i = 0; i < np; i++) {
             for (int32_t j = 0; j < nd; j++) {
-                if (!gqaServingLayoutValid(
+                if (!gqaInferenceLayoutValid(
                         p_spans[i].rank_count, d_spans[j].rank_count,
                         kv_heads)) {
-                    failServing(ctx, ServingError::InvalidConfig);
+                    failInference(ctx, InferenceError::InvalidConfig);
                     return false;
                 }
             }
@@ -151,12 +151,12 @@ MADRONA_NO_INLINE bool initializeServing(
     // An explicit kv_partition_factor>0 must restate the per-rank GQA
     // layout of every P worker (== its rank_count); intermediate values
     // cannot pair heads cleanly (MLA uses kv_mode=1 and requires factor
-    // ∈ {0, 1} instead — checked by beginServingKvTransfer).
+    // ∈ {0, 1} instead — checked by beginInferenceKvTransfer).
     if (config.data[IC_KV_MODE] == 0 && config.data[IC_KV_PARTITION_FACTOR] > 0) {
         for (int32_t i = 0; i < np; i++) {
             if (config.data[IC_KV_PARTITION_FACTOR] !=
                     p_spans[i].rank_count) {
-                failServing(ctx, ServingError::InvalidConfig);
+                failInference(ctx, InferenceError::InvalidConfig);
                 return false;
             }
         }
@@ -165,21 +165,21 @@ MADRONA_NO_INLINE bool initializeServing(
     runtime.num_requests = nr;
     int64_t previous_arrival = -1;
     for (int32_t i = 0; i < nr; i++) {
-        ServingRequestRecord &request = runtime.requests[i];
-        request.request_id = input.data[i][SR_REQUEST_ID];
-        request.arrival_ns = input.data[i][SR_ARRIVAL_NS];
-        request.prompt_len = input.data[i][SR_PROMPT_LEN];
-        request.output_len = input.data[i][SR_OUTPUT_LEN];
-        request.state = ServingRequestState::WaitingArrival;
+        InferenceRequestRecord &request = runtime.requests[i];
+        request.request_id = input.data[i][IR_REQUEST_ID];
+        request.arrival_ns = input.data[i][IR_ARRIVAL_NS];
+        request.prompt_len = input.data[i][IR_PROMPT_LEN];
+        request.output_len = input.data[i][IR_OUTPUT_LEN];
+        request.state = InferenceRequestState::WaitingArrival;
         if (request.arrival_ns < previous_arrival ||
             request.arrival_ns < 0 || request.prompt_len <= 0 ||
             request.output_len < 0) {
-            failServing(ctx, ServingError::InvalidConfig);
+            failInference(ctx, InferenceError::InvalidConfig);
             return false;
         }
         for (int32_t j = 0; j < i; j++) {
             if (runtime.requests[j].request_id == request.request_id) {
-                failServing(ctx, ServingError::InvalidConfig);
+                failInference(ctx, InferenceError::InvalidConfig);
                 return false;
             }
         }
@@ -196,7 +196,7 @@ MADRONA_NO_INLINE bool initializeServing(
         runtime.d_workers[i].rank_count = d_spans[i].rank_count;
     }
 
-    // Preserve the parsed workload exactly once, then park serving ranks.
+    // Preserve the parsed workload exactly once, then park inference ranks.
     for (int32_t i = 0; i < ctx.data().numNpus; i++) {
         const madrona::Entity entity = ctx.data().npuEntities[i];
         if (entity == madrona::Entity::none()) {
@@ -209,15 +209,15 @@ MADRONA_NO_INLINE bool initializeServing(
             active.nodes[n].type = ChakraNodeType::None;
         }
         ctx.get<OneNPUFinishedFlag>(entity).is_finished = true;
-        ctx.get<ServingNpuExecution>(entity) = ServingNpuExecution {};
+        ctx.get<InferenceNpuExecution>(entity) = InferenceNpuExecution {};
     }
     runtime.initialized = 1;
     return true;
 }
 
 MADRONA_NO_INLINE bool workerGenerationFinished(
-    Engine &ctx, ServingWorker &worker,
-    ServingStage stage, int32_t worker_id)
+    Engine &ctx, InferenceWorker &worker,
+    InferenceStage stage, int32_t worker_id)
 {
     if (worker.busy == 0) {
         return false;
@@ -228,8 +228,8 @@ MADRONA_NO_INLINE bool workerGenerationFinished(
         if (entity == madrona::Entity::none()) {
             return false;
         }
-        const ServingNpuExecution &execution =
-            ctx.get<ServingNpuExecution>(entity);
+        const InferenceNpuExecution &execution =
+            ctx.get<InferenceNpuExecution>(entity);
         if (execution.active == 0 ||
             execution.worker_id != worker_id ||
             execution.stage != static_cast<int32_t>(stage) ||
@@ -241,22 +241,22 @@ MADRONA_NO_INLINE bool workerGenerationFinished(
     for (int32_t rank = 0; rank < worker.rank_count; rank++) {
         const madrona::Entity entity =
             ctx.data().npuEntities[worker.rank_start + rank];
-        ctx.get<ServingNpuExecution>(entity).active = 0;
+        ctx.get<InferenceNpuExecution>(entity).active = 0;
     }
     return true;
 }
 
 }
 
-void servingPreUpdate(Engine &ctx)
+void inferencePreUpdate(Engine &ctx)
 {
     const InferenceConfigData &config =
         ctx.get<InferenceConfigData>(ctx.data().init_entity);
-    ServingRuntime &runtime = ctx.singleton<ServingRuntime>();
+    InferenceRuntime &runtime = ctx.singleton<InferenceRuntime>();
     if (runtime.initialized == 0) {
-        const ServingRequestData &input =
-            ctx.get<ServingRequestData>(ctx.data().init_entity);
-        if (!initializeServing(ctx, runtime, config, input)) {
+        const InferenceRequestData &input =
+            ctx.get<InferenceRequestData>(ctx.data().init_entity);
+        if (!initializeInference(ctx, runtime, config, input)) {
             return;
         }
     }
@@ -269,31 +269,31 @@ void servingPreUpdate(Engine &ctx)
     while (runtime.next_arrival < runtime.num_requests &&
            runtime.requests[runtime.next_arrival].arrival_ns <= now) {
         const int32_t slot = runtime.next_arrival++;
-        ServingRequestRecord &request = runtime.requests[slot];
+        InferenceRequestRecord &request = runtime.requests[slot];
         const int32_t worker =
-            selectServingWorker(runtime, config, ServingStage::Prefill);
+            selectInferenceWorker(runtime, config, InferenceStage::Prefill);
         request.p_worker = worker;
-        request.state = ServingRequestState::WaitingPrefill;
+        request.state = InferenceRequestState::WaitingPrefill;
         if (worker < 0 ||
-            !enqueueServingRequest(runtime.p_workers[worker], slot,
+            !enqueueInferenceRequest(runtime.p_workers[worker], slot,
                                    request.prompt_len)) {
-            failServing(ctx, ServingError::QueueOverflow);
+            failInference(ctx, InferenceError::QueueOverflow);
             return;
         }
     }
-    scheduleServingPrefill(ctx, runtime, config);
-    scheduleServingDecode(ctx, runtime, config);
-    updateServingStats(ctx);
+    scheduleInferencePrefill(ctx, runtime, config);
+    scheduleInferenceDecode(ctx, runtime, config);
+    updateInferenceStats(ctx);
 }
 
-void servingPostUpdate(Engine &ctx)
+void inferencePostUpdate(Engine &ctx)
 {
     const InferenceConfigData &config =
         ctx.get<InferenceConfigData>(ctx.data().init_entity);
     if (config.data[IC_ENABLED] == 0) {
         return;
     }
-    ServingRuntime &runtime = ctx.singleton<ServingRuntime>();
+    InferenceRuntime &runtime = ctx.singleton<InferenceRuntime>();
     if (runtime.initialized == 0 || ctx.singleton<SystemStatus>().failed != 0) {
         return;
     }
@@ -302,15 +302,15 @@ void servingPostUpdate(Engine &ctx)
     const int32_t np =
         static_cast<int32_t>(config.data[IC_NUM_P_WORKERS]);
     for (int32_t w = 0; w < np; w++) {
-        ServingWorker &worker = runtime.p_workers[w];
-        if (!workerGenerationFinished(ctx, worker, ServingStage::Prefill, w)) {
+        InferenceWorker &worker = runtime.p_workers[w];
+        if (!workerGenerationFinished(ctx, worker, InferenceStage::Prefill, w)) {
             continue;
         }
         worker.busy = 0;
         for (int32_t i = 0; i < worker.batch_count; i++) {
             const int32_t slot = worker.batch[i];
             runtime.requests[slot].t_p_finish_ns = now;
-            beginServingKvTransfer(ctx, runtime, config, slot);
+            beginInferenceKvTransfer(ctx, runtime, config, slot);
         }
         worker.batch_count = 0;
         worker.batch_tokens = 0;
@@ -319,15 +319,15 @@ void servingPostUpdate(Engine &ctx)
     const int32_t nd =
         static_cast<int32_t>(config.data[IC_NUM_D_WORKERS]);
     for (int32_t w = 0; w < nd; w++) {
-        ServingWorker &worker = runtime.d_workers[w];
-        if (!workerGenerationFinished(ctx, worker, ServingStage::Decode, w)) {
+        InferenceWorker &worker = runtime.d_workers[w];
+        if (!workerGenerationFinished(ctx, worker, InferenceStage::Decode, w)) {
             continue;
         }
         worker.busy = 0;
         int32_t kept = 0;
         for (int32_t i = 0; i < worker.active_count; i++) {
             const int32_t slot = worker.active[i];
-            ServingRequestRecord &request = runtime.requests[slot];
+            InferenceRequestRecord &request = runtime.requests[slot];
             if (request.output_done == 0) {
                 request.t_first_token_ns = now;
             }
@@ -335,7 +335,7 @@ void servingPostUpdate(Engine &ctx)
             if (request.output_done >= request.output_len) {
                 request.output_done = request.output_len;
                 request.t_finish_ns = now;
-                request.state = ServingRequestState::Finished;
+                request.state = InferenceRequestState::Finished;
                 runtime.finished_requests++;
             } else {
                 worker.active[kept++] = slot;
@@ -346,11 +346,11 @@ void servingPostUpdate(Engine &ctx)
         worker.batch_tokens = 0;
     }
     ctx.singleton<SystemStatus>().finished =
-        servingIsFinished(runtime, config) ? 1 : 0;
-    updateServingStats(ctx);
+        inferenceIsFinished(runtime, config) ? 1 : 0;
+    updateInferenceStats(ctx);
 }
 
-bool servingIsFinished(const ServingRuntime &runtime,
+bool inferenceIsFinished(const InferenceRuntime &runtime,
                        const InferenceConfigData &config)
 {
     if (runtime.finished_requests != runtime.num_requests ||
@@ -363,14 +363,14 @@ bool servingIsFinished(const ServingRuntime &runtime,
     const int32_t nd =
         static_cast<int32_t>(config.data[IC_NUM_D_WORKERS]);
     for (int32_t i = 0; i < np; i++) {
-        const ServingWorker &w = runtime.p_workers[i];
+        const InferenceWorker &w = runtime.p_workers[i];
         if (w.busy || w.queue_count || w.active_count || w.batch_count ||
             w.pending_kv_tokens) {
             return false;
         }
     }
     for (int32_t i = 0; i < nd; i++) {
-        const ServingWorker &w = runtime.d_workers[i];
+        const InferenceWorker &w = runtime.d_workers[i];
         if (w.busy || w.queue_count || w.active_count || w.batch_count ||
             w.pending_kv_tokens) {
             return false;
@@ -379,12 +379,12 @@ bool servingIsFinished(const ServingRuntime &runtime,
     return true;
 }
 
-void updateServingStats(Engine &ctx)
+void updateInferenceStats(Engine &ctx)
 {
-    const ServingRuntime &runtime = ctx.singleton<ServingRuntime>();
-    ServingStatsData &stats = ctx.singleton<ServingStatsData>();
+    const InferenceRuntime &runtime = ctx.singleton<InferenceRuntime>();
+    InferenceStatsData &stats = ctx.singleton<InferenceStatsData>();
     for (int32_t i = 0; i < runtime.num_requests; i++) {
-        const ServingRequestRecord &r = runtime.requests[i];
+        const InferenceRequestRecord &r = runtime.requests[i];
         int64_t *out = stats.data[i];
         out[0] = r.request_id;
         out[1] = r.arrival_ns;

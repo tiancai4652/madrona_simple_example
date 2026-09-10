@@ -347,7 +347,7 @@ def run(trace_file=None):
         for step in range(1, 10_001):
             world.step()
             status = world.system_status()
-            current_stats = world.serving_stats()
+            current_stats = world.inference_stats()
             if trace_stream is not None:
                 _write_frame_log(
                     trace_stream,
@@ -370,7 +370,7 @@ def run(trace_file=None):
         if trace_stream is not None:
             trace_stream.close()
 
-    stats = world.serving_stats()
+    stats = world.inference_stats()
     print(
         f"finished in {step} steps, "
         f"simulation_time_ms={world.simulation_time():.9f}")

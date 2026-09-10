@@ -27,9 +27,9 @@ enum class ExportID : uint32_t {
     ProcessParams,
     SystemStatus,
     InferenceConfigData,
-    ServingRequestData,
+    InferenceRequestData,
     WorkloadParamsTableData,
-    ServingStatsData,
+    InferenceStatsData,
     NumExports,
 };
 

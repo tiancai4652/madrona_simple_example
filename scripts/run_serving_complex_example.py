@@ -222,7 +222,7 @@ def run():
     print(
         "request  P  D  prompt  output  kv_bytes  "
         "p_start  p_finish  kv_done  first_token  finish")
-    for row in world.serving_stats():
+    for row in world.inference_stats():
         print(
             f"{row['request_id']:>7}  "
             f"{row['p_worker']:>1}  "

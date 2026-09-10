@@ -1,4 +1,4 @@
-#include "serving_scheduler.hpp"
+#include "inference_scheduler.hpp"
 
 #include "net_sys_interface.hpp"
 
@@ -12,7 +12,7 @@ inline int64_t nowNs(Engine &ctx)
 }
 
 inline void resetNpuForReplay(Engine &ctx, madrona::Entity entity,
-                              ServingStage stage, int32_t worker_id,
+                              InferenceStage stage, int32_t worker_id,
                               int32_t generation, int32_t request_count,
                               int64_t token_count)
 {
@@ -30,7 +30,7 @@ inline void resetNpuForReplay(Engine &ctx, madrona::Entity entity,
     comm.flow_id = flow_base;
     ctx.get<OneNPUFinishedFlag>(entity).is_finished = false;
     ctx.get<ChakraNodesForNoDP>(entity) = ChakraNodesForNoDP {};
-    ServingNpuExecution &execution = ctx.get<ServingNpuExecution>(entity);
+    InferenceNpuExecution &execution = ctx.get<InferenceNpuExecution>(entity);
     execution.active = 1;
     execution.worker_id = worker_id;
     execution.stage = static_cast<int32_t>(stage);
@@ -41,8 +41,8 @@ inline void resetNpuForReplay(Engine &ctx, madrona::Entity entity,
 
 }
 
-void startServingWork(Engine &ctx, ServingWorker &worker,
-                      ServingStage stage, int32_t worker_id,
+void startInferenceWork(Engine &ctx, InferenceWorker &worker,
+                      InferenceStage stage, int32_t worker_id,
                       int64_t token_count)
 {
     worker.busy = 1;
@@ -62,7 +62,7 @@ void startServingWork(Engine &ctx, ServingWorker &worker,
     }
 }
 
-void scheduleServingPrefill(Engine &ctx, ServingRuntime &runtime,
+void scheduleInferencePrefill(Engine &ctx, InferenceRuntime &runtime,
                             const InferenceConfigData &config)
 {
     const int32_t num_workers =
@@ -73,7 +73,7 @@ void scheduleServingPrefill(Engine &ctx, ServingRuntime &runtime,
     const int64_t max_wait = config.data[IC_P_MAX_WAIT_NS];
     const int64_t now = nowNs(ctx);
     for (int32_t w = 0; w < num_workers; w++) {
-        ServingWorker &worker = runtime.p_workers[w];
+        InferenceWorker &worker = runtime.p_workers[w];
         if (worker.busy != 0 || worker.queue_count == 0) {
             continue;
         }
@@ -104,16 +104,16 @@ void scheduleServingPrefill(Engine &ctx, ServingRuntime &runtime,
             worker.queued_tokens -= request_tokens;
             worker.batch[worker.batch_count++] = slot;
             tokens += request_tokens;
-            ServingRequestRecord &request = runtime.requests[slot];
-            request.state = ServingRequestState::Prefilling;
+            InferenceRequestRecord &request = runtime.requests[slot];
+            request.state = InferenceRequestState::Prefilling;
             request.t_p_start_ns = now;
         }
         worker.batch_id = runtime.next_batch_id++;
-        startServingWork(ctx, worker, ServingStage::Prefill, w, tokens);
+        startInferenceWork(ctx, worker, InferenceStage::Prefill, w, tokens);
     }
 }
 
-void scheduleServingDecode(Engine &ctx, ServingRuntime &runtime,
+void scheduleInferenceDecode(Engine &ctx, InferenceRuntime &runtime,
                            const InferenceConfigData &config)
 {
     const int32_t num_workers =
@@ -124,11 +124,11 @@ void scheduleServingDecode(Engine &ctx, ServingRuntime &runtime,
     const int64_t max_wait = config.data[IC_D_MAX_WAIT_NS];
     const int64_t now = nowNs(ctx);
     for (int32_t w = 0; w < num_workers; w++) {
-        ServingWorker &worker = runtime.d_workers[w];
+        InferenceWorker &worker = runtime.d_workers[w];
         if (worker.busy != 0) {
             continue;
         }
-        // Dual-threshold start gate, symmetric with scheduleServingPrefill.
+        // Dual-threshold start gate, symmetric with scheduleInferencePrefill.
         // With an empty queue the active set launches its next generation
         // right away ("有东西就跑", not gated). With a queued request the
         // generation only starts when d_max_wait_ns == 0 (plain continuous
@@ -147,11 +147,11 @@ void scheduleServingDecode(Engine &ctx, ServingRuntime &runtime,
             if (worker.active_count > 0 && max_tokens > 0) {
                 int64_t active_tokens = 0;
                 for (int32_t i = 0; i < worker.active_count; i++) {
-                    const ServingRequestRecord &r =
+                    const InferenceRequestRecord &r =
                         runtime.requests[worker.active[i]];
                     active_tokens += r.prompt_len + r.output_done;
                 }
-                const ServingRequestRecord &head =
+                const InferenceRequestRecord &head =
                     runtime.requests[worker.queue[0]];
                 head_blocked = active_tokens + head.prompt_len +
                     head.output_done > max_tokens;
@@ -167,13 +167,13 @@ void scheduleServingDecode(Engine &ctx, ServingRuntime &runtime,
         // start this generation.
         int64_t tokens = 0;
         for (int32_t i = 0; i < worker.active_count; i++) {
-            const ServingRequestRecord &r =
+            const InferenceRequestRecord &r =
                 runtime.requests[worker.active[i]];
             tokens += r.prompt_len + r.output_done;
         }
         while (worker.queue_count > 0 && worker.active_count < max_batch) {
             const int32_t slot = worker.queue[0];
-            ServingRequestRecord &r = runtime.requests[slot];
+            InferenceRequestRecord &r = runtime.requests[slot];
             const int64_t context = r.prompt_len + r.output_done;
             if (worker.active_count > 0 && max_tokens > 0 &&
                 tokens + context > max_tokens) {
@@ -186,7 +186,7 @@ void scheduleServingDecode(Engine &ctx, ServingRuntime &runtime,
             worker.queued_tokens -= context;
             worker.active[worker.active_count++] = slot;
             tokens += context;
-            r.state = ServingRequestState::Decoding;
+            r.state = InferenceRequestState::Decoding;
             if (r.t_d_start_ns == 0) {
                 r.t_d_start_ns = now;
             }
@@ -199,7 +199,7 @@ void scheduleServingDecode(Engine &ctx, ServingRuntime &runtime,
             worker.batch[i] = worker.active[i];
         }
         worker.batch_id = runtime.next_batch_id++;
-        startServingWork(ctx, worker, ServingStage::Decode, w, tokens);
+        startInferenceWork(ctx, worker, InferenceStage::Decode, w, tokens);
     }
 }
 

@@ -3,13 +3,13 @@ import numpy as np
 import torch
 from ._madrona_simple_example_cpp import SimpleGridworldSimulator, madrona
 from .chakra import build_process_params, load_chakra_workload
-from .serving import (
-    SERVING_STATS_OUTPUT_FIELDS,
+from .inference import (
+    INFERENCE_STATS_OUTPUT_FIELDS,
     load_request_trace,
     load_workload_params_table,
     pack_request_trace,
     pack_workload_params_table,
-    parse_serving_stats,
+    parse_inference_stats,
 )
 
 __all__ = [
@@ -263,11 +263,11 @@ class GridWorld:
                 raise ValueError(
                     f"network topology is missing NPU host ids: {missing[:8]}")
 
-        serving_trace = None
-        serving_profiles = None
+        inference_trace = None
+        inference_profiles = None
         if inference_config is not None:
-            serving_trace = load_request_trace(request_trace)
-            serving_profiles = load_workload_params_table(workload_params_table)
+            inference_trace = load_request_trace(request_trace)
+            inference_profiles = load_workload_params_table(workload_params_table)
             inference_config.validate(system_config.npu_count)
 
         if prior_weights is None:
@@ -318,8 +318,8 @@ class GridWorld:
 
         self._system_enabled = system_workload is not None
         self._inference_enabled = inference_config is not None
-        self._num_serving_requests = (
-            len(serving_trace) if serving_trace is not None else 0)
+        self._num_inference_requests = (
+            len(inference_trace) if inference_trace is not None else 0)
         if self._system_enabled:
             chakra_data = load_chakra_workload(
                 system_workload, system_config.npu_count)
@@ -334,13 +334,13 @@ class GridWorld:
 
         if self._inference_enabled:
             config_tensor = self.sim.inference_config_tensor().to_torch()
-            request_tensor = self.sim.serving_request_tensor().to_torch()
+            request_tensor = self.sim.inference_request_tensor().to_torch()
             profile_tensor = self.sim.workload_params_table_tensor().to_torch()
             config_row = torch.from_numpy(inference_config.pack(
-                self._num_serving_requests, system_config.npu_count,
-                len(serving_profiles)))
-            request_row = torch.from_numpy(pack_request_trace(serving_trace))
-            profile_row = torch.from_numpy(pack_workload_params_table(serving_profiles))
+                self._num_inference_requests, system_config.npu_count,
+                len(inference_profiles)))
+            request_row = torch.from_numpy(pack_request_trace(inference_trace))
+            profile_row = torch.from_numpy(pack_workload_params_table(inference_profiles))
             for world_idx in range(num_worlds):
                 config_tensor[world_idx].copy_(config_row)
                 request_tensor[world_idx].copy_(request_row)
@@ -396,16 +396,16 @@ class GridWorld:
             for i in range(self.sim.num_flow_completions())
         ]
 
-    def serving_stats(self):
+    def inference_stats(self):
         if not self._inference_enabled:
             return []
-        raw = self.sim.serving_stats_tensor().to_torch()[0].cpu().numpy()
-        return parse_serving_stats(raw, self._num_serving_requests)
+        raw = self.sim.inference_stats_tensor().to_torch()[0].cpu().numpy()
+        return parse_inference_stats(raw, self._num_inference_requests)
 
-    def write_serving_stats_csv(self, output_path):
-        rows = self.serving_stats()
+    def write_inference_stats_csv(self, output_path):
+        rows = self.inference_stats()
         with open(output_path, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=SERVING_STATS_OUTPUT_FIELDS)
+            writer = csv.DictWriter(f, fieldnames=INFERENCE_STATS_OUTPUT_FIELDS)
             writer.writeheader()
             writer.writerows(rows)
 

@@ -6,14 +6,14 @@ from pathlib import Path
 
 import numpy as np
 
-from madrona_simple_example.serving import (
+from madrona_simple_example.inference import (
     INFERENCE_CONFIG_LENGTH,
     InferenceConfig,
     load_request_trace,
     load_workload_params_table,
     pack_request_trace,
     pack_workload_params_table,
-    parse_serving_stats,
+    parse_inference_stats,
 )
 
 IC_P_WORKERS_BASE = 32
@@ -429,14 +429,14 @@ class WorkloadParamsTableTests(unittest.TestCase):
                 load_workload_params_table([row])
 
 
-class ServingStatsTests(unittest.TestCase):
+class InferenceStatsTests(unittest.TestCase):
     def test_metric_formulas(self):
         raw = np.zeros((1, 19), dtype=np.int64)
         raw[0] = [
             9, 100, 120, 200, 200, 200, 240, 300, 500,
             0, 0, 4, 4, 4096, 7, 32, 2, 2, 350,
         ]
-        row = parse_serving_stats(raw)[0]
+        row = parse_inference_stats(raw)[0]
         self.assertEqual(row["ttft_ns"], 250)
         self.assertEqual(row["tpot_ns"], 50.0)
         self.assertEqual(row["e2e_ns"], 400)
@@ -447,7 +447,7 @@ class ServingStatsTests(unittest.TestCase):
         raw[0, 7] = 30
         raw[0, 8] = 30
         raw[0, 18] = 30
-        self.assertEqual(parse_serving_stats(raw)[0]["tpot_ns"], 0.0)
+        self.assertEqual(parse_inference_stats(raw)[0]["tpot_ns"], 0.0)
 
 
 if __name__ == "__main__":

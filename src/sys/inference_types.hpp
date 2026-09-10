@@ -4,14 +4,14 @@
 
 namespace madsimple {
 
-constexpr int32_t MAX_SERVING_REQUESTS = 1024;
-constexpr int32_t MAX_SERVING_WORKERS = 16;
-constexpr int32_t MAX_SERVING_WORKER_RANKS = 16;
-constexpr int32_t MAX_SERVING_QUEUE = MAX_SERVING_REQUESTS;
-constexpr int32_t MAX_SERVING_BATCH = 128;
+constexpr int32_t MAX_INFERENCE_REQUESTS = 1024;
+constexpr int32_t MAX_INFERENCE_WORKERS = 16;
+constexpr int32_t MAX_INFERENCE_WORKER_RANKS = 16;
+constexpr int32_t MAX_INFERENCE_QUEUE = MAX_INFERENCE_REQUESTS;
+constexpr int32_t MAX_INFERENCE_BATCH = 128;
 constexpr int32_t INFERENCE_CONFIG_LENGTH = 256;
-constexpr int32_t SERVING_REQUEST_FIELDS = 4;
-constexpr int32_t SERVING_STATS_FIELDS = 19;
+constexpr int32_t INFERENCE_REQUEST_FIELDS = 4;
+constexpr int32_t INFERENCE_STATS_FIELDS = 19;
 constexpr int32_t MAX_WORKLOAD_PARAMS_TABLE_ENTRIES = 1024;
 constexpr int32_t WORKLOAD_PARAMS_TABLE_FIELDS = 6;
 
@@ -56,26 +56,26 @@ enum InferenceConfigIndex : int32_t {
 };
 
 // Per-worker rank layout lists. Each worker occupies two int64 slots
-// (rank_start, rank_count); up to MAX_SERVING_WORKERS (16) workers fit
+// (rank_start, rank_count); up to MAX_INFERENCE_WORKERS (16) workers fit
 // in the 32-slot window of each pool.
 constexpr int32_t IC_P_WORKERS_BASE = 32;
 constexpr int32_t IC_D_WORKERS_BASE = 64;
-constexpr int32_t IC_WORKER_SLOTS = 2 * MAX_SERVING_WORKERS;
+constexpr int32_t IC_WORKER_SLOTS = 2 * MAX_INFERENCE_WORKERS;
 
-enum ServingRequestInputIndex : int32_t {
-    SR_REQUEST_ID = 0,
-    SR_ARRIVAL_NS = 1,
-    SR_PROMPT_LEN = 2,
-    SR_OUTPUT_LEN = 3,
+enum InferenceRequestInputIndex : int32_t {
+    IR_REQUEST_ID = 0,
+    IR_ARRIVAL_NS = 1,
+    IR_PROMPT_LEN = 2,
+    IR_OUTPUT_LEN = 3,
 };
 
-enum class ServingStage : int32_t {
+enum class InferenceStage : int32_t {
     None = 0,
     Prefill = 1,
     Decode = 2,
 };
 
-enum class ServingRequestState : int32_t {
+enum class InferenceRequestState : int32_t {
     Empty = 0,
     WaitingArrival,
     WaitingPrefill,
@@ -87,7 +87,7 @@ enum class ServingRequestState : int32_t {
     Rejected,
 };
 
-enum class ServingError : int32_t {
+enum class InferenceError : int32_t {
     None = 0,
     InvalidConfig = 100,
     CapacityExceeded = 101,
@@ -100,8 +100,8 @@ struct InferenceConfigData {
     int64_t data[INFERENCE_CONFIG_LENGTH] {};
 };
 
-struct ServingRequestData {
-    int64_t data[MAX_SERVING_REQUESTS][SERVING_REQUEST_FIELDS] {};
+struct InferenceRequestData {
+    int64_t data[MAX_INFERENCE_REQUESTS][INFERENCE_REQUEST_FIELDS] {};
 };
 
 enum WorkloadParamsTableFieldIndex : int32_t {
@@ -117,7 +117,7 @@ struct WorkloadParamsTableData {
     int64_t data[MAX_WORKLOAD_PARAMS_TABLE_ENTRIES][WORKLOAD_PARAMS_TABLE_FIELDS] {};
 };
 
-struct ServingRequestRecord {
+struct InferenceRequestRecord {
     int64_t request_id = 0;
     int64_t arrival_ns = 0;
     int64_t prompt_len = 0;
@@ -137,18 +137,18 @@ struct ServingRequestRecord {
     int32_t kv_shards = 0;
     int32_t kv_done = 0;
     uint32_t kv_done_mask = 0;
-    ServingRequestState state = ServingRequestState::Empty;
+    InferenceRequestState state = InferenceRequestState::Empty;
 };
 
-struct ServingWorker {
+struct InferenceWorker {
     int32_t rank_start = 0;
     int32_t rank_count = 0;
     int32_t queue_count = 0;
-    int32_t queue[MAX_SERVING_QUEUE] {};
+    int32_t queue[MAX_INFERENCE_QUEUE] {};
     int32_t active_count = 0;
-    int32_t active[MAX_SERVING_BATCH] {};
+    int32_t active[MAX_INFERENCE_BATCH] {};
     int32_t batch_count = 0;
-    int32_t batch[MAX_SERVING_BATCH] {};
+    int32_t batch[MAX_INFERENCE_BATCH] {};
     int64_t queued_tokens = 0;
     int64_t pending_kv_tokens = 0;
     int64_t batch_tokens = 0;
@@ -157,7 +157,7 @@ struct ServingWorker {
     int32_t busy = 0;
 };
 
-struct ServingRuntime {
+struct InferenceRuntime {
     int32_t initialized = 0;
     int32_t enabled = 0;
     int32_t num_requests = 0;
@@ -165,52 +165,52 @@ struct ServingRuntime {
     int32_t finished_requests = 0;
     int32_t inflight_kv = 0;
     int64_t next_batch_id = 1;
-    ServingRequestRecord requests[MAX_SERVING_REQUESTS] {};
-    ServingWorker p_workers[MAX_SERVING_WORKERS] {};
-    ServingWorker d_workers[MAX_SERVING_WORKERS] {};
+    InferenceRequestRecord requests[MAX_INFERENCE_REQUESTS] {};
+    InferenceWorker p_workers[MAX_INFERENCE_WORKERS] {};
+    InferenceWorker d_workers[MAX_INFERENCE_WORKERS] {};
 };
 
 // Rows are request slots. Columns:
 // id, arrival, p-start, p-finish, d-route, kv-start, kv-done, d-start,
 // finish, P worker, D worker, output target, output done, kv bytes, state,
 // prompt length, kv shard count, kv shard done, first-token completion.
-struct ServingStatsData {
-    int64_t data[MAX_SERVING_REQUESTS][SERVING_STATS_FIELDS] {};
+struct InferenceStatsData {
+    int64_t data[MAX_INFERENCE_REQUESTS][INFERENCE_STATS_FIELDS] {};
 };
 
-struct ServingNpuExecution {
+struct InferenceNpuExecution {
     int32_t active = 0;
     int32_t worker_id = -1;
-    int32_t stage = static_cast<int32_t>(ServingStage::None);
+    int32_t stage = static_cast<int32_t>(InferenceStage::None);
     int32_t generation = 0;
     int32_t request_count = 0;
     int64_t token_count = 0;
 };
 
-constexpr uint32_t SERVING_KV_FLOW_BIT = 0x80000000u;
-constexpr uint32_t SERVING_KV_SHARD_BITS = 4u;
-constexpr uint32_t SERVING_KV_SHARD_MASK = 0xFu;
+constexpr uint32_t INFERENCE_KV_FLOW_BIT = 0x80000000u;
+constexpr uint32_t INFERENCE_KV_SHARD_BITS = 4u;
+constexpr uint32_t INFERENCE_KV_SHARD_MASK = 0xFu;
 
-inline uint32_t makeServingKvFlowID(uint32_t request_slot, uint32_t shard)
+inline uint32_t makeInferenceKvFlowID(uint32_t request_slot, uint32_t shard)
 {
-    return SERVING_KV_FLOW_BIT |
-        (request_slot << SERVING_KV_SHARD_BITS) |
-        (shard & SERVING_KV_SHARD_MASK);
+    return INFERENCE_KV_FLOW_BIT |
+        (request_slot << INFERENCE_KV_SHARD_BITS) |
+        (shard & INFERENCE_KV_SHARD_MASK);
 }
 
-inline bool isServingKvFlowID(uint32_t flow_id)
+inline bool isInferenceKvFlowID(uint32_t flow_id)
 {
-    return (flow_id & SERVING_KV_FLOW_BIT) != 0;
+    return (flow_id & INFERENCE_KV_FLOW_BIT) != 0;
 }
 
-inline uint32_t servingKvRequestSlot(uint32_t flow_id)
+inline uint32_t inferenceKvRequestSlot(uint32_t flow_id)
 {
-    return (flow_id & ~SERVING_KV_FLOW_BIT) >> SERVING_KV_SHARD_BITS;
+    return (flow_id & ~INFERENCE_KV_FLOW_BIT) >> INFERENCE_KV_SHARD_BITS;
 }
 
-inline uint32_t servingKvShard(uint32_t flow_id)
+inline uint32_t inferenceKvShard(uint32_t flow_id)
 {
-    return flow_id & SERVING_KV_SHARD_MASK;
+    return flow_id & INFERENCE_KV_SHARD_MASK;
 }
 
 }

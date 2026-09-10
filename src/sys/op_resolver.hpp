@@ -4,10 +4,10 @@
 
 namespace madsimple {
 
-MADRONA_NO_INLINE void resolveServingOp(
+MADRONA_NO_INLINE void resolveInferenceOp(
     const InferenceConfigData &config,
     const WorkloadParamsTableData &profiles,
-    const ServingNpuExecution &execution,
+    const InferenceNpuExecution &execution,
     ChakraNode &node);
 
 }

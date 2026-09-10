@@ -12,22 +12,22 @@ namespace madsimple {
 // The scan runs in ascending worker id and only a *strictly smaller* value
 // replaces the incumbent, so equal values keep the earliest (smallest id)
 // worker: explicit tie-break by worker id.
-int32_t selectServingWorker(ServingRuntime &runtime,
+int32_t selectInferenceWorker(InferenceRuntime &runtime,
                             const InferenceConfigData &config,
-                            ServingStage stage)
+                            InferenceStage stage)
 {
-    const bool prefill = stage == ServingStage::Prefill;
+    const bool prefill = stage == InferenceStage::Prefill;
     const int32_t count = static_cast<int32_t>(config.data[
         prefill ? IC_NUM_P_WORKERS : IC_NUM_D_WORKERS]);
     if (count <= 0) {
         return -1;
     }
 
-    ServingWorker *workers = prefill ? runtime.p_workers : runtime.d_workers;
+    InferenceWorker *workers = prefill ? runtime.p_workers : runtime.d_workers;
     int32_t selected = 0;
     int64_t best = INT64_MAX;
     for (int32_t i = 0; i < count; i++) {
-        const ServingWorker &worker = workers[i];
+        const InferenceWorker &worker = workers[i];
         int64_t value = worker.queued_tokens;
         if (prefill) {
             if (worker.busy != 0) {
@@ -37,7 +37,7 @@ int32_t selectServingWorker(ServingRuntime &runtime,
             value += worker.pending_kv_tokens;
             for (int32_t active_idx = 0;
                  active_idx < worker.active_count; active_idx++) {
-                const ServingRequestRecord &request =
+                const InferenceRequestRecord &request =
                     runtime.requests[worker.active[active_idx]];
                 value += request.prompt_len + request.output_done;
             }
@@ -50,10 +50,10 @@ int32_t selectServingWorker(ServingRuntime &runtime,
     return selected;
 }
 
-bool enqueueServingRequest(ServingWorker &worker, int32_t slot,
+bool enqueueInferenceRequest(InferenceWorker &worker, int32_t slot,
                            int64_t tokens)
 {
-    if (worker.queue_count >= MAX_SERVING_QUEUE) {
+    if (worker.queue_count >= MAX_INFERENCE_QUEUE) {
         return false;
     }
     worker.queue[worker.queue_count++] = slot;

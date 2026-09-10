@@ -6,7 +6,7 @@
 #include <madrona/rand.hpp>
 #include <madrona/render/ecs.hpp>
 
-#include "serving_types.hpp"
+#include "inference_types.hpp"
 
 // // ----------- for llm sys -------------------------
 
@@ -585,7 +585,7 @@ namespace madsimple
         ChakraNodesData,
         ProcessParams,
         InferenceConfigData,
-        ServingRequestData,
+        InferenceRequestData,
         WorkloadParamsTableData>
     {};
 
@@ -811,7 +811,7 @@ namespace madsimple
                          NpuID,
                          ChakraNodes,
                          ChakraTemplateNodes,
-                         ServingNpuExecution,
+                         InferenceNpuExecution,
                          HardwareResource,
                          ProcessingCompTask,
                          ProcessingCommTasks,

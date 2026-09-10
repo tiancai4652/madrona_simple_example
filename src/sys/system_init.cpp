@@ -42,7 +42,7 @@ namespace madsimple::llm_system
         registry.registerComponent<NpuID>();
         registry.registerComponent<ChakraNodes>();
         registry.registerComponent<ChakraTemplateNodes>();
-        registry.registerComponent<ServingNpuExecution>();
+        registry.registerComponent<InferenceNpuExecution>();
         registry.registerComponent<HardwareResource>();
         registry.registerComponent<ProcessingCompTask>();
         registry.registerComponent<ProcessingCommTasks>();
@@ -174,7 +174,7 @@ namespace madsimple::llm_system
             int nodeCount = 0;
             parseChakraNodes(chakra_nodes_data, i, ctx.get<ChakraNodes>(npuNode).nodes, nodeCount);
             ctx.get<ChakraTemplateNodes>(npuNode) = ChakraTemplateNodes {};
-            ctx.get<ServingNpuExecution>(npuNode) = ServingNpuExecution {};
+            ctx.get<InferenceNpuExecution>(npuNode) = InferenceNpuExecution {};
             
             // Save nodeCount immediately
             const int savedNodeCount = nodeCount;

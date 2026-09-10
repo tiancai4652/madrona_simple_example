@@ -3,7 +3,7 @@
 #include "sys/llm_system.hpp"
 #include "sys/net_sys_interface.hpp"
 #include "sys/kv_transfer.hpp"
-#include "sys/serving_runtime.hpp"
+#include "sys/inference_runtime.hpp"
 
 #ifndef MADRONA_GPU_MODE
 #include <chrono>
@@ -120,19 +120,19 @@ MADRONA_NO_INLINE void clearNpuFlowFinishStepSystem(
     finished.count = 0;
 }
 
-MADRONA_NO_INLINE void servingPreStepSystem(Engine &ctx, SimDriver &)
+MADRONA_NO_INLINE void inferencePreStepSystem(Engine &ctx, SimDriver &)
 {
-    servingPreUpdate(ctx);
+    inferencePreUpdate(ctx);
 }
 
-MADRONA_NO_INLINE void collectServingKvStepSystem(Engine &ctx, SimDriver &)
+MADRONA_NO_INLINE void collectInferenceKvStepSystem(Engine &ctx, SimDriver &)
 {
-    collectServingKvCompletions(ctx);
+    collectInferenceKvCompletions(ctx);
 }
 
-MADRONA_NO_INLINE void servingPostStepSystem(Engine &ctx, SimDriver &)
+MADRONA_NO_INLINE void inferencePostStepSystem(Engine &ctx, SimDriver &)
 {
-    servingPostUpdate(ctx);
+    inferencePostUpdate(ctx);
 }
 
 MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
@@ -167,9 +167,9 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
     const InferenceConfigData &inference_config =
         ctx.get<InferenceConfigData>(ctx.data().init_entity);
     if (inference_config.data[IC_ENABLED] != 0) {
-        const ServingRuntime &serving = ctx.singleton<ServingRuntime>();
-        status.finished = serving.initialized != 0 &&
-            servingIsFinished(serving, inference_config);
+        const InferenceRuntime &inference = ctx.singleton<InferenceRuntime>();
+        status.finished = inference.initialized != 0 &&
+            inferenceIsFinished(inference, inference_config);
     } else {
         status.finished = ctx.data().numNpus > 0 &&
             finished_npus == ctx.data().numNpus;
@@ -551,9 +551,9 @@ MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
         ctx.get<InferenceConfigData>(sim.init_entity);
     bool system_finished = false;
     if (inference_config.data[IC_ENABLED] != 0) {
-        const ServingRuntime &serving = ctx.singleton<ServingRuntime>();
-        system_finished = serving.initialized != 0 &&
-            servingIsFinished(serving, inference_config);
+        const InferenceRuntime &inference = ctx.singleton<InferenceRuntime>();
+        system_finished = inference.initialized != 0 &&
+            inferenceIsFinished(inference, inference_config);
     } else {
         system_finished = sim.sys_chakra_entities_created && sim.numNpus > 0;
         for (int32_t i = 0; system_finished && i < sim.numNpus; i++) {
@@ -757,16 +757,16 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         pruneSystemEventsStepSystem, SimDriver>>({n0begin});
     auto n0sysinit = builder.addToGraph<ParallelForNode<Engine,
         llm_system::sys_init, ChakraNodesData, ProcessParams>>({n0prune});
-    auto n0servingpre = builder.addToGraph<ParallelForNode<Engine,
-        servingPreStepSystem, SimDriver>>({n0sysinit});
+    auto n0inferencepre = builder.addToGraph<ParallelForNode<Engine,
+        inferencePreStepSystem, SimDriver>>({n0sysinit});
     auto n0checkflow = builder.addToGraph<ParallelForNode<Engine,
         llm_system::sys_checkFlow,
-        NpuID, NodeID, TaskFlows>>({n0servingpre});
+        NpuID, NodeID, TaskFlows>>({n0inferencepre});
     auto n0checkrecv = builder.addToGraph<ParallelForNode<Engine,
         llm_system::sys_checkRecvFlow,
         NpuID, NodeID, RecvNodeFlag>>({n0checkflow});
     auto n0collectkv = builder.addToGraph<ParallelForNode<Engine,
-        collectServingKvStepSystem, SimDriver>>({n0checkrecv});
+        collectInferenceKvStepSystem, SimDriver>>({n0checkrecv});
     auto n0clearfinished = builder.addToGraph<ParallelForNode<Engine,
         clearNpuFlowFinishStepSystem,
         NpuID, NpuFlowFinishedList>>({n0collectkv});
@@ -778,14 +778,14 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         llm_system::sys_processChakraNodes,
         NpuID, ChakraNodes, HardwareResource, ProcessingCompTask,
         ProcessingCommTasks, OneNPUFinishedFlag,
-        ChakraNodesForNoDP, ServingNpuExecution>>({n0remove});
-    auto n0servingpost = builder.addToGraph<ParallelForNode<Engine,
-        servingPostStepSystem, SimDriver>>({n0process});
+        ChakraNodesForNoDP, InferenceNpuExecution>>({n0remove});
+    auto n0inferencepost = builder.addToGraph<ParallelForNode<Engine,
+        inferencePostStepSystem, SimDriver>>({n0process});
     // Serial, but O(active NPUs' own pending counts), not O(total flows
     // ever materialized) -- replaces the old single global
     // PendingSetFlowQueue drain.
     auto n0createFlows = builder.addToGraph<ParallelForNode<Engine,
-        createFlowsFromNpuRequestsStepSystem, SimDriver>>({n0servingpost});
+        createFlowsFromNpuRequestsStepSystem, SimDriver>>({n0inferencepost});
     auto n0prepare = builder.addToGraph<ParallelForNode<Engine,
         preparePendingFlowMetaStepSystem,
         FlowDef, FlowRuntimeState, FlowScheduleState>>({n0createFlows});
