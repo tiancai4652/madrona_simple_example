@@ -43,19 +43,14 @@ MADRONA_NO_INLINE void resetAllocPhaseScratch(
     bool keep_trace)
 {
     hints.has_drain_hint = 0;
+    hints.has_finish_hint = 0;
     hints.drain_hint_t = 0.0;
+    hints.finish_hint_t = 0.0;
     drain_hint.want_clear = 0;
     drain_hint.want_set = 0;
     drain_hint.set_t = 0.0;
     cleanup.num = 0;
     trace.was_dirty_at_alloc = 0;
-    // Finish hints are deliberately NOT cleared here: a clean (steady-state)
-    // port must keep its hint so reducePortCachedHints can fold the earliest
-    // finish gap into cachedNextFinishTime every frame. Dirty ports zero and
-    // recompute their hints in allocOnePort instead. Without this, the cache
-    // goes sentinel whenever a flow lands and no port is dirty, chooseDT
-    // loses sight of in-flight finishes, and a distant system event stretches
-    // dt into a clock jump (see research/event-clock-jump-analysis.md).
     if (keep_trace) {
         trace.has_alloc_trace = 0;
         trace.alloc_port_bw = 0.0;
@@ -729,10 +724,6 @@ void Sim::allocOnePort(
         return;
     }
     trace.was_dirty_at_alloc = 1;
-    // Dirty ports recompute their finish hints from the live tag set below,
-    // so any stale hint value is dropped first.
-    hints.has_finish_hint = 0;
-    hints.finish_hint_t = 0.0;
     // Legacy code called clearBacklogDrainTimer(pid) up-front for every
     // dirty port; we defer the clear to flushPortDrainHints so each port
     // only touches its own hint buffer in the parallel phase.

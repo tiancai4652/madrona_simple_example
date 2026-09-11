@@ -252,15 +252,6 @@ void Sim::reducePortCachedHints(Context &ctx)
         runtime.cachedDrainPortID = -1;
     }
 
-    // Finish-hint folding must be unconditional: every port's hint is a
-    // gap measured against the current frame's `now` (alloc recomputes dirty
-    // ports this frame; progress recomputed clean ports at the end of the
-    // previous frame), so the earliest hint is always valid here. Gating the
-    // fold on was_dirty_at_alloc left steady-state flows invisible to
-    // chooseDT and let a distant system event stretch dt into a clock jump
-    // (see research/event-clock-jump-analysis.md). The cache is fully
-    // recomputed here -- never merged with the previous frame's value.
-    runtime.cachedNextFinishTime = std::numeric_limits<Time>::max();
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
         if (port_e == Entity::none()) {
@@ -268,10 +259,11 @@ void Sim::reducePortCachedHints(Context &ctx)
         }
         PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
         PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
-        (void)trace;
-        if (hints.has_finish_hint != 0) {
-            if (hints.finish_hint_t < runtime.cachedNextFinishTime) {
-                runtime.cachedNextFinishTime = hints.finish_hint_t;
+        if (trace.was_dirty_at_alloc != 0) {
+            if (hints.has_finish_hint != 0) {
+                if (hints.finish_hint_t < runtime.cachedNextFinishTime) {
+                    runtime.cachedNextFinishTime = hints.finish_hint_t;
+                }
             }
         }
         if (hints.has_drain_hint != 0) {
