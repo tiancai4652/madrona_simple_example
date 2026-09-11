@@ -604,6 +604,19 @@ Time Sim::chooseDT(Context &ctx) const
         dt = std::min(dt, system_gap);
     }
 
+    // Inference pipeline handoffs (recorded KV completion -> collect at the
+    // next frame's start, enqueued WaitingDecode -> admission at the next
+    // frame's pre-step) are frame-quantized: their absolute times are the
+    // `now` of the consuming frame. Without a cap, a long dt chosen purely
+    // from future flow/system events (e.g. a late request arrival) pushes
+    // the handoff -- and everything downstream of it -- into that distant
+    // frame, shifting inference timelines depending on unrelated traffic.
+    // Cap dt to the idle quantum so the consumer frame comes right away.
+    if (runtime.inferenceHandoffPending != 0) {
+        constexpr Time kHandoffQuantum = 0.001;
+        dt = std::min(dt, kHandoffQuantum);
+    }
+
     if (dt > 1e12 || dt == timerInactiveSentinel()) {
         dt = 0.001;
     }

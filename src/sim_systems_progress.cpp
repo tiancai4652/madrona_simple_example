@@ -58,16 +58,22 @@ MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
     bool need_check_finish =
         runtime.cachedNextFinishTime < timerInactiveSentinel() &&
         runtime.cachedNextFinishTime <= dt + 1e-12;
-    if (!need_check_finish) {
-        return;
-    }
+    // Finish hints must be recomputed EVERY frame, not only when a finish is
+    // imminent: each hint is a gap measured against `next_now` (= next
+    // frame's now), and alloc only refreshes hints for dirty ports. Skipping
+    // the scan left clean ports with stale hints and let the finish cache go
+    // sentinel, so chooseDT lost sight of in-flight finishes and a distant
+    // system event stretched dt into a clock jump (see
+    // research/event-clock-jump-analysis.md). Only the side effects
+    // (materialized destroys and outbox events) stay gated behind
+    // need_check_finish to preserve the original completion semantics.
 
     auto handle_source_tag = [&](Entity tag_e) {
         trace.progress_source_scan_count += 1;
         FlowTagState &tag = ctx.get<FlowTagState>(tag_e);
         materializeRemaining(tag, next_now);
 
-        if (tag.remaining < 1.0) {
+        if (need_check_finish && tag.remaining < 1.0) {
             tag.remaining = 0.0;
             FlowTagProgress &progress = ctx.get<FlowTagProgress>(tag_e);
             if (progress.pending_source_destroy == 0 &&
@@ -95,12 +101,14 @@ MADRONA_NO_INLINE void Sim::progressFinishedSourcesOnePort(
                 }
             }
         } else if (tag.out_bw > 1e-15) {
+            // A tag whose remaining already crossed below 1.0 while
+            // need_check_finish was false (float boundary) must still seed a
+            // hint -- possibly 0.0 -- so the next frame's cache re-arms the
+            // finish path instead of going sentinel.
             Time t_finish = tag.remaining / tag.out_bw;
-            if (t_finish > 1e-15) {
-                if (!hints.has_finish_hint || t_finish < hints.finish_hint_t) {
-                    hints.has_finish_hint = 1;
-                    hints.finish_hint_t = t_finish;
-                }
+            if (!hints.has_finish_hint || t_finish < hints.finish_hint_t) {
+                hints.has_finish_hint = 1;
+                hints.finish_hint_t = t_finish;
             }
         }
     };
@@ -545,27 +553,29 @@ MADRONA_NO_INLINE void Sim::finishProgressState(Context &ctx, Time dt)
         if (enablePfc != 0) {
             progressExhaustedPfcState(ctx, dt);
         }
-    } else if (runtime.cachedNextFinishTime < timerInactiveSentinel()) {
-        if (runtime.cachedNextFinishTime <= dt + 1e-12) {
-            Time next_finish = timerInactiveSentinel();
-            for (int32_t port_id = 0; port_id < numPorts; port_id++) {
-                Entity port_e = portEntities[port_id];
-                if (port_e == Entity::none()) {
-                    continue;
-                }
-                PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
-                if (hints.has_finish_hint != 0 &&
-                    hints.finish_hint_t < next_finish) {
-                    next_finish = hints.finish_hint_t;
-                }
+    }
+
+    // Finish hints were just recomputed for every port relative to next_now
+    // (= next frame's now), so the cache is re-derived from scratch here.
+    // The old conditional rebuild/decay maintenance produced a sentinel or
+    // stale cache whenever no port happened to be dirty at alloc, which made
+    // chooseDT blind to in-flight finishes and stretched dt into a clock
+    // jump to the next system event (see
+    // research/event-clock-jump-analysis.md).
+    {
+        Time next_finish = timerInactiveSentinel();
+        for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+            Entity port_e = portEntities[port_id];
+            if (port_e == Entity::none()) {
+                continue;
             }
-            runtime.cachedNextFinishTime = next_finish;
-        } else {
-            runtime.cachedNextFinishTime -= dt;
-            if (runtime.cachedNextFinishTime < 1e-15) {
-                runtime.cachedNextFinishTime = 1e-15;
+            const PortCachedHints &hints = ctx.get<PortCachedHints>(port_e);
+            if (hints.has_finish_hint != 0 &&
+                hints.finish_hint_t < next_finish) {
+                next_finish = hints.finish_hint_t;
             }
         }
+        runtime.cachedNextFinishTime = next_finish;
     }
 
     if (runtime.cachedNextDrainTime < timerInactiveSentinel()) {

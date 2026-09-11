@@ -327,6 +327,17 @@ struct SimRuntimeState {
     int32_t pfcControlEventsSeen = 0;
     int32_t progressAllExhausted = 0;
     int32_t cachedDrainPortID = -1;
+    // Set when an inference-layer pipeline handoff is waiting for the next
+    // frame: a KV flow completion was recorded this frame (its consumer,
+    // collectInferenceKvCompletions, runs at the next frame's start) or a
+    // KV-ready request was enqueued on an idle decode worker (its consumer,
+    // scheduleInferenceDecode, runs at the next frame's pre-step). chooseDT
+    // caps dt while this is set so the handoff frame lands right after the
+    // producing frame; without the cap the consumer time quantizes to the
+    // frame cadence and a distant future event (e.g. a late request
+    // arrival) stretches the handoff by the whole dt. Cleared at the start
+    // of every frame.
+    int32_t inferenceHandoffPending = 0;
     double cachedNextDelayedGap = 0.0;
     double cachedNextBacklogGap = 0.0;
     double cachedNextPfcPauseGap = 0.0;

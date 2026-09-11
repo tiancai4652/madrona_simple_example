@@ -616,18 +616,24 @@ class InferenceIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(gap, 0)
         self.assertLess(gap, 5000, "queued request was not admitted "
                                    "immediately at a decode boundary")
-        # The active request is not delayed by the admission: its decode
-        # cadence (first-generation latency and per-generation pace) is
-        # identical to a solo run without the second request. Absolute
-        # wall times may differ between the two runs because the extra
-        # arrival shifts the engine's event-driven clock, but no
-        # generation may stretch once decoding has started.
+        # The active request is not delayed by the admission: its pipeline
+        # up to the first token is exactly the solo run's (the late arrival
+        # must not shift an in-flight request's timeline -- regression for
+        # the frame-quantized handoff / event clock jump). Once r2 joins the
+        # batch, the shared generation legitimately scales with the extra
+        # batch token (duration = base * batch tokens) and r1's KV reads
+        # contend with r2's traffic, so r1 may only stretch, and only by a
+        # bounded amount (one extra batch token here).
         solo = self._run_to_completion(
             self._make_world([requests[0]], inference_config=build()))
-        self.assertEqual(solo[0]["first_token_ns"] - solo[0]["d_start_ns"],
-                         by_id[1]["first_token_ns"] - by_id[1]["d_start_ns"])
-        self.assertEqual(solo[0]["finish_ns"] - solo[0]["first_token_ns"],
-                         by_id[1]["finish_ns"] - by_id[1]["first_token_ns"])
+        self.assertEqual(by_id[1]["d_start_ns"], solo[0]["d_start_ns"])
+        self.assertEqual(by_id[1]["first_token_ns"],
+                         solo[0]["first_token_ns"])
+        self.assertGreaterEqual(by_id[1]["finish_ns"],
+                                solo[0]["finish_ns"])
+        self.assertLess(by_id[1]["finish_ns"] - solo[0]["finish_ns"], 5000,
+                        "active request's decode was grossly stretched by "
+                        "the admission")
 
     def test_decode_queue_empty_runs_generations_without_hold(self):
         # Dual-threshold D gate, queue-empty branch: once the batch is
@@ -693,6 +699,41 @@ class InferenceIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 held_row["finish_ns"] - held_row["first_token_ns"],
                 immediate_row["finish_ns"] - immediate_row["first_token_ns"])
+
+    def test_late_arrival_does_not_stall_inflight_finish_clock(self):
+        # Regression for the event-clock jump (see
+        # docs/research/event-clock-jump-analysis.md): while a request is
+        # mid-flight (in-flight KV / decode generations pending), a second
+        # request arriving much later must not stretch the chosen dt so the
+        # in-flight finishes get deferred to the next system event.
+        # r1's absolute timeline must be identical whether r2 arrives at
+        # t=5000 or not.
+        solo_requests = [{
+            "request_id": 1,
+            "arrival_time_ns": 0,
+            "prompt_len": 1,
+            "output_len": 10,
+        }]
+        duo_requests = solo_requests + [{
+            "request_id": 2,
+            "arrival_time_ns": 5000,
+            "prompt_len": 1,
+            "output_len": 1,
+        }]
+        solo = {row["request_id"]: row for row in self._run_to_completion(
+            self._make_world(solo_requests))}
+        duo = {row["request_id"]: row for row in self._run_to_completion(
+            self._make_world(duo_requests))}
+        self.assertEqual(solo[1]["state"], 7)
+        self.assertEqual(duo[1]["state"], 7)
+        self.assertEqual(duo[2]["state"], 7)
+        for field in ("p_start_ns", "p_finish_ns", "d_route_ns",
+                      "kv_done_ns", "d_start_ns", "first_token_ns",
+                      "finish_ns"):
+            self.assertEqual(
+                solo[1][field], duo[1][field],
+                f"r1 {field} shifted by r2's late arrival: "
+                f"solo={solo[1][field]} duo={duo[1][field]}")
 
     def test_decode_holds_until_max_wait_when_batch_not_full(self):
         # Dual-threshold D gate, hold branch: while r1 keeps decoding, a

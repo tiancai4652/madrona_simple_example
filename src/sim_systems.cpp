@@ -1,5 +1,6 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
+#include "sys/inference_types.hpp"
 
 #include <madrona/sync.hpp>
 
@@ -376,6 +377,9 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
     Entity flow_entity = findFlowMetaEntity(ctx, flow_id);
     if (flow_entity == Entity::none()) {
         return;
+    }
+    if (isInferenceKvFlowID((uint32_t)flow_id)) {
+        ctx.singleton<SimRuntimeState>().inferenceHandoffPending = 1;
     }
 
     const FlowDef &flow = ctx.get<FlowDef>(flow_entity);

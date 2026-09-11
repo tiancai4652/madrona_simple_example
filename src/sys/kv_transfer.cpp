@@ -272,6 +272,7 @@ void collectInferenceKvCompletions(Engine &ctx)
                 continue;
             }
             request.state = InferenceRequestState::WaitingDecode;
+            ctx.singleton<SimRuntimeState>().inferenceHandoffPending = 1;
             if (!enqueueInferenceRequest(worker, static_cast<int32_t>(slot),
                                        request.prompt_len)) {
                 failInference(ctx, InferenceError::QueueOverflow);

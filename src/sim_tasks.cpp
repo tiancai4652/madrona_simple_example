@@ -104,6 +104,7 @@ MADRONA_NO_INLINE void beginScheduleStepSystem(Engine &ctx, SimDriver &driver)
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     runtime.delayedDropCount = 0;
     runtime.delayedPfcDropCount = 0;
+    runtime.inferenceHandoffPending = 0;
     driver.tick += 1;
 }
 
