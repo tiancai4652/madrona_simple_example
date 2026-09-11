@@ -558,17 +558,26 @@ Time Sim::chooseDT(Context &ctx) const
         dt_event = std::min(dt_event, runtime.cachedNextFinishTime);
     }
 
+    // Drain/backlog timers only mark ports dirty so alloc can re-run; the
+    // underlying backlog materialization is exact regardless of when the
+    // timer fires, so letting them pin dt at their raw (often nanosecond)
+    // granularity buys nothing but step count on congested workloads -- the
+    // legacy engine effectively batched these discoveries at microsecond
+    // scale and matched the reference simulator's FCTs. Floor both gaps at
+    // the idle quantum (1us) so the timers fire within one quantum of their
+    // deadline instead of one per frame.
+    constexpr Time kTimerGapFloor = 0.001;
     if (enableBuffer != 0 && runtime.cachedNextDrainTime > 1e-15 &&
         runtime.cachedNextDrainTime < timerInactiveSentinel()) {
-        drain_gap = runtime.cachedNextDrainTime;
-        dt_event = std::min(dt_event, runtime.cachedNextDrainTime);
+        drain_gap = std::max(runtime.cachedNextDrainTime, kTimerGapFloor);
+        dt_event = std::min(dt_event, drain_gap);
     }
 
     if (enableBuffer != 0 &&
         runtime.cachedNextBacklogGap > 1e-15 &&
         runtime.cachedNextBacklogGap < timerInactiveSentinel()) {
-        backlog_gap = runtime.cachedNextBacklogGap;
-        dt_event = std::min(dt_event, runtime.cachedNextBacklogGap);
+        backlog_gap = std::max(runtime.cachedNextBacklogGap, kTimerGapFloor);
+        dt_event = std::min(dt_event, backlog_gap);
     }
 
     if (enablePfc != 0) {

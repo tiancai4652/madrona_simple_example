@@ -91,6 +91,10 @@ def should_stop(world):
     )
 
 
+def sim_failed(world):
+    return world.system_status()["failed"]
+
+
 def _is_log_capture_mode():
     """Return True when the run is generating raw [INIT]/[SYS] logs that will
     be parsed by check/run_parity.py. In that mode any [parity] trace from the
@@ -170,6 +174,20 @@ def main():
             flush=True,
         )
 
+    steps = 0
+    t0 = time.time()
+    t_prev = t0
+    steps_prev = 0
+    step_phase_rows = []
+    failed = False
+    if not log_capture_mode:
+        print(
+            f"[parity] start loop: max_steps={args.max_steps} "
+            f"gpu={bool(args.gpu)} pfc={bool(args.pfc)} "
+            f"progress_every={progress_every}",
+            flush=True,
+        )
+
     while steps < args.max_steps and not should_stop(world):
         world.step()
         steps += 1
@@ -177,6 +195,16 @@ def main():
         if phase_times.get("step", 0) == 0:
             phase_times["step"] = steps
         step_phase_rows.append(phase_times)
+
+        if not failed and sim_failed(world):
+            failed = True
+            status = world.system_status()
+            print(
+                f"[parity] FATAL: sim reported failed at step={steps} "
+                f"error_code={status['error_code']}",
+                flush=True,
+            )
+            break
 
         if (
             not log_capture_mode
@@ -205,7 +233,7 @@ def main():
         print(
             f"[parity] loop done: steps={steps} "
             f"elapsed={time.time() - t0:.1f}s "
-            f"stopped_cleanly={should_stop(world)}",
+            f"stopped_cleanly={should_stop(world) and not failed}",
             flush=True,
         )
 
@@ -242,13 +270,18 @@ def main():
         "num_flow_completions": len(world.flow_completions()),
         "completion_csv": str(completion_path),
         "step_phase_times_csv": str(phase_times_path),
-        "stopped_cleanly": should_stop(world),
+        "stopped_cleanly": should_stop(world) and not failed,
+        "failed": failed,
     }
+    if failed:
+        summary["error_code"] = world.system_status()["error_code"]
 
     summary_path = out_dir / "madrona_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     if os.environ.get("parity_print_summary") not in (None, "", "0"):
         print(json.dumps(summary, indent=2, sort_keys=True))
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

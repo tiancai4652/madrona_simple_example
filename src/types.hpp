@@ -103,23 +103,27 @@ constexpr int32_t MAX_PAUSED_UPSTREAMS = 384;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
 // batches, so they must cover the largest same-port fan-in in one step.
-constexpr int32_t MAX_PORT_CLEANUP = 256;
-constexpr int32_t MAX_PORT_OUTBOX = 256;
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 256;
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 256;
-constexpr int32_t MAX_TAGS_PER_PORT = 64;
+// Sized for the leafspine1024 alltoall workload (up to ~3072 flows fan in on
+// one leaf uplink port at the same instant); pushDelayedEvent now FAILS the
+// run loudly on overflow instead of silently dropping, so underestimating a
+// future workload surfaces as error_code=6 rather than wrong results.
+constexpr int32_t MAX_PORT_CLEANUP = 4096;
+constexpr int32_t MAX_PORT_OUTBOX = 4096;
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 4096;
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 4096;
+constexpr int32_t MAX_TAGS_PER_PORT = 4096;
 // Do not create FlowTag entities inside the single-threaded GPU initWorlds
 // kernel. Tags are allocated lazily by createTagOnPort and recycled through
 // PortTagPool after first use.
 constexpr int32_t INITIAL_TAGS_PER_PORT = 0;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 192;
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 256;
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 256;
-constexpr int32_t MAX_PORT_INBOX_PFC = 384;
-constexpr int32_t MAX_PORT_CREATE = 256;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 4096;
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 4096;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 4096;
+constexpr int32_t MAX_PORT_INBOX_PFC = 1024;
+constexpr int32_t MAX_PORT_CREATE = 4096;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
-constexpr int32_t MAX_PORT_COMPLETE = 320;
+constexpr int32_t MAX_PORT_COMPLETE = 4096;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 // Time-skip event queue (SystemEventQueue) capacity. Raised from 1024 so the
 // sys-layer COMP/COMM scheduling events can't silently fill the queue and be
@@ -322,6 +326,10 @@ struct SimRuntimeState {
     int32_t numDelayedEvents = 0;
     int32_t numActiveTags = 0;
     int32_t numSourceTags = 0;
+    // Cumulative since sim start (NOT reset per frame): delayed-event drops
+    // are a silent-correctness hazard (the affected flow never materializes
+    // and the sim later quiesces as if finished), so the counters must
+    // survive until updateSystemStatus latches SystemStatus.failed on them.
     int32_t delayedDropCount = 0;
     int32_t delayedPfcDropCount = 0;
     int32_t pfcControlEventsSeen = 0;

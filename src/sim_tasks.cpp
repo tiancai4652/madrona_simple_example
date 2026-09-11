@@ -7,6 +7,7 @@
 
 #ifndef MADRONA_GPU_MODE
 #include <chrono>
+#include <cstdio>
 #endif
 
 using namespace madrona;
@@ -102,8 +103,6 @@ MADRONA_NO_INLINE void beginScheduleStepSystem(Engine &ctx, SimDriver &driver)
         sim.systemLogStep += 1;
     }
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
-    runtime.delayedDropCount = 0;
-    runtime.delayedPfcDropCount = 0;
     runtime.inferenceHandoffPending = 0;
     driver.tick += 1;
 }
@@ -140,6 +139,21 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
                                                     SimDriver &)
 {
     SystemStatus &status = ctx.singleton<SystemStatus>();
+    // Delayed-event drops are silent correctness hazards: the flow whose
+    // arrival event was dropped never materializes a tag and the sim later
+    // quiesces looking like a clean finish (see MAX_PORT_DELAYED_EVENTS).
+    // The counters are cumulative, so a single drop anywhere fails the run.
+    // error_code 6 = delayed event drop (4/5 are the NPU overflow codes).
+    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    if (runtime.delayedDropCount != 0 && status.failed == 0) {
+        std::fprintf(stderr,
+            "[SIM][FATAL] delayed events dropped: count=%d "
+            "(pfc=%d) -- results are incomplete; raise the per-port "
+            "event queue capacity or add overflow backpressure\n",
+            runtime.delayedDropCount, runtime.delayedPfcDropCount);
+        status.failed = 1;
+        status.error_code = 6;
+    }
     if (!ctx.data().sys_chakra_entities_created) {
         return;
     }
