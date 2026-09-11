@@ -646,6 +646,34 @@ MADRONA_NO_INLINE bool allocOnePortDefault(
     double &out_total)
 {
     PriorityBuffer &pb = port_buf.prior_bufs[0];
+    // Phantom-chunk recovery (B1, 2026-09-11): pop FIFO-head chunks whose
+    // weights are all inactive -- every flow the chunk was created for has
+    // either no tag on this port anymore or a fully drained ledger
+    // (in_bw == 0 && backlog == 0), i.e. each owning flow already completed
+    // from this port's perspective. The chunk bytes stranded behind them are
+    // phantom accounting: the chunk ledger (bytes integrated from
+    // net_buffer_rate) and the per-tag backlog ledger drift apart under PFC
+    // pause/resume stalls, so completed flows can leave their share behind.
+    // Because chunks drain strictly FIFO (assignChunkWeightedOutBW only ever
+    // serves the head chunk) and live_sum_in is zero in that state, a phantom
+    // head chunk permanently starves the port: out_bw stays 0, the buffer
+    // never drains, and every live flow queued behind it stalls forever --
+    // the diagnosed T2d/leafspine1024 freeze (22 host ports stuck paused
+    // with their leaf detect ports holding real, undrainable ingress-tag
+    // backlogs; see CHECKPOINT-REPORT §十五/§十六). Evicting the phantom head
+    // chunks lets alloc resume with the next chunk. On healthy paths the
+    // head chunk always has at least one active weight, so the loop body
+    // never runs and behaviour is unchanged.
+    while (pb.num_chunks > 0) {
+        const BufferChunk &head = pb.buf_chunks[pb.head];
+        if (activeChunkWeightSum(sim, ctx, port_id, head) > 1e-15) {
+            break;
+        }
+        pb.buf_cnt = std::max(0.0, pb.buf_cnt - head.chunk_bytes);
+        pb.buf_chunks[pb.head] = BufferChunk {};
+        pb.head = (pb.head + 1) % MAX_BUFFER_CHUNKS;
+        pb.num_chunks -= 1;
+    }
     bool has_buffer = pb.buf_cnt > 1e-15 && pb.num_chunks > 0;
     if (!has_buffer && live_sum_in < 1e-18) {
         return false;

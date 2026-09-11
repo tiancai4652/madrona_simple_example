@@ -176,6 +176,10 @@ MADRONA_NO_INLINE void Sim::applyPfcTimerOnePort(
 // ptxas finish per-TU optimisation under `-dlto -dopt=on
 // --extra-device-vectorization`; the monolithic form used to hang the
 // compiler on this TU.
+//
+// Ingress gating is `pfc_check_target || any pause_active` (stagnation
+// recovery for paused ports, see pfcDetectOnePortIngress); egress gating is
+// unchanged (this port's dirty flag).
 MADRONA_NO_INLINE void Sim::markPfcIngressCheckTargets(Context &ctx)
 {
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
@@ -429,13 +433,40 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     // markPfcIngressCheckTargets mirrors Jiuding's legacy ingress_check set:
     // scan dirty egress ports' live PortTagLists, then mark each contributing
     // ingress port exactly once before this per-port detect pass.
-    if (state.pfc_check_target == 0) {
+    //
+    // Stagnation-recovery visibility fix (B1, 2026-09-11): the check-target
+    // set is dirty-driven -- it only contains ingress ports that own tags on
+    // a *dirty* egress port this frame. Once the whole system goes static
+    // (no dirty sources, all timers drained), a port stuck in
+    // pause_active=1 is never a check target again, so the XON resume below
+    // can never be re-evaluated and the paused upstream stays paused forever
+    // (diagnosed freeze: 22 host ports paused with materialized buf 0 << xon,
+    // resume timers all inactive, zero pause cycles -- root cause A1 in
+    // CHECKPOINT-REPORT §十五). Resume evaluation for an already-paused port
+    // must therefore not depend on the dirty gate: while any
+    // pause_active[pri] != 0, run the exact same detect body below every
+    // frame (same materialization / comparison / emit path as a check
+    // target). Once pause_active clears, the port reverts to pure
+    // check-target gating, so healthy paths see no new events.
+    bool stagnation_check = false;
+    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+        if (state.pause_active[pri] != 0) {
+            stagnation_check = true;
+            break;
+        }
+    }
+    if (state.pfc_check_target == 0 && !stagnation_check) {
         return;
     }
     if (cfg.pfc_enabled == 0) {
         return;
     }
     if (traceModeEnabled()) {
+        // Trace semantics note: with the stagnation_check bypass above, a
+        // paused port now enters the detect body every frame even when it is
+        // not in the dirty-derived check-target set, so pfc_detect_checked
+        // counts "detect ran on this port this frame" (it can now be 1 on
+        // frames where pfc_check_target == 0).
         trace.pfc_detect_checked = 1;
     }
 
