@@ -558,25 +558,27 @@ Time Sim::chooseDT(Context &ctx) const
         dt_event = std::min(dt_event, runtime.cachedNextFinishTime);
     }
 
-    // Drain/backlog timers only mark ports dirty so alloc can re-run; the
-    // underlying backlog materialization is exact regardless of when the
-    // timer fires, so letting them pin dt at their raw (often nanosecond)
-    // granularity buys nothing but step count on congested workloads -- the
-    // legacy engine effectively batched these discoveries at microsecond
-    // scale and matched the reference simulator's FCTs. Floor both gaps at
-    // the idle quantum (1us) so the timers fire within one quantum of their
-    // deadline instead of one per frame.
-    constexpr Time kTimerGapFloor = 0.001;
+    // Drain/backlog timer gaps participate in dt selection with NO floor:
+    // the timers re-arm precisely because the engine does not know whether
+    // an allocation mode switch (buffer empty -> direct, queue head chunk
+    // fully served -> next chunk) is due at their deadline. Clamping these
+    // gaps upward (a previous revision used a 1us floor as a livelock-era
+    // performance stopgap) deletes wake-ups and silently accepts stale
+    // allocation for up to the floor quantum -- an approximation that one
+    // workload's bit-exact match cannot certify. dt stays strict-min: extra
+    // wake-ups never change exact results, removed ones can. The original
+    // ns-scale pinning this floor masked was the phantom-chunk livelock,
+    // fixed at the root (see CHECKPOINT-REPORT §19).
     if (enableBuffer != 0 && runtime.cachedNextDrainTime > 1e-15 &&
         runtime.cachedNextDrainTime < timerInactiveSentinel()) {
-        drain_gap = std::max(runtime.cachedNextDrainTime, kTimerGapFloor);
+        drain_gap = runtime.cachedNextDrainTime;
         dt_event = std::min(dt_event, drain_gap);
     }
 
     if (enableBuffer != 0 &&
         runtime.cachedNextBacklogGap > 1e-15 &&
         runtime.cachedNextBacklogGap < timerInactiveSentinel()) {
-        backlog_gap = std::max(runtime.cachedNextBacklogGap, kTimerGapFloor);
+        backlog_gap = runtime.cachedNextBacklogGap;
         dt_event = std::min(dt_event, backlog_gap);
     }
 
