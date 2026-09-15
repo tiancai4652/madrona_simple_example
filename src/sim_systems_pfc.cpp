@@ -177,8 +177,8 @@ MADRONA_NO_INLINE void Sim::applyPfcTimerOnePort(
 // --extra-device-vectorization`; the monolithic form used to hang the
 // compiler on this TU.
 //
-// Ingress gating is `pfc_check_target || any pause_active` (stagnation
-// recovery for paused ports, see pfcDetectOnePortIngress); egress gating is
+// Ingress gating is `pfc_check_target` (dirty-derived) plus the
+// starvation watchdog in markPfcIngressCheckTargets; egress gating is
 // unchanged (this port's dirty flag).
 MADRONA_NO_INLINE void Sim::markPfcIngressCheckTargets(Context &ctx)
 {
@@ -225,6 +225,45 @@ MADRONA_NO_INLINE void Sim::markPfcIngressCheckTargets(Context &ctx)
                         egress_port, portToNode[egress_port], tag);
                 }
             }
+        }
+    }
+
+    // Starvation watchdog (B1 follow-up, 2026-09-11): a paused ingress port
+    // that is not in the dirty-derived check-target set gets no resume
+    // evaluation, and once the system goes fully static it never re-enters
+    // the set (diagnosed 1024/T2d freeze at deep queues: paused ports with
+    // materialized buf 0 << xon, all timers inactive -- CHECKPOINT-REPORT
+    // section 15). A port that stays paused outside the target set for
+    // kPfcStagnationFrames consecutive frames is therefore forced into the
+    // detect pass below. In healthy congestion episodes a real dirty egress
+    // re-marks the target within a few frames, so the counter resets and the
+    // watchdog never fires -- unlike the first fix revision (which ran the
+    // detect body every frame while paused and shifted resume timing enough
+    // to break the workload's symmetric completion pattern: bisect4 +
+    // ablation matrix, CHECKPOINT-REPORT section 19).
+    constexpr int32_t kPfcStagnationFrames = 8;
+    for (int32_t port_id = 0; port_id < numPorts; port_id++) {
+        Entity port_e = portEntities[port_id];
+        if (port_e == Entity::none()) {
+            continue;
+        }
+        PortPfcState &pfc = ctx.get<PortPfcState>(port_e);
+        bool paused = false;
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            if (pfc.pause_active[pri] != 0) {
+                paused = true;
+                break;
+            }
+        }
+        if (paused && pfc.pfc_check_target == 0) {
+            if (pfc.stalled_frames < kPfcStagnationFrames) {
+                pfc.stalled_frames += 1;
+            }
+            if (pfc.stalled_frames >= kPfcStagnationFrames) {
+                pfc.pfc_check_target = 1;
+            }
+        } else {
+            pfc.stalled_frames = 0;
         }
     }
 }
@@ -434,28 +473,13 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     // scan dirty egress ports' live PortTagLists, then mark each contributing
     // ingress port exactly once before this per-port detect pass.
     //
-    // Stagnation-recovery visibility fix (B1, 2026-09-11): the check-target
-    // set is dirty-driven -- it only contains ingress ports that own tags on
-    // a *dirty* egress port this frame. Once the whole system goes static
-    // (no dirty sources, all timers drained), a port stuck in
-    // pause_active=1 is never a check target again, so the XON resume below
-    // can never be re-evaluated and the paused upstream stays paused forever
-    // (diagnosed freeze: 22 host ports paused with materialized buf 0 << xon,
-    // resume timers all inactive, zero pause cycles -- root cause A1 in
-    // CHECKPOINT-REPORT §十五). Resume evaluation for an already-paused port
-    // must therefore not depend on the dirty gate: while any
-    // pause_active[pri] != 0, run the exact same detect body below every
-    // frame (same materialization / comparison / emit path as a check
-    // target). Once pause_active clears, the port reverts to pure
-    // check-target gating, so healthy paths see no new events.
-    bool stagnation_check = false;
-    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
-        if (state.pause_active[pri] != 0) {
-            stagnation_check = true;
-            break;
-        }
-    }
-    if (state.pfc_check_target == 0 && !stagnation_check) {
+    // Stagnation-recovery visibility fix (B1, 2026-09-11): resume
+    // evaluation for a paused port must not depend solely on the dirty gate
+    // (see the starvation watchdog in markPfcIngressCheckTargets, which
+    // force-marks pfc_check_target for ports paused outside the target set
+    // for too long). The detect body below stays bit-identical for both the
+    // dirty-derived and the watchdog-triggered passes.
+    if (state.pfc_check_target == 0) {
         return;
     }
     if (cfg.pfc_enabled == 0) {

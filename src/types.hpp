@@ -97,33 +97,37 @@ constexpr int32_t PFC_MAX_PRIORITY = 1;
 
 // Must be >= the maximum number of flows/events per hot port so buffer chunks
 // and per-port queues do not silently drop same-timestamp fan-in.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 64;
+constexpr int32_t MAX_CHUNK_WEIGHTS = 256;
 constexpr int32_t MAX_BUFFER_CHUNKS = 16;
-constexpr int32_t MAX_PAUSED_UPSTREAMS = 384;
+constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
 // batches, so they must cover the largest same-port fan-in in one step.
-// Sized for the leafspine1024 alltoall workload (up to ~3072 flows fan in on
-// one leaf uplink port at the same instant); pushDelayedEvent now FAILS the
-// run loudly on overflow instead of silently dropping, so underestimating a
-// future workload surfaces as error_code=6 rather than wrong results.
-constexpr int32_t MAX_PORT_CLEANUP = 4096;
-constexpr int32_t MAX_PORT_OUTBOX = 4096;
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 4096;
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 4096;
-constexpr int32_t MAX_TAGS_PER_PORT = 4096;
+// Restored to the leafspine1024-d128 tuned values (62232f1 shrank them for a
+// different experiment, which caused silent arrival-event loss and ghost
+// flows here; the B1 iteration briefly jumped them to 4096, but deep queues
+// changed the engine's event coalescing regime -- livelock + non-symmetric
+// per-flow completion timing, see CHECKPOINT-REPORT §19 ablation matrix).
+// pushDelayedEvent now FAILS loudly on overflow (error_code=6), so an
+// underestimated capacity in a future workload surfaces as a failed run
+// rather than wrong results. Per-experiment tuning stays compile-time.
+constexpr int32_t MAX_PORT_CLEANUP = 512;
+constexpr int32_t MAX_PORT_OUTBOX = 512;
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 512;
+constexpr int32_t MAX_TAGS_PER_PORT = 256;
 // Do not create FlowTag entities inside the single-threaded GPU initWorlds
 // kernel. Tags are allocated lazily by createTagOnPort and recycled through
 // PortTagPool after first use.
 constexpr int32_t INITIAL_TAGS_PER_PORT = 0;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 4096;
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 4096;
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 4096;
-constexpr int32_t MAX_PORT_INBOX_PFC = 1024;
-constexpr int32_t MAX_PORT_CREATE = 4096;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 448;
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 512;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 512;
+constexpr int32_t MAX_PORT_INBOX_PFC = 64;
+constexpr int32_t MAX_PORT_CREATE = 512;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
-constexpr int32_t MAX_PORT_COMPLETE = 4096;
+constexpr int32_t MAX_PORT_COMPLETE = 320;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 // Time-skip event queue (SystemEventQueue) capacity. Raised from 1024 so the
 // sys-layer COMP/COMM scheduling events can't silently fill the queue and be
@@ -503,6 +507,9 @@ struct PortPfcConfig {
 struct PortPfcState {
     int32_t paused[PFC_MAX_PRIORITY] {};
     int32_t pause_active[PFC_MAX_PRIORITY] {};
+    // Consecutive frames this port has been pause_active while outside the
+    // dirty-derived check-target set (starvation watchdog, sim_systems_pfc).
+    int32_t stalled_frames = 0;
     int32_t paused_upstream_count[PFC_MAX_PRIORITY] {};
     int32_t paused_upstreams[PFC_MAX_PRIORITY][MAX_PAUSED_UPSTREAMS] {};
     int32_t pfc_cnt[PFC_MAX_PRIORITY] {};
