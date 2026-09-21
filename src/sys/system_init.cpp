@@ -48,6 +48,7 @@ namespace madsimple::llm_system
         registry.registerComponent<ProcessingCommTasks>();
         registry.registerComponent<OneNPUFinishedFlag>();
         registry.registerComponent<ChakraNodesForNoDP>();
+        registry.registerComponent<ChakraReadyState>();
         registry.registerComponent<NpuFlowPairState>();
         // registry.registerArchetype<NpuNode>();
         REGISTER_ARCHETYPE_WITH_NAME(registry, NpuNode);
@@ -173,6 +174,9 @@ namespace madsimple::llm_system
             ctx.get<NpuID>(npuNode).test_collective_comm_ring = false;
             int nodeCount = 0;
             parseChakraNodes(chakra_nodes_data, i, ctx.get<ChakraNodes>(npuNode).nodes, nodeCount);
+            // B1: build the incremental ready set once at parse time.
+            buildChakraReadyState(ctx.get<ChakraNodes>(npuNode),
+                                  ctx.get<ChakraReadyState>(npuNode));
             ctx.get<ChakraTemplateNodes>(npuNode) = ChakraTemplateNodes {};
             ctx.get<InferenceNpuExecution>(npuNode) = InferenceNpuExecution {};
             
@@ -198,10 +202,44 @@ namespace madsimple::llm_system
             ctx.data().npuEntities[i] = npuNode;
             ctx.data().numNpus = static_cast<int32_t>(i + 1);
 
+            // A1/A7 draft components: makeEntity<NpuNode>() runs no
+            // component constructors, so every component must be assigned
+            // explicitly here or it starts as raw memory (this bit us once
+            // -- garbage draft.count caused wild writes, see DECISIONS.md
+            // 期2 E12; a second occurrence during C1 deleted the four
+            // NpuFlow* assignments below -- garbage finished.count read as
+            // 3.2e9 and crashed the A1 draft node, see E16).
             ctx.get<NpuFlowInbox>(npuNode) = NpuFlowInbox {};
             ctx.get<NpuFlowActiveList>(npuNode) = NpuFlowActiveList {};
             ctx.get<NpuFlowFinishedList>(npuNode) = NpuFlowFinishedList {};
             ctx.get<NpuFlowPairState>(npuNode) = NpuFlowPairState {};
+            ctx.get<NpuKvCollectDraft>(npuNode) = NpuKvCollectDraft {};
+            ctx.get<NpuFlowScheduleDraft>(npuNode) = NpuFlowScheduleDraft {};
+            // C1: per-NPU comm entity pool + retire draft (same E12 rule).
+            ctx.get<NpuCommEntityPool>(npuNode) = NpuCommEntityPool {};
+            ctx.get<NpuCommRetireDraft>(npuNode) = NpuCommRetireDraft {};
+            NpuCommEntityPool &comm_pool = ctx.get<NpuCommEntityPool>(npuNode);
+            for (uint32_t pool_idx = 0;
+                 pool_idx < MAX_COMM_ENTITIES_PER_NPU; pool_idx++) {
+                // ProcessComm_E pool entity. makeEntity runs no component
+                // constructors (E12): every component is assigned here.
+                Entity comm_entity = ctx.makeEntity<ProcessComm_E>();
+                ctx.get<NpuID>(comm_entity) = NpuID {};
+                ctx.get<NodeID>(comm_entity) = NodeID {};
+                ctx.get<TaskFlows>(comm_entity) = TaskFlows {};
+                ctx.get<PoolSlotActive>(comm_entity) = PoolSlotActive {};
+                comm_pool.comm_free[pool_idx] = comm_entity;
+
+                // ProcessRecvComm_E pool entity.
+                Entity recv_entity = ctx.makeEntity<ProcessRecvComm_E>();
+                ctx.get<NpuID>(recv_entity) = NpuID {};
+                ctx.get<NodeID>(recv_entity) = NodeID {};
+                ctx.get<RecvNodeFlag>(recv_entity) = RecvNodeFlag {};
+                ctx.get<PoolSlotActive>(recv_entity) = PoolSlotActive {};
+                comm_pool.recv_free[pool_idx] = recv_entity;
+            }
+            comm_pool.comm_free_count = MAX_COMM_ENTITIES_PER_NPU;
+            comm_pool.recv_free_count = MAX_COMM_ENTITIES_PER_NPU;
             NpuFlowPool &pool = ctx.get<NpuFlowPool>(npuNode);
             pool = NpuFlowPool {};
             pool.free_count = MAX_FLOWS_PER_NPU;

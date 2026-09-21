@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <madrona/components.hpp>
+
 namespace madsimple {
 
 constexpr int32_t MAX_INFERENCE_REQUESTS = 1024;
@@ -165,6 +167,11 @@ struct InferenceRuntime {
     int32_t finished_requests = 0;
     int32_t inflight_kv = 0;
     int64_t next_batch_id = 1;
+    // Bumped once per inferencePreUpdate / inferencePostUpdate at exactly
+    // the point where updateInferenceStats used to be called. Each request
+    // slot entity copies its own row when it observes a new sequence number
+    // (A9 per-request stats split). Monotonic; 0 means "never refreshed".
+    int32_t stats_refresh_seq = 0;
     InferenceRequestRecord requests[MAX_INFERENCE_REQUESTS] {};
     InferenceWorker p_workers[MAX_INFERENCE_WORKERS] {};
     InferenceWorker d_workers[MAX_INFERENCE_WORKERS] {};
@@ -178,6 +185,22 @@ struct InferenceStatsData {
     int64_t data[MAX_INFERENCE_REQUESTS][INFERENCE_STATS_FIELDS] {};
 };
 
+// A9 per-request stats split: one lightweight entity per request slot
+// (created once at world init). The entity carries only its slot index and
+// the last stats-refresh sequence number it copied; the request records
+// themselves stay in the InferenceRuntime singleton so every existing
+// runtime code path is untouched. The stats-refresh task-graph node runs
+// one instance per slot entity: each instance reads its own record and
+// writes its own InferenceStatsData row -- zero shared writes.
+struct InferenceRequestSlot {
+    int32_t slot = 0;
+    int32_t last_refresh_seq = 0;
+};
+
+struct InferenceRequestSlotArch : public madrona::Archetype<
+    InferenceRequestSlot
+> {};
+
 struct InferenceNpuExecution {
     int32_t active = 0;
     int32_t worker_id = -1;
@@ -185,6 +208,33 @@ struct InferenceNpuExecution {
     int32_t generation = 0;
     int32_t request_count = 0;
     int64_t token_count = 0;
+};
+
+// A10 (copy-the-answer-sheet per NPU): the scheduling singletons
+// (scheduleInferencePrefill/Decode -> startInferenceWork) no longer copy
+// template nodes inline; they append one entry per (worker, rank) to this
+// roster, and a per-NPU parallel task-graph node copies/reset only the
+// NPUs whose id appears in it. Cleared at the head of every inference
+// pre-step, rewritten by the scheduling decision -- single writer
+// (SimDriver singleton) -> many readers (NPU workers), no locking.
+// Capacity: entries per frame <= numNpus (worker rank ranges are disjoint
+// and fit numNpus, enforced at init), bounded by 256 for defense.
+struct InferenceResetEntry {
+    int32_t npu_id = -1;
+    int32_t stage = static_cast<int32_t>(InferenceStage::None);
+    int32_t worker_id = -1;
+    int32_t generation = 0;
+    int32_t request_count = 0;
+    int64_t token_count = 0;
+};
+
+constexpr int32_t INFERENCE_RESET_ROSTER_CAP =
+    MAX_INFERENCE_WORKERS * MAX_INFERENCE_WORKER_RANKS;
+
+struct InferenceResetRoster {
+    int32_t count = 0;
+    int32_t overflow_count = 0;
+    InferenceResetEntry entries[INFERENCE_RESET_ROSTER_CAP] {};
 };
 
 constexpr uint32_t INFERENCE_KV_FLOW_BIT = 0x80000000u;

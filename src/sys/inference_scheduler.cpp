@@ -1,6 +1,9 @@
 #include "inference_scheduler.hpp"
 
+#include "chakra_node_processing.hpp"
 #include "net_sys_interface.hpp"
+#include <cstdio>
+#include <cstdlib>
 
 namespace madsimple {
 
@@ -11,36 +14,13 @@ inline int64_t nowNs(Engine &ctx)
     return static_cast<int64_t>(net_sys_interface::getCurrentTime(ctx));
 }
 
-inline void resetNpuForReplay(Engine &ctx, madrona::Entity entity,
-                              InferenceStage stage, int32_t worker_id,
-                              int32_t generation, int32_t request_count,
-                              int64_t token_count)
-{
-    ChakraNodes &active = ctx.get<ChakraNodes>(entity);
-    const ChakraTemplateNodes &templ = ctx.get<ChakraTemplateNodes>(entity);
-    for (int32_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; i++) {
-        active.nodes[i] = templ.nodes[i];
-    }
-    ctx.get<HardwareResource>(entity) = HardwareResource {};
-    ctx.get<ProcessingCompTask>(entity) = ProcessingCompTask {};
-    ProcessingCommTasks &comm = ctx.get<ProcessingCommTasks>(entity);
-    const int64_t flow_base =
-        static_cast<int64_t>(ctx.get<NpuID>(entity).value) * FLOW_ID_MAX_LENGTH;
-    comm = ProcessingCommTasks {};
-    comm.flow_id = flow_base;
-    ctx.get<OneNPUFinishedFlag>(entity).is_finished = false;
-    ctx.get<ChakraNodesForNoDP>(entity) = ChakraNodesForNoDP {};
-    InferenceNpuExecution &execution = ctx.get<InferenceNpuExecution>(entity);
-    execution.active = 1;
-    execution.worker_id = worker_id;
-    execution.stage = static_cast<int32_t>(stage);
-    execution.generation = generation;
-    execution.request_count = request_count;
-    execution.token_count = token_count;
 }
 
-}
-
+// A10: the scheduling decision no longer copies the answer sheets inline.
+// It appends one roster entry per (worker, rank); the per-NPU parallel
+// task-graph node (inferenceResetLocal) performs the copy/reset. The
+// roster is cleared at the head of every inference pre-step (see
+// inferencePreUpdate), so entries never leak across frames.
 void startInferenceWork(Engine &ctx, InferenceWorker &worker,
                       InferenceStage stage, int32_t worker_id,
                       int64_t token_count)
@@ -48,17 +28,86 @@ void startInferenceWork(Engine &ctx, InferenceWorker &worker,
     worker.busy = 1;
     worker.generation++;
     worker.batch_tokens = token_count;
+    InferenceResetRoster &roster = ctx.singleton<InferenceResetRoster>();
     for (int32_t rank = 0; rank < worker.rank_count; rank++) {
         const int32_t npu_id = worker.rank_start + rank;
         if (npu_id < 0 || npu_id >= ctx.data().numNpus) {
             continue;
         }
-        const madrona::Entity entity = ctx.data().npuEntities[npu_id];
-        if (entity != madrona::Entity::none()) {
-            resetNpuForReplay(ctx, entity, stage, worker_id,
-                static_cast<int32_t>(worker.generation), worker.batch_count,
-                token_count);
+        if (roster.count >= INFERENCE_RESET_ROSTER_CAP) {
+            // Structurally unreachable: entries per frame <= numNpus
+            // (disjoint rank ranges enforced at init) <= 16 << 256.
+            roster.overflow_count += 1;
+            SystemStatus &status = ctx.singleton<SystemStatus>();
+            status.failed = 1;
+            status.error_code =
+                static_cast<int32_t>(InferenceError::CapacityExceeded);
+            return;
         }
+        roster.entries[roster.count++] = InferenceResetEntry {
+            .npu_id = npu_id,
+            .stage = static_cast<int32_t>(stage),
+            .worker_id = worker_id,
+            .generation = static_cast<int32_t>(worker.generation),
+            .request_count = worker.batch_count,
+            .token_count = token_count,
+        };
+    }
+}
+
+// A10 per-NPU copy pass (see inference_scheduler.hpp). Component-reference
+// version of the legacy resetNpuForReplay: identical mutations, applied
+// only when this NPU appears in this frame's roster. The flow-id base is
+// taken from this NPU's own id, exactly like the legacy entity lookup.
+void inferenceResetLocal(Engine &ctx, uint32_t npu_id,
+                         ChakraNodes &active, ChakraTemplateNodes &templ,
+                         HardwareResource &hardwareResource,
+                         ProcessingCompTask &processingCompTask,
+                         ProcessingCommTasks &comm,
+                         OneNPUFinishedFlag &oneNPUFinishedFlag,
+                         ChakraNodesForNoDP &noDP,
+                         ChakraReadyState &readyState,
+                         InferenceNpuExecution &execution)
+{
+    const InferenceConfigData &config =
+        ctx.get<InferenceConfigData>(ctx.data().init_entity);
+    if (config.data[IC_ENABLED] == 0) {
+        return;
+    }
+    const InferenceRuntime &runtime = ctx.singleton<InferenceRuntime>();
+    if (runtime.initialized == 0 ||
+        ctx.singleton<SystemStatus>().failed != 0) {
+        return;
+    }
+    const InferenceResetRoster &roster = ctx.singleton<InferenceResetRoster>();
+
+    for (int32_t i = 0; i < roster.count; i++) {
+        const InferenceResetEntry &entry = roster.entries[i];
+        if (entry.npu_id != static_cast<int32_t>(npu_id)) {
+            continue;
+        }
+
+        for (int32_t n = 0; n < MAX_CHAKRA_NODES_PER_NPU; n++) {
+            active.nodes[n] = templ.nodes[n];
+        }
+        // B1: the restored template changes the node graph, so rebuild the
+        // incremental ready set for this generation (once per NPU start).
+        llm_system::buildChakraReadyState(active, readyState);
+        hardwareResource = HardwareResource {};
+        processingCompTask = ProcessingCompTask {};
+        const int64_t flow_base =
+            static_cast<int64_t>(npu_id) * FLOW_ID_MAX_LENGTH;
+        comm = ProcessingCommTasks {};
+        comm.flow_id = flow_base;
+        oneNPUFinishedFlag.is_finished = false;
+        noDP = ChakraNodesForNoDP {};
+        execution.active = 1;
+        execution.worker_id = entry.worker_id;
+        execution.stage = entry.stage;
+        execution.generation = entry.generation;
+        execution.request_count = entry.request_count;
+        execution.token_count = entry.token_count;
+        break;
     }
 }
 

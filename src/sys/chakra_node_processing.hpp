@@ -16,11 +16,30 @@ namespace madsimple::llm_system
 
     int filterNoDependencyNodes(const ChakraNodes &chakraNodes, ChakraNode filteredNodes[],bool &is_none_node,
                                 int maxNodes = CURRENT_EXEC_NODES_MAX);
-    
+
     int checkRecvNodeDependencies(const ChakraNodes &chakraNodes, uint32_t independentRecvNodes[], 
         int maxNodes = CURRENT_EXEC_NODES_MAX);
 
     void removeNode(ChakraNodes &chakraNodes, uint32_t nodeId);
+
+    // B1 incremental ready-set maintenance (replaces the per-frame full
+    // rescan; see ChakraReadyState in sys_types.hpp for the invariants).
+    // Rebuild the whole ready state from the node array (used once at
+    // parse / at resetNpuForReplay).
+    void buildChakraReadyState(const ChakraNodes &chakraNodes,
+                               ChakraReadyState &ready);
+    // removeNode variant that also maintains the ready state. Semantically
+    // identical to the legacy removeNode on ChakraNodes; the ready state is
+    // pure bookkeeping consumed by sys_processChakraNodes.
+    void removeNodeWithReady(ChakraNodes &chakraNodes, uint32_t nodeId,
+                             ChakraReadyState &ready);
+    // Fill filteredNodes[0..return) with the zero-dependency nodes in
+    // ascending slot order (legacy filterNoDependencyNodes order), capped
+    // at maxNodes. Sets is_none_node = (no valid nodes at all).
+    int readyNodesFromState(const ChakraNodes &chakraNodes,
+                            const ChakraReadyState &ready,
+                            ChakraNode filteredNodes[], bool &is_none_node,
+                            int maxNodes = CURRENT_EXEC_NODES_MAX);
 
     // Utility functions for node processing
     const char *CollectiveCommTypeToString(CollectiveCommType type);

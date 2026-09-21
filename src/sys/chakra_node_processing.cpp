@@ -275,6 +275,156 @@ namespace madsimple::llm_system
         }
     }
 
+    // --------------------- B1 incremental ready-set maintenance -------------
+
+    void buildChakraReadyState(const ChakraNodes &chakraNodes,
+                               ChakraReadyState &ready)
+    {
+        ready = ChakraReadyState {};
+        for (int i = 0; i < MAX_CHAKRA_NODES_PER_NPU; ++i)
+        {
+            const ChakraNode &node = chakraNodes.nodes[i];
+            if (node.type == ChakraNodeType::None)
+            {
+                continue;
+            }
+            ready.valid_count += 1;
+            int deps = 0;
+            for (int j = 0; j < NODE_DATA_DEPS_LENGTH; ++j)
+            {
+                if (node.data_deps[j] != INVALID_DEPENDENCY)
+                {
+                    deps += 1;
+                }
+            }
+            ready.remaining_deps[i] = deps;
+            if (deps == 0)
+            {
+                // Slots are scanned in ascending order, so appends keep the
+                // ready list sorted -- the legacy scan's emission order.
+                ready.ready[ready.ready_count++] = i;
+            }
+        }
+    }
+
+    namespace {
+
+    int findReadySlotIndex(const ChakraReadyState &ready, int slot)
+    {
+        for (int i = 0; i < ready.ready_count; ++i)
+        {
+            if (ready.ready[i] == slot)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    void insertReadySorted(ChakraReadyState &ready, int slot)
+    {
+        if (ready.ready_count >= MAX_CHAKRA_NODES_PER_NPU)
+        {
+            return;
+        }
+        // Sorted insertion keeping ascending slot order.
+        int pos = ready.ready_count;
+        for (int i = 0; i < ready.ready_count; ++i)
+        {
+            if (ready.ready[i] > slot)
+            {
+                pos = i;
+                break;
+            }
+        }
+        for (int i = ready.ready_count; i > pos; --i)
+        {
+            ready.ready[i] = ready.ready[i - 1];
+        }
+        ready.ready[pos] = slot;
+        ready.ready_count += 1;
+    }
+
+    } // namespace
+
+    void removeNodeWithReady(ChakraNodes &chakraNodes, uint32_t nodeId,
+                             ChakraReadyState &ready)
+    {
+        // First pass: invalidate the node itself (same mutation as the
+        // legacy removeNode) and retire its ready-state bookkeeping.
+        for (size_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; ++i)
+        {
+            ChakraNode &node = chakraNodes.nodes[i];
+
+            if (node.id == nodeId)
+            {
+                node.type = ChakraNodeType::None;
+                for (int j = 0; j < NODE_DATA_DEPS_LENGTH; ++j)
+                {
+                    node.data_deps[j] = INVALID_DEPENDENCY;
+                }
+                node.id = INVALID_DEPENDENCY;
+
+                const int slot = static_cast<int>(i);
+                ready.valid_count -= 1;
+                const int ready_idx = findReadySlotIndex(ready, slot);
+                if (ready_idx >= 0)
+                {
+                    for (int k = ready_idx; k + 1 < ready.ready_count; ++k)
+                    {
+                        ready.ready[k] = ready.ready[k + 1];
+                    }
+                    ready.ready_count -= 1;
+                }
+                break;
+            }
+        }
+
+        // Second pass: clear successor dependencies; a successor whose
+        // remaining dependency count drops to zero joins the ready set
+        // (sorted insertion keeps the legacy emission order).
+        for (size_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; ++i)
+        {
+            ChakraNode &node = chakraNodes.nodes[i];
+
+            if (node.type == ChakraNodeType::None)
+            {
+                continue;
+            }
+
+            const int slot = static_cast<int>(i);
+            for (int j = 0; j < NODE_DATA_DEPS_LENGTH; ++j)
+            {
+                if (node.data_deps[j] == nodeId)
+                {
+                    node.data_deps[j] = INVALID_DEPENDENCY;
+                    if (ready.remaining_deps[slot] > 0)
+                    {
+                        ready.remaining_deps[slot] -= 1;
+                        if (ready.remaining_deps[slot] == 0)
+                        {
+                            insertReadySorted(ready, slot);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    int readyNodesFromState(const ChakraNodes &chakraNodes,
+                            const ChakraReadyState &ready,
+                            ChakraNode filteredNodes[], bool &is_none_node,
+                            int maxNodes)
+    {
+        is_none_node = (ready.valid_count == 0);
+        int count = 0;
+        for (int i = 0; i < ready.ready_count && count < maxNodes; ++i)
+        {
+            filteredNodes[count++] = chakraNodes.nodes[ready.ready[i]];
+        }
+        return count;
+    }
+
     const char *CollectiveCommTypeToString(CollectiveCommType type)
     {
         switch (type)

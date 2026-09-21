@@ -1,4 +1,6 @@
 #include "inference_runtime.hpp"
+#include <cstdio>
+#include <cstdlib>
 
 #include "kv_transfer.hpp"
 #include "net_sys_interface.hpp"
@@ -163,6 +165,18 @@ MADRONA_NO_INLINE bool initializeInference(
     }
 
     runtime.num_requests = nr;
+    // A9 per-request stats split: one lightweight worker entity per actual
+    // request slot (created once, when the runtime initializes). Same-frame
+    // visibility of system-created entities is already relied upon for the
+    // NPU entities (sys_init) and the comm task entities, so the refresh
+    // task-graph nodes that run right after pre/post see them immediately.
+    for (int32_t i = 0; i < nr; i++) {
+        madrona::Entity slot_entity = ctx.makeEntity<InferenceRequestSlotArch>();
+        ctx.get<InferenceRequestSlot>(slot_entity) = InferenceRequestSlot {
+            .slot = i,
+            .last_refresh_seq = 0,
+        };
+    }
     int64_t previous_arrival = -1;
     for (int32_t i = 0; i < nr; i++) {
         InferenceRequestRecord &request = runtime.requests[i];
@@ -208,6 +222,9 @@ MADRONA_NO_INLINE bool initializeInference(
             templ.nodes[n] = active.nodes[n];
             active.nodes[n].type = ChakraNodeType::None;
         }
+        // B1: parked ranks have no live nodes; the ready set is rebuilt by
+        // resetNpuForReplay when the rank restarts.
+        ctx.get<ChakraReadyState>(entity) = ChakraReadyState {};
         ctx.get<OneNPUFinishedFlag>(entity).is_finished = true;
         ctx.get<InferenceNpuExecution>(entity) = InferenceNpuExecution {};
     }
@@ -264,6 +281,13 @@ void inferencePreUpdate(Engine &ctx)
         return;
     }
 
+    // A10: fresh reset roster for this frame's scheduling decision (the
+    // decision appends entries; the per-NPU copy node consumes them right
+    // after this pre-step). Cleared only when the decision actually runs,
+    // mirroring the legacy "copy happens inside the decision" behavior on
+    // disabled/failed frames.
+    ctx.singleton<InferenceResetRoster>() = InferenceResetRoster {};
+
     const int64_t now =
         static_cast<int64_t>(net_sys_interface::getCurrentTime(ctx));
     while (runtime.next_arrival < runtime.num_requests &&
@@ -283,7 +307,7 @@ void inferencePreUpdate(Engine &ctx)
     }
     scheduleInferencePrefill(ctx, runtime, config);
     scheduleInferenceDecode(ctx, runtime, config);
-    updateInferenceStats(ctx);
+    markInferenceStatsRefresh(ctx);
 }
 
 void inferencePostUpdate(Engine &ctx)
@@ -347,7 +371,7 @@ void inferencePostUpdate(Engine &ctx)
     }
     ctx.singleton<SystemStatus>().finished =
         inferenceIsFinished(runtime, config) ? 1 : 0;
-    updateInferenceStats(ctx);
+    markInferenceStatsRefresh(ctx);
 }
 
 bool inferenceIsFinished(const InferenceRuntime &runtime,
@@ -379,33 +403,51 @@ bool inferenceIsFinished(const InferenceRuntime &runtime,
     return true;
 }
 
-void updateInferenceStats(Engine &ctx)
+// A9 split of updateInferenceStats: called once by every request-slot
+// entity right after inferencePreUpdate / inferencePostUpdate. The row
+// order (out[0..18] field assignment) is byte-identical to the legacy
+// full-table copy; the seq gate keeps the "only refresh when the pre/post
+// step actually reached its former updateInferenceStats call" semantics,
+// including the early-return failure paths that used to skip the refresh.
+void refreshInferenceStatsRow(Engine &ctx, InferenceRequestSlot &slot)
 {
     const InferenceRuntime &runtime = ctx.singleton<InferenceRuntime>();
-    InferenceStatsData &stats = ctx.singleton<InferenceStatsData>();
-    for (int32_t i = 0; i < runtime.num_requests; i++) {
-        const InferenceRequestRecord &r = runtime.requests[i];
-        int64_t *out = stats.data[i];
-        out[0] = r.request_id;
-        out[1] = r.arrival_ns;
-        out[2] = r.t_p_start_ns;
-        out[3] = r.t_p_finish_ns;
-        out[4] = r.t_d_route_ns;
-        out[5] = r.t_kv_start_ns;
-        out[6] = r.t_kv_done_ns;
-        out[7] = r.t_d_start_ns;
-        out[8] = r.t_finish_ns;
-        out[9] = r.p_worker;
-        out[10] = r.d_worker;
-        out[11] = r.output_len;
-        out[12] = r.output_done;
-        out[13] = r.kv_bytes;
-        out[14] = static_cast<int64_t>(r.state);
-        out[15] = r.prompt_len;
-        out[16] = r.kv_shards;
-        out[17] = r.kv_done;
-        out[18] = r.t_first_token_ns;
+    if (runtime.stats_refresh_seq == slot.last_refresh_seq) {
+        return;
     }
+    slot.last_refresh_seq = runtime.stats_refresh_seq;
+    if (slot.slot >= runtime.num_requests) {
+        return;
+    }
+    const InferenceRequestRecord &r = runtime.requests[slot.slot];
+    int64_t *out = ctx.singleton<InferenceStatsData>().data[slot.slot];
+    out[0] = r.request_id;
+    out[1] = r.arrival_ns;
+    out[2] = r.t_p_start_ns;
+    out[3] = r.t_p_finish_ns;
+    out[4] = r.t_d_route_ns;
+    out[5] = r.t_kv_start_ns;
+    out[6] = r.t_kv_done_ns;
+    out[7] = r.t_d_start_ns;
+    out[8] = r.t_finish_ns;
+    out[9] = r.p_worker;
+    out[10] = r.d_worker;
+    out[11] = r.output_len;
+    out[12] = r.output_done;
+    out[13] = r.kv_bytes;
+    out[14] = static_cast<int64_t>(r.state);
+    out[15] = r.prompt_len;
+    out[16] = r.kv_shards;
+    out[17] = r.kv_done;
+    out[18] = r.t_first_token_ns;
+}
+
+// Bumps the stats-refresh sequence number. Called at exactly the two spots
+// where the legacy updateInferenceStats(ctx) call sat (end of pre / end of
+// post); the per-request refresh nodes consume it right after.
+void markInferenceStatsRefresh(Engine &ctx)
+{
+    ctx.singleton<InferenceRuntime>().stats_refresh_seq += 1;
 }
 
 }

@@ -1,9 +1,11 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
+#include "sim_probe.hpp"
 #include "sys/llm_system.hpp"
 #include "sys/net_sys_interface.hpp"
 #include "sys/kv_transfer.hpp"
 #include "sys/inference_runtime.hpp"
+#include "sys/inference_scheduler.hpp"
 
 #ifndef MADRONA_GPU_MODE
 #include <chrono>
@@ -96,6 +98,7 @@ constexpr int kTaskgraphStageLimit = 12;
 
 MADRONA_NO_INLINE void beginScheduleStepSystem(Engine &ctx, SimDriver &driver)
 {
+    SIM_PROBE_FRAME_BEGIN();
     beginHostStepPhase(ctx, driver);
 
     Sim &sim = ctx.data();
@@ -109,6 +112,7 @@ MADRONA_NO_INLINE void beginScheduleStepSystem(Engine &ctx, SimDriver &driver)
 
 MADRONA_NO_INLINE void pruneSystemEventsStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("pruneSystemEvents");
     ctx.data().pruneSystemEvents(ctx);
 }
 
@@ -117,27 +121,124 @@ MADRONA_NO_INLINE void clearNpuFlowFinishStepSystem(
     NpuID &,
     NpuFlowFinishedList &finished)
 {
+    SIM_PROBE_RECORD("clearNpuFlowFinish");
     finished.count = 0;
 }
 
 MADRONA_NO_INLINE void inferencePreStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("inferencePre");
     inferencePreUpdate(ctx);
 }
 
-MADRONA_NO_INLINE void collectInferenceKvStepSystem(Engine &ctx, SimDriver &)
+// A9 per-request stats refresh, pre-side. Runs immediately after
+// inferencePreStepSystem, i.e. at exactly the position the legacy
+// updateInferenceStats(ctx) call occupied at the end of inferencePreUpdate.
+// One instance per request slot; each instance copies only its own row
+// (zero shared writes), gated by the refresh sequence bump inside
+// markInferenceStatsRefresh so early-return failure paths that used to skip
+// the refresh still skip it.
+MADRONA_NO_INLINE void refreshInferenceStatsPreStepSystem(
+    Engine &ctx,
+    InferenceRequestSlot &slot)
 {
-    collectInferenceKvCompletions(ctx);
+    SIM_PROBE_RECORD("refreshInferenceStats[pre]");
+    refreshInferenceStatsRow(ctx, slot);
+}
+
+// A10 per-NPU copy pass: the answer sheets are copied here (each NPU its
+// own) instead of inline in the scheduling decision. Positioned right
+// after the pre-side stats refresh -- the legacy reset happened inside
+// inferencePreUpdate, i.e. before this point in the frame -- and before
+// sys_checkFlow, matching the legacy order.
+MADRONA_NO_INLINE void inferenceResetLocalStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    ChakraNodes &chakraNodes,
+    ChakraTemplateNodes &templ,
+    HardwareResource &hardwareResource,
+    ProcessingCompTask &processingCompTask,
+    ProcessingCommTasks &processingCommTasks,
+    OneNPUFinishedFlag &oneNPUFinishedFlag,
+    ChakraNodesForNoDP &chakraNodesForNoDP,
+    ChakraReadyState &chakraReadyState,
+    InferenceNpuExecution &inferenceExecution)
+{
+    SIM_PROBE_RECORD("inferenceResetLocal");
+    inferenceResetLocal(ctx, npu.value, chakraNodes, templ, hardwareResource,
+        processingCompTask, processingCommTasks, oneNPUFinishedFlag,
+        chakraNodesForNoDP, chakraReadyState, inferenceExecution);
+}
+
+MADRONA_NO_INLINE void collectInferenceKvDraftStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    NpuFlowFinishedList &finished,
+    NpuKvCollectDraft &draft)
+{
+    SIM_PROBE_RECORD("collectInferenceKvDraft");
+    collectInferenceKvDrafts(ctx, npu.value, finished, draft);
+}
+
+MADRONA_NO_INLINE void commitInferenceKvCollectStepSystem(Engine &ctx,
+                                                          SimDriver &)
+{
+    SIM_PROBE_RECORD("commitInferenceKvCollect");
+    commitInferenceKvCollect(ctx);
 }
 
 MADRONA_NO_INLINE void inferencePostStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("inferencePost");
     inferencePostUpdate(ctx);
+}
+
+// A9 per-request stats refresh, post-side. Same contract as the pre-side
+// node: positioned right after inferencePostStepSystem, one instance per
+// request slot, each copying only its own InferenceStatsData row.
+MADRONA_NO_INLINE void refreshInferenceStatsPostStepSystem(
+    Engine &ctx,
+    InferenceRequestSlot &slot)
+{
+    SIM_PROBE_RECORD("refreshInferenceStats[post]");
+    refreshInferenceStatsRow(ctx, slot);
+}
+
+// C1 frame-tail pool recycle: see the pool component docs in types.hpp.
+// Serial singleton; walks NPUs in id order so the free-list order is
+// deterministic.
+MADRONA_NO_INLINE void recycleCommEntitiesStepSystem(Engine &ctx,
+                                                     SimDriver &)
+{
+    SIM_PROBE_RECORD("recycleCommEntities");
+    Sim &sim = ctx.data();
+    for (int32_t npu_id = 0; npu_id < sim.numNpus; npu_id++) {
+        Entity npu_entity = sim.npuEntities[npu_id];
+        if (npu_entity == Entity::none()) {
+            continue;
+        }
+        NpuCommRetireDraft &draft = ctx.get<NpuCommRetireDraft>(npu_entity);
+        NpuCommEntityPool &pool = ctx.get<NpuCommEntityPool>(npu_entity);
+        for (uint32_t i = 0; i < draft.count; i++) {
+            const NpuCommRetireReq &req = draft.reqs[i];
+            if (req.entity == Entity::none()) {
+                continue;
+            }
+            ctx.get<PoolSlotActive>(req.entity).active = 0;
+            if (req.is_recv != 0) {
+                pool.retireRecv(req.entity);
+            } else {
+                pool.retireComm(req.entity);
+            }
+        }
+        draft.count = 0;
+    }
 }
 
 MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
                                                     SimDriver &)
 {
+    SIM_PROBE_RECORD("updateSystemStatus");
     SystemStatus &status = ctx.singleton<SystemStatus>();
     // Delayed-event drops are silent correctness hazards: the flow whose
     // arrival event was dropped never materializes a tag and the sim later
@@ -155,6 +256,9 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
         status.error_code = 6;
     }
     if (!ctx.data().sys_chakra_entities_created) {
+        // Pure-network worlds exit here every frame; the probe frame-flush
+        // must still run so its per-frame bookkeeping stays complete.
+        SIM_PROBE_FRAME_END();
         return;
     }
 
@@ -200,6 +304,7 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
         }
     }
     status.next_system_event_ns = next_event;
+    SIM_PROBE_FRAME_END();
 }
 
 // Serial singleton: drains every NPU's own (lock-free) inbox into that
@@ -207,11 +312,20 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
 // count), not O(total flows ever created) -- see
 // sim.hpp/createFlowsFromNpuRequests
 // doc comment.
+// A4 per-NPU split: one instance per NPU drains that NPU's own inbox into
+// that NPU's own preallocated FlowMeta pool. O(per-NPU pending count) per
+// instance, not O(total flows ever created) -- see
+// sim.hpp/createFlowsFromNpuRequestsOneNpu doc comment.
 MADRONA_NO_INLINE void createFlowsFromNpuRequestsStepSystem(
     Engine &ctx,
-    SimDriver &)
+    NpuID &npu,
+    NpuFlowInbox &inbox,
+    NpuFlowPool &pool,
+    NpuFlowActiveList &active)
 {
-    ctx.data().createFlowsFromNpuRequests(ctx);
+    SIM_PROBE_RECORD("createFlowsFromNpuRequests");
+    ctx.data().createFlowsFromNpuRequestsOneNpu(ctx, npu.value, inbox, pool,
+                                                active);
 }
 
 MADRONA_NO_INLINE void preparePendingFlowMetaStepSystem(
@@ -220,21 +334,40 @@ MADRONA_NO_INLINE void preparePendingFlowMetaStepSystem(
     FlowRuntimeState &runtime,
     FlowScheduleState &schedule_state)
 {
+    SIM_PROBE_RECORD("preparePendingFlowMeta");
     Sim &sim = ctx.data();
     sim.preparePendingFlowMeta(ctx, flow, runtime, schedule_state);
 }
 
 MADRONA_NO_INLINE void flushScheduleStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("flushSchedule");
     Sim &sim = ctx.data();
     sim.schedulePendingFlows(ctx);
-    // Independent of schedulePendingFlows: walks each NPU's own bounded
-    // NpuFlowActiveList (see doc comment on Sim::scheduleNpuFlows).
-    sim.scheduleNpuFlows(ctx);
+    // A7 serial commit: replays each NPU's deferred push tickets right
+    // where the legacy scheduleNpuFlows loop sat relative to the
+    // static-flow pushes, so the global delayed-event registration order
+    // (F9) is byte-identical.
+    sim.commitNpuFlowSchedule(ctx);
+}
+
+// A7 per-NPU local pass: flow-local checks/writes + push tickets into the
+// NPU's own draft. Position: right after preparePendingFlowMeta (which
+// sets ready_now/prepared) and before flushSchedule (whose tail replays
+// the tickets after schedulePendingFlows, matching the legacy push order).
+MADRONA_NO_INLINE void scheduleNpuFlowsLocalStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    NpuFlowActiveList &active,
+    NpuFlowScheduleDraft &draft)
+{
+    SIM_PROBE_RECORD("scheduleNpuFlowsLocal");
+    ctx.data().scheduleNpuFlowsLocal(ctx, npu.value, active, draft);
 }
 
 MADRONA_NO_INLINE void beginDeliverStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("beginDeliver");
     closeHostStepPhase(ctx, StepPhaseID::Schedule);
     Sim &sim = ctx.data();
     if (sim.traceModeEnabled() &&
@@ -251,12 +384,14 @@ MADRONA_NO_INLINE void deliverOnePortStepSystem(
     PortInbox &inbox,
     PortTraceLast &trace)
 {
+    SIM_PROBE_RECORD("deliverOnePort");
     Sim &sim = ctx.data();
     sim.deliverEventsOnePort(ctx, port_state.port_id, queue, inbox, trace);
 }
 
 MADRONA_NO_INLINE void postDeliverStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("postDeliver");
     Sim &sim = ctx.data();
     sim.finishDeliverEvents(ctx);
 }
@@ -267,6 +402,7 @@ MADRONA_NO_INLINE void resetIngressPortStateStepSystem(
     PortCreateList &create_list,
     PortCompletionList &completion_list)
 {
+    SIM_PROBE_RECORD("resetIngressPortState");
     (void)ctx;
     inbox.num_arrival = 0;
     inbox.num_bwupd = 0;
@@ -287,6 +423,7 @@ MADRONA_NO_INLINE void pfcPropagateOnePortStepSystem(
     PortTraceLast &trace,
     PortInbox &inbox)
 {
+    SIM_PROBE_RECORD("pfcPropagateOnePort");
     Sim &sim = ctx.data();
     sim.pfcPropagateOnePort(ctx, port_state.port_id, port_state, pfc_state,
         dirty, inbox, trace);
@@ -302,6 +439,7 @@ MADRONA_NO_INLINE void arrivalOnePortStepSystem(
     PortSourceTagList &source_tag_list,
     PortCreateList &create_list)
 {
+    SIM_PROBE_RECORD("arrivalOnePort");
     Sim &sim = ctx.data();
     sim.flowArrivalOnePort(ctx, port_state.port_id, port_state, dirty, inbox,
         tag_list, source_tag_list, create_list, trace);
@@ -320,6 +458,7 @@ MADRONA_NO_INLINE void bwUpdateOnePortStepSystem(
     PortOutbox &outbox,
     PortCompletionList &completions)
 {
+    SIM_PROBE_RECORD("bwUpdateOnePort");
     Sim &sim = ctx.data();
     sim.bwUpdateOnePort(ctx, port_state.port_id, port_state, port_buf, dirty,
         inbox, tag_list, create_list, cleanup, outbox, completions, trace);
@@ -338,12 +477,57 @@ MADRONA_NO_INLINE void materializeTagCreateOnePortStepSystem(
         create_list, ingress_links, trace);
 }
 
+// Probe wrappers: this node is registered twice per frame (ingress chain
+// pass A after arrival, pass B after bwUpdate); split the instance counts
+// so the parallelism probe can report each registration separately.
+MADRONA_NO_INLINE void materializeTagCreateOnePortAStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    DirtyPort &dirty,
+    PortCreateList &create_list,
+    PortIngressLinkList &ingress_links,
+    PortTraceLast &trace)
+{
+    SIM_PROBE_RECORD("materializeTagCreateOnePortA");
+    materializeTagCreateOnePortStepSystem(ctx, port_state, dirty, create_list,
+        ingress_links, trace);
+}
+
+MADRONA_NO_INLINE void materializeTagCreateOnePortBStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    DirtyPort &dirty,
+    PortCreateList &create_list,
+    PortIngressLinkList &ingress_links,
+    PortTraceLast &trace)
+{
+    SIM_PROBE_RECORD("materializeTagCreateOnePortB");
+    materializeTagCreateOnePortStepSystem(ctx, port_state, dirty, create_list,
+        ingress_links, trace);
+}
+
 MADRONA_NO_INLINE void flushIngressTagLinksStepSystem(
     Engine &ctx,
     SimDriver &)
 {
     Sim &sim = ctx.data();
     sim.flushIngressTagLinks(ctx);
+}
+
+MADRONA_NO_INLINE void flushIngressTagLinksAStepSystem(
+    Engine &ctx,
+    SimDriver &)
+{
+    SIM_PROBE_RECORD("flushIngressTagLinksA");
+    flushIngressTagLinksStepSystem(ctx, ctx.singleton<SimDriver>());
+}
+
+MADRONA_NO_INLINE void flushIngressTagLinksBStepSystem(
+    Engine &ctx,
+    SimDriver &)
+{
+    SIM_PROBE_RECORD("flushIngressTagLinksB");
+    flushIngressTagLinksStepSystem(ctx, ctx.singleton<SimDriver>());
 }
 
 MADRONA_NO_INLINE void flushIngressTagUnlinksStepSystem(
@@ -367,6 +551,32 @@ MADRONA_NO_INLINE void materializeTagCleanupOnePortNowStepSystem(
         ingress_unlinks, completions, outbox, sim.now);
 }
 
+MADRONA_NO_INLINE void materializeTagCleanupOnePortIngressStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortCleanup &cleanup,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox)
+{
+    SIM_PROBE_RECORD("materializeTagCleanupOnePort[ingress]");
+    materializeTagCleanupOnePortNowStepSystem(ctx, port_state, cleanup,
+        ingress_unlinks, completions, outbox);
+}
+
+MADRONA_NO_INLINE void materializeTagCleanupOnePortAllocStepSystem(
+    Engine &ctx,
+    PortState &port_state,
+    PortCleanup &cleanup,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox)
+{
+    SIM_PROBE_RECORD("materializeTagCleanupOnePort[alloc]");
+    materializeTagCleanupOnePortNowStepSystem(ctx, port_state, cleanup,
+        ingress_unlinks, completions, outbox);
+}
+
 MADRONA_NO_INLINE void materializeTagCleanupOnePortFrameEndStepSystem(
     Engine &ctx,
     PortState &port_state,
@@ -375,6 +585,7 @@ MADRONA_NO_INLINE void materializeTagCleanupOnePortFrameEndStepSystem(
     PortCompletionList &completions,
     PortOutbox &outbox)
 {
+    SIM_PROBE_RECORD("materializeTagCleanupOnePortFrameEnd");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.materializeTagCleanupOnePort(ctx, port_state.port_id, cleanup,
@@ -383,6 +594,7 @@ MADRONA_NO_INLINE void materializeTagCleanupOnePortFrameEndStepSystem(
 
 MADRONA_NO_INLINE void postIngressStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("postIngress");
     closeHostStepPhase(ctx, StepPhaseID::Deliver);
     Sim &sim = ctx.data();
     sim.flushIngressTagUnlinks(ctx);
@@ -412,6 +624,7 @@ MADRONA_NO_INLINE void allocOnePortStepSystem(
     PortCleanup &cleanup,
     PortTagList &tag_list)
 {
+    SIM_PROBE_RECORD("allocOnePort");
     Sim &sim = ctx.data();
     sim.allocOnePort(ctx, port_state.port_id, port_state, port_buf, dirty,
         pfc_cfg, pfc_state, hints, drain_hint, cleanup, trace, tag_list);
@@ -419,12 +632,14 @@ MADRONA_NO_INLINE void allocOnePortStepSystem(
 
 MADRONA_NO_INLINE void flushTagCleanupStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("flushPortTagCleanup");
     Sim &sim = ctx.data();
     sim.flushPortTagCleanup(ctx);
 }
 
 MADRONA_NO_INLINE void reducePortCachedHintsStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("reducePortCachedHints");
     Sim &sim = ctx.data();
     sim.reducePortCachedHints(ctx);
 }
@@ -435,12 +650,14 @@ MADRONA_NO_INLINE void applyDrainHintOnePortStepSystem(
     PortDrainHint &hint,
     PortTimers &timers)
 {
+    SIM_PROBE_RECORD("applyDrainHintOnePort");
     Sim &sim = ctx.data();
     sim.applyDrainHintOnePort(port_state.port_id, hint, timers);
 }
 
 MADRONA_NO_INLINE void postAllocStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("postAlloc");
     closeHostStepPhase(ctx, StepPhaseID::Ingress);
     Sim &sim = ctx.data();
     sim.flushIngressTagUnlinks(ctx);
@@ -467,6 +684,7 @@ MADRONA_NO_INLINE void pfcDetectOnePortStepSystem(
     PortTagList &tag_list,
     IngressTagList &ingress_list)
 {
+    SIM_PROBE_RECORD("pfcDetectOnePort");
     Sim &sim = ctx.data();
     sim.pfcDetectOnePort(ctx, port_state.port_id, port_state, port_buf,
         dirty, pfc_cfg, pfc_state, outbox, trace, tag_list, ingress_list);
@@ -476,6 +694,7 @@ MADRONA_NO_INLINE void markPfcIngressCheckTargetsStepSystem(
     Engine &ctx,
     SimDriver &)
 {
+    SIM_PROBE_RECORD("markPfcIngressCheckTargets");
     Sim &sim = ctx.data();
     sim.markPfcIngressCheckTargets(ctx);
 }
@@ -491,6 +710,7 @@ MADRONA_NO_INLINE void emitOnePortStepSystem(
     PortOutbox &outbox,
     PortTagList &tag_list)
 {
+    SIM_PROBE_RECORD("emitOnePort");
     Sim &sim = ctx.data();
     sim.emitOnePort(ctx, port_state.port_id, port_state, dirty, outbox, trace,
         tag_list);
@@ -503,12 +723,14 @@ MADRONA_NO_INLINE void applyPfcTimerOnePortStepSystem(
     PortPfcState &state,
     PortTimers &timers)
 {
+    SIM_PROBE_RECORD("applyPfcTimerOnePort");
     Sim &sim = ctx.data();
     sim.applyPfcTimerOnePort(port_state.port_id, state, timers);
 }
 
 MADRONA_NO_INLINE void postPfcStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("postPfc");
     Sim &sim = ctx.data();
     sim.flushPortOutbox(ctx);
     if (sim.traceModeEnabled()) {
@@ -519,6 +741,7 @@ MADRONA_NO_INLINE void postPfcStepSystem(Engine &ctx, SimDriver &)
 
 MADRONA_NO_INLINE void postEmitStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("postEmit");
     closeHostStepPhase(ctx, StepPhaseID::Alloc);
     Sim &sim = ctx.data();
     sim.flushPortOutbox(ctx);
@@ -534,6 +757,7 @@ MADRONA_NO_INLINE void clearDirtyOnePortSystem(Engine &ctx,
                                                DirtyPort &dirty,
                                                PortTraceLast &trace)
 {
+    SIM_PROBE_RECORD("clearDirtyOnePort");
     (void)ctx;
     trace.was_dirty_at_clear = (dirty.isDirty != 0) ? 1 : 0;
     dirty.isDirty = 0;
@@ -546,6 +770,7 @@ MADRONA_NO_INLINE void snapshotDirtyOnePortStepSystem(
     PortTimers &timers,
     PortTraceLast &trace)
 {
+    SIM_PROBE_RECORD("snapshotDirtyOnePort");
     Sim &sim = ctx.data();
     sim.snapshotDirtyOnePort(port_state.port_id, queue, timers, trace);
 }
@@ -556,6 +781,7 @@ MADRONA_NO_INLINE void snapshotDirtyOnePortStepSystem(
 // no Sim-global dirty-port list is rebuilt here.
 MADRONA_NO_INLINE void postClearStepSystem(Engine &ctx, SimDriver &driver)
 {
+    SIM_PROBE_RECORD("postClear");
     (void)driver;
     closeHostStepPhase(ctx, StepPhaseID::PfcEmit);
     Sim &sim = ctx.data();
@@ -600,6 +826,7 @@ MADRONA_NO_INLINE void advanceOnePortBufferStepSystem(
     PortCleanup &cleanup,
     PortTagList &tag_list)
 {
+    SIM_PROBE_RECORD("advanceOnePortBuffer");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.advanceOnePortBuffer(ctx, port_state.port_id, runtime.nextDT,
@@ -617,6 +844,7 @@ MADRONA_NO_INLINE void progressFinishedSourcesOnePortStepSystem(
     PortTraceLast &trace,
     PortOutbox &outbox)
 {
+    SIM_PROBE_RECORD("progressFinishedSourcesOnePort");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.progressFinishedSourcesOnePort(ctx, runtime.nextDT,
@@ -631,6 +859,7 @@ MADRONA_NO_INLINE void cleanupFinishedSourcesOnePortStepSystem(
     PortCachedHints &hints,
     PortFinishedSourceList &finished_list)
 {
+    SIM_PROBE_RECORD("cleanupFinishedSourcesOnePort");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.cleanupFinishedSourcesOnePort(ctx, sim.now + runtime.nextDT,
@@ -642,6 +871,7 @@ MADRONA_NO_INLINE void progressBacklogDrainTimerOnePortStepSystem(
     DirtyPort &dirty,
     PortTimers &timers)
 {
+    SIM_PROBE_RECORD("progressBacklogDrainTimerOnePort");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.progressBacklogDrainTimerOnePort(timers, dirty, runtime.nextDT);
@@ -649,6 +879,7 @@ MADRONA_NO_INLINE void progressBacklogDrainTimerOnePortStepSystem(
 
 MADRONA_NO_INLINE void flushProgressOutboxStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("flushProgressOutbox");
     Sim &sim = ctx.data();
     sim.flushPortOutbox(ctx);
 }
@@ -660,6 +891,7 @@ MADRONA_NO_INLINE void progressPfcTimerOnePortStepSystem(
     IngressTagList &ingress_list,
     PortDirtyMarkList &dirty_marks)
 {
+    SIM_PROBE_RECORD("progressPfcTimerOnePort");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.progressPfcTimerOnePort(ctx, port_state.port_id, timers,
@@ -668,12 +900,14 @@ MADRONA_NO_INLINE void progressPfcTimerOnePortStepSystem(
 
 MADRONA_NO_INLINE void flushDirtyPortMarksStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("flushDirtyPortMarks");
     Sim &sim = ctx.data();
     sim.flushDirtyPortMarks(ctx);
 }
 
 MADRONA_NO_INLINE void prepareProgressStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("prepareProgress");
     Sim &sim = ctx.data();
     sim.prepareProgressState(ctx);
 }
@@ -684,6 +918,7 @@ MADRONA_NO_INLINE void markBufferedPortDirtyOnePortStepSystem(
     DirtyPort &dirty,
     PortTraceLast &trace)
 {
+    SIM_PROBE_RECORD("markBufferedPortDirtyOnePort");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     trace.progress_buffered_dirty_marked = 0;
@@ -694,6 +929,7 @@ MADRONA_NO_INLINE void markBufferedPortDirtyOnePortStepSystem(
 
 MADRONA_NO_INLINE void finishProgressStepSystem(Engine &ctx, SimDriver &)
 {
+    SIM_PROBE_RECORD("finishProgress");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.finishProgressState(ctx, runtime.nextDT);
@@ -701,6 +937,7 @@ MADRONA_NO_INLINE void finishProgressStepSystem(Engine &ctx, SimDriver &)
 
 MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
 {
+    SIM_PROBE_RECORD("postBuffer");
     closeHostStepPhase(ctx, StepPhaseID::ClearDT);
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
@@ -753,6 +990,89 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     }
 }
 
+// Probe wrapper: sys_checkNpuFinish is registered directly from llm_system.
+MADRONA_NO_INLINE void sys_checkNpuFinishProbeStepSystem(
+    Engine &ctx,
+    CheckNpuFinishFlag &flag)
+{
+    SIM_PROBE_RECORD("sys_checkNpuFinish");
+    llm_system::sys_checkNpuFinish(ctx, flag);
+}
+
+// Probe wrappers: the llm_system nodes below are registered directly from
+// the sys/ modules; route them through thin sim_tasks wrappers so the
+// parallelism probe can count their per-frame instance counts from here.
+MADRONA_NO_INLINE void sys_initProbeStepSystem(
+    Engine &ctx,
+    ChakraNodesData &chakra_nodes_data,
+    ProcessParams &processParams)
+{
+    SIM_PROBE_RECORD("sys_init");
+    llm_system::sys_init(ctx, chakra_nodes_data, processParams);
+}
+
+MADRONA_NO_INLINE void sys_checkFlowProbeStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    NodeID &node,
+    TaskFlows &flows,
+    PoolSlotActive &slot_active)
+{
+    SIM_PROBE_RECORD("sys_checkFlow");
+    // C1: pooled idle entities match this archetype query; skip them.
+    if (slot_active.active == 0) {
+        return;
+    }
+    llm_system::sys_checkFlow(ctx, npu, node, flows);
+}
+
+MADRONA_NO_INLINE void sys_checkRecvFlowProbeStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    NodeID &node,
+    RecvNodeFlag &recv_flag,
+    PoolSlotActive &slot_active)
+{
+    SIM_PROBE_RECORD("sys_checkRecvFlow");
+    // C1: pooled idle entities match this archetype query; skip them.
+    if (slot_active.active == 0) {
+        return;
+    }
+    llm_system::sys_checkRecvFlow(ctx, npu, node, recv_flag);
+}
+
+MADRONA_NO_INLINE void sys_removeChakraNodesProbeStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    ChakraNodes &chakraNodes,
+    HardwareResource &hardwareResource,
+    ProcessingCompTask &processingCompTask,
+    ProcessingCommTasks &processingCommTasks,
+    ChakraReadyState &chakraReadyState)
+{
+    SIM_PROBE_RECORD("sys_removeChakraNodes");
+    llm_system::sys_removeChakraNodes(ctx, npu, chakraNodes, hardwareResource,
+        processingCompTask, processingCommTasks, chakraReadyState);
+}
+
+MADRONA_NO_INLINE void sys_processChakraNodesProbeStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    ChakraNodes &chakraNodes,
+    HardwareResource &hardwareResource,
+    ProcessingCompTask &processingCompTask,
+    ProcessingCommTasks &processingCommTasks,
+    OneNPUFinishedFlag &oneNPUFinishedFlag,
+    ChakraNodesForNoDP &chakraNodesForNoDP,
+    ChakraReadyState &chakraReadyState,
+    InferenceNpuExecution &inferenceExecution)
+{
+    SIM_PROBE_RECORD("sys_processChakraNodes");
+    llm_system::sys_processChakraNodes(ctx, npu, chakraNodes, hardwareResource,
+        processingCompTask, processingCommTasks, oneNPUFinishedFlag,
+        chakraNodesForNoDP, chakraReadyState, inferenceExecution);
+}
+
 }  // inline namespace systems
 
 // MWGPU's initTasks kernel executes WorldT::setupTasks on device to build the
@@ -771,41 +1091,74 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     auto n0prune = builder.addToGraph<ParallelForNode<Engine,
         pruneSystemEventsStepSystem, SimDriver>>({n0begin});
     auto n0sysinit = builder.addToGraph<ParallelForNode<Engine,
-        llm_system::sys_init, ChakraNodesData, ProcessParams>>({n0prune});
+        sys_initProbeStepSystem, ChakraNodesData, ProcessParams>>({n0prune});
     auto n0inferencepre = builder.addToGraph<ParallelForNode<Engine,
         inferencePreStepSystem, SimDriver>>({n0sysinit});
+    // A9: per-request stats mirror, replacing the in-system
+    // updateInferenceStats call at the tail of inferencePreUpdate.
+    auto n0statspre = builder.addToGraph<ParallelForNode<Engine,
+        refreshInferenceStatsPreStepSystem, InferenceRequestSlot>>(
+            {n0inferencepre});
+    // A10: per-NPU answer-sheet copy pass, replacing the inline
+    // resetNpuForReplay calls inside the scheduling decision.
+    auto n0reset = builder.addToGraph<ParallelForNode<Engine,
+        inferenceResetLocalStepSystem,
+        NpuID, ChakraNodes, ChakraTemplateNodes, HardwareResource,
+        ProcessingCompTask, ProcessingCommTasks, OneNPUFinishedFlag,
+        ChakraNodesForNoDP, ChakraReadyState, InferenceNpuExecution>>(
+            {n0statspre});
     auto n0checkflow = builder.addToGraph<ParallelForNode<Engine,
-        llm_system::sys_checkFlow,
-        NpuID, NodeID, TaskFlows>>({n0inferencepre});
+        sys_checkFlowProbeStepSystem,
+        NpuID, NodeID, TaskFlows, PoolSlotActive>>({n0reset});
     auto n0checkrecv = builder.addToGraph<ParallelForNode<Engine,
-        llm_system::sys_checkRecvFlow,
-        NpuID, NodeID, RecvNodeFlag>>({n0checkflow});
+        sys_checkRecvFlowProbeStepSystem,
+        NpuID, NodeID, RecvNodeFlag, PoolSlotActive>>({n0checkflow});
+    // A1: per-NPU KV draft pass + serial commit, replacing the legacy
+    // collectInferenceKvCompletions singleton at the same graph position.
+    // The commit replays tickets in npu-major order, so the D-worker queue
+    // enqueue order (F6/F7) is unchanged.
+    auto n0kvdraft = builder.addToGraph<ParallelForNode<Engine,
+        collectInferenceKvDraftStepSystem,
+        NpuID, NpuFlowFinishedList, NpuKvCollectDraft>>({n0checkrecv});
     auto n0collectkv = builder.addToGraph<ParallelForNode<Engine,
-        collectInferenceKvStepSystem, SimDriver>>({n0checkrecv});
+        commitInferenceKvCollectStepSystem, SimDriver>>({n0kvdraft});
     auto n0clearfinished = builder.addToGraph<ParallelForNode<Engine,
         clearNpuFlowFinishStepSystem,
         NpuID, NpuFlowFinishedList>>({n0collectkv});
     auto n0remove = builder.addToGraph<ParallelForNode<Engine,
-        llm_system::sys_removeChakraNodes,
+        sys_removeChakraNodesProbeStepSystem,
         NpuID, ChakraNodes, HardwareResource, ProcessingCompTask,
-        ProcessingCommTasks>>({n0clearfinished});
+        ProcessingCommTasks, ChakraReadyState>>({n0clearfinished});
     auto n0process = builder.addToGraph<ParallelForNode<Engine,
-        llm_system::sys_processChakraNodes,
+        sys_processChakraNodesProbeStepSystem,
         NpuID, ChakraNodes, HardwareResource, ProcessingCompTask,
-        ProcessingCommTasks, OneNPUFinishedFlag,
-        ChakraNodesForNoDP, InferenceNpuExecution>>({n0remove});
+        ProcessingCommTasks, OneNPUFinishedFlag, ChakraNodesForNoDP,
+        ChakraReadyState, InferenceNpuExecution>>({n0remove});
     auto n0inferencepost = builder.addToGraph<ParallelForNode<Engine,
         inferencePostStepSystem, SimDriver>>({n0process});
-    // Serial, but O(active NPUs' own pending counts), not O(total flows
-    // ever materialized) -- replaces the old single global
-    // PendingSetFlowQueue drain.
+    // A9: per-request stats mirror, replacing the in-system
+    // updateInferenceStats call at the tail of inferencePostUpdate.
+    auto n0statspost = builder.addToGraph<ParallelForNode<Engine,
+        refreshInferenceStatsPostStepSystem, InferenceRequestSlot>>(
+            {n0inferencepost});
+    // A4: per-NPU fan-out replacing the serial singleton drain; runs at
+    // the same task-graph position (after the post-side stats refresh,
+    // before preparePendingFlowMeta).
     auto n0createFlows = builder.addToGraph<ParallelForNode<Engine,
-        createFlowsFromNpuRequestsStepSystem, SimDriver>>({n0inferencepost});
+        createFlowsFromNpuRequestsStepSystem,
+        NpuID, NpuFlowInbox, NpuFlowPool, NpuFlowActiveList>>(
+            {n0statspost});
     auto n0prepare = builder.addToGraph<ParallelForNode<Engine,
         preparePendingFlowMetaStepSystem,
         FlowDef, FlowRuntimeState, FlowScheduleState>>({n0createFlows});
+    // A7 per-NPU local pass: flow-local work + push tickets; the serial
+    // push commit lives at the tail of flushScheduleStepSystem (after
+    // schedulePendingFlows), preserving the legacy registration order.
+    auto n0npusched = builder.addToGraph<ParallelForNode<Engine,
+        scheduleNpuFlowsLocalStepSystem,
+        NpuID, NpuFlowActiveList, NpuFlowScheduleDraft>>({n0prepare});
     auto n0 = builder.addToGraph<ParallelForNode<Engine,
-        flushScheduleStepSystem, SimDriver>>({n0prepare});
+        flushScheduleStepSystem, SimDriver>>({n0npusched});
     auto n1reset = builder.addToGraph<ParallelForNode<Engine,
         resetIngressPortStateStepSystem,
         PortInbox, PortCreateList, PortCompletionList>>({n0});
@@ -831,28 +1184,28 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         PortState, DirtyPort, PortTraceLast, PortInbox, PortTagList,
         PortSourceTagList, PortCreateList>>({n1});
     auto n2createA_local = builder.addToGraph<ParallelForNode<Engine,
-        materializeTagCreateOnePortStepSystem,
+        materializeTagCreateOnePortAStepSystem,
         PortState, DirtyPort, PortCreateList, PortIngressLinkList,
         PortTraceLast>>({n2arr});
     auto n2createA = builder.addToGraph<ParallelForNode<Engine,
-        flushIngressTagLinksStepSystem, SimDriver>>({n2createA_local});
+        flushIngressTagLinksAStepSystem, SimDriver>>({n2createA_local});
     auto n2bw = builder.addToGraph<ParallelForNode<Engine,
         bwUpdateOnePortStepSystem,
         PortState, PortBuffer, DirtyPort, PortTraceLast, PortInbox,
         PortTagList, PortCreateList, PortCleanup, PortOutbox,
         PortCompletionList>>({n2createA});
     auto n2createB_local = builder.addToGraph<ParallelForNode<Engine,
-        materializeTagCreateOnePortStepSystem,
+        materializeTagCreateOnePortBStepSystem,
         PortState, DirtyPort, PortCreateList, PortIngressLinkList,
         PortTraceLast>>({n2bw});
     auto n2createB = builder.addToGraph<ParallelForNode<Engine,
-        flushIngressTagLinksStepSystem, SimDriver>>({n2createB_local});
+        flushIngressTagLinksBStepSystem, SimDriver>>({n2createB_local});
     auto n2pfc = builder.addToGraph<ParallelForNode<Engine,
         pfcPropagateOnePortStepSystem,
         PortState, DirtyPort, PortPfcState, PortTraceLast, PortInbox>>(
             {n2createB});
     auto n2cleanup_local = builder.addToGraph<ParallelForNode<Engine,
-        materializeTagCleanupOnePortNowStepSystem,
+        materializeTagCleanupOnePortIngressStepSystem,
         PortState, PortCleanup, PortIngressUnlinkList,
         PortCompletionList, PortOutbox>>({n2pfc});
     auto n2cleanup = builder.addToGraph<ParallelForNode<Engine,
@@ -877,7 +1230,7 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         applyDrainHintOnePortStepSystem,
         PortState, PortDrainHint, PortTimers>>({n5reduce});
     auto n5cleanup = builder.addToGraph<ParallelForNode<Engine,
-        materializeTagCleanupOnePortNowStepSystem,
+        materializeTagCleanupOnePortAllocStepSystem,
         PortState, PortCleanup, PortIngressUnlinkList,
         PortCompletionList, PortOutbox>>({n5drain});
     auto n5 = builder.addToGraph<ParallelForNode<Engine,
@@ -967,10 +1320,17 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         postBufferStepSystem,
         SimDriver>>({n11bufcleanup});
     auto n12finish = builder.addToGraph<ParallelForNode<Engine,
-        llm_system::sys_checkNpuFinish,
+        sys_checkNpuFinishProbeStepSystem,
         CheckNpuFinishFlag>>({n12});
+    // C1: frame-tail pool recycle -- replays each NPU's retire requests in
+    // npu_id order, returning finished comm/recv entities to their pool's
+    // free list. Must run after the checkFlow/checkRecvFlow workers (draft
+    // writers) and before the next frame's process*ChakraNodes (pool
+    // takers).
+    auto n12recycle = builder.addToGraph<ParallelForNode<Engine,
+        recycleCommEntitiesStepSystem, SimDriver>>({n12finish});
     auto n12status = builder.addToGraph<ParallelForNode<Engine,
-        updateSystemStatusStepSystem, SimDriver>>({n12finish});
+        updateSystemStatusStepSystem, SimDriver>>({n12recycle});
     final_node = n12status;
     }
     }

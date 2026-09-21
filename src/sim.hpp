@@ -522,23 +522,48 @@ struct Sim : public madrona::WorldBase {
     // ---
     // O(1) dense lookup, npu_id -> that NPU's real system entity.
     MADRONA_NO_INLINE madrona::Entity findNpuEntity(uint32_t npu_id) const;
-    // Serial singleton step: drains every NPU's NpuFlowInbox, pops a
-    // preallocated entity from that NPU's own NpuFlowPool per request, and
-    // fills in FlowDef/FlowRouteState/FlowRuntimeState/FlowScheduleState in
-    // place (flow_order = -1). Registers the new flow_id into the shared
-    // flowMetaEntityLookup table (the one piece of state that must stay
-    // global, since network-side routing resolves flow_id -> FlowMeta
-    // entity irrespective of owner). Bounded by MAX_NPUS *
-    // MAX_FLOWS_PER_NPU per step, not by total flows ever created.
-    MADRONA_NO_INLINE void createFlowsFromNpuRequests(madrona::Context &ctx);
-    // Serial singleton step, the NPU-owned counterpart of
-    // schedulePendingFlows(): walks each NPU's own bounded
-    // NpuFlowActiveList and activates (pushes the delayed arrival event +
-    // marks the route active) any flow whose FlowScheduleState.ready_now
-    // was set by preparePendingFlowMeta(). Unlike schedulePendingFlows, it
-    // does *not* assume/require array order == start_time order, so it
-    // never needs to stop scanning at the first not-yet-ready entry.
-    MADRONA_NO_INLINE void scheduleNpuFlows(madrona::Context &ctx);
+    // A4 per-NPU split of the former serial createFlowsFromNpuRequests
+    // singleton: one task-graph instance per NPU drains that NPU's own
+    // (lock-free) NpuFlowInbox, popping a preallocated entity from that
+    // NPU's own NpuFlowPool per request and filling in
+    // FlowDef/FlowRouteState/FlowRuntimeState/FlowScheduleState in place
+    // (flow_order = -1). Registers the new flow_id into the shared
+    // flowMetaEntityLookup table -- safe concurrently because each NPU's
+    // flow ids are disjoint (per-NPU monotonic counters, npu_id * 10000
+    // base, plus the high-bit inference KV ids owned by the sending P
+    // rank), so parallel inserts touch disjoint hash slots. The global
+    // numFlowDefs counter is bumped with an atomic add (value must be
+    // exact; order is irrelevant). Bounded by MAX_FLOWS_PER_NPU per step
+    // per NPU, not by total flows ever created.
+    MADRONA_NO_INLINE void createFlowsFromNpuRequestsOneNpu(
+        madrona::Context &ctx,
+        uint32_t npu_id,
+        NpuFlowInbox &inbox,
+        NpuFlowPool &pool,
+        NpuFlowActiveList &active);
+    // A7 per-NPU split of the former serial scheduleNpuFlows singleton.
+    // Local pass (one task-graph instance per NPU): walks that NPU's own
+    // bounded NpuFlowActiveList, performs every flow-local check and write
+    // (pending==0/ready_now==0 skips, route materialization into the flow's
+    // own FlowRouteState, route_active, pending=0/active=1) and records a
+    // push ticket (copy of the prepared DelayedEvent) into that NPU's own
+    // NpuFlowScheduleDraft for every prepared flow. Does NOT touch the
+    // global delayed-event state.
+    MADRONA_NO_INLINE void scheduleNpuFlowsLocal(
+        madrona::Context &ctx,
+        uint32_t npu_id,
+        NpuFlowActiveList &active,
+        NpuFlowScheduleDraft &draft);
+    // Serial commit pass (called at the tail of flushScheduleStepSystem,
+    // after schedulePendingFlows -- exactly where the legacy loop's pushes
+    // sat relative to the static-flow pushes): replays each NPU's tickets
+    // in npu_id ascending order, re-evaluating the global
+    // numDelayedEvents < MAX_DELAYED_EVENTS gate per ticket where the
+    // legacy loop evaluated it, then pushes via pushDelayedEvent and
+    // applies the deferred numFlowRoutes increments. This keeps the global
+    // delayed-event registration order byte-identical (F9 invariant).
+    // Clears the drafts.
+    MADRONA_NO_INLINE void commitNpuFlowSchedule(madrona::Context &ctx);
     MADRONA_NO_INLINE void materializeBacklog(FlowTagState &tag, Time at_time);
     MADRONA_NO_INLINE void materializeRemaining(FlowTagState &tag, Time at_time);
     MADRONA_NO_INLINE void materializeBufCnt(PortBuffer &port_buf,

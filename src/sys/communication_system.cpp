@@ -1,6 +1,8 @@
 #include "communication_system.hpp"
 #include "net_sys_interface.hpp"
 #include "sys_config.hpp"
+#include <cstdio>
+#include <cstdlib>
 #include "../sim.hpp"
 
 using namespace madsimple;
@@ -138,6 +140,37 @@ namespace madsimple::llm_system
         }
     }
 
+    // C1: append a retire request to the owner NPU's NpuCommRetireDraft.
+    // Atomic slot claim (same pattern as net_sys_interface::addEvent) keeps
+    // concurrent per-entity workers of the same NPU safe. The frame tail
+    // recycleCommEntities singleton drains the draft in npu_id order and
+    // moves the entities back to the pool free lists. Overflow is
+    // structurally unreachable (retires per frame <= lent entities <=
+    // MAX_COMM_ENTITIES_PER_NPU) and fails loudly with error_code 7.
+    void retirePooledCommEntity(Engine &ctx, uint32_t npu_id_value,
+                                Entity entity, uint32_t is_recv)
+    {
+        if (entity == Entity::none()) {
+            return;
+        }
+        NpuCommRetireDraft &draft =
+            ctx.get<NpuCommRetireDraft>(ctx.data().npuEntities[npu_id_value]);
+        madrona::AtomicU32Ref count_ref(draft.count);
+        uint32_t slot = count_ref.fetch_add_relaxed(1);
+        if (slot >= MAX_COMM_ENTITIES_PER_NPU) {
+            count_ref.fetch_sub<madrona::sync::relaxed>(1);
+            draft.overflow_count += 1;
+            SystemStatus &status = ctx.singleton<SystemStatus>();
+            status.failed = 1;
+            status.error_code = 7;
+            return;
+        }
+        draft.reqs[slot] = NpuCommRetireReq {
+            .entity = entity,
+            .is_recv = is_recv,
+        };
+    }
+
     void sys_checkFlow(Engine &ctx, NpuID &npu_id, NodeID &node_id, TaskFlows &taskFlows)
     {
         #if SYS_LOG
@@ -176,7 +209,15 @@ namespace madsimple::llm_system
 
                             ctx.get<ProcessingCommTasks>(ctx.data().npuEntities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx),npu_id.value);
 
-                            ctx.destroyEntity(ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value]);
+                            // C1: the finished comm entity goes back to its
+                            // owner NPU's pool via the retire draft (this
+                            // worker runs per-entity in parallel, so a
+                            // direct pool return would race with sibling
+                            // entities of the same NPU -- F13). The frame
+                            // tail recycleCommEntities step replays these
+                            // requests in npu_id order.
+                            retirePooledCommEntity(ctx, npu_id.value,
+                                ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value], 0);
                         }
                     }
                 }
@@ -215,7 +256,10 @@ namespace madsimple::llm_system
 
                                 ctx.get<ProcessingCommTasks>(ctx.data().npuEntities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx),npu_id.value);
 
-                                ctx.destroyEntity(ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value]);
+                                // C1: retire via the owner NPU's draft (see
+                                // the DEV_MODE==0 branch above).
+                                retirePooledCommEntity(ctx, npu_id.value,
+                                    ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value], 0);
                             }
                         }
                     }
@@ -248,7 +292,10 @@ namespace madsimple::llm_system
                 #endif
                 ctx.data().send_recv_map_recvend[recvNodeFlag.comm_src][recvNodeFlag.comm_dst]=0;
                 ctx.get<ProcessingCommTasks>(ctx.data().npuEntities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx),npu_id.value);
-                ctx.destroyEntity(ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value]);
+                // C1: retire via the owner NPU's draft (parallel per-entity
+                // workers must not touch the pool directly -- F13).
+                retirePooledCommEntity(ctx, npu_id.value,
+                    ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value], 1);
             }
 
         }
@@ -294,7 +341,9 @@ namespace madsimple::llm_system
                 }
                 #endif
                 ctx.get<ProcessingCommTasks>(ctx.data().npuEntities[npu_id.value]).setFinish(node_id.value, getCurrentTime(ctx),npu_id.value);
-                ctx.destroyEntity(ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value]);
+                // C1: retire via the owner NPU's draft (see above).
+                retirePooledCommEntity(ctx, npu_id.value,
+                    ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value], 1);
             }
         }
     }

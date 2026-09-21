@@ -74,11 +74,24 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerSingleton<SystemStatus>();
     registry.registerSingleton<InferenceRuntime>();
     registry.registerSingleton<InferenceStatsData>();
+    // A10 per-NPU answer-sheet reset roster (decision writes, NPU workers
+    // consume).
+    registry.registerSingleton<InferenceResetRoster>();
+    // A9 per-request stats refresh workers (one entity per request slot).
+    registry.registerComponent<InferenceRequestSlot>();
+    registry.registerArchetype<InferenceRequestSlotArch>();
 
     registry.registerComponent<NpuFlowInbox>();
     registry.registerComponent<NpuFlowPool>();
     registry.registerComponent<NpuFlowActiveList>();
     registry.registerComponent<NpuFlowFinishedList>();
+    // A1/A7 per-NPU draft components (parallel scan -> serial commit).
+    registry.registerComponent<NpuKvCollectDraft>();
+    registry.registerComponent<NpuFlowScheduleDraft>();
+    // C1 per-NPU comm entity pool + retire draft.
+    registry.registerComponent<NpuCommEntityPool>();
+    registry.registerComponent<NpuCommRetireDraft>();
+    registry.registerComponent<PoolSlotActive>();
 
     registry.registerArchetype<Agent>();
     registry.registerArchetype<SimDriverArch>();
@@ -171,6 +184,11 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.singleton<SystemStatus>() = SystemStatus {};
     ctx.singleton<InferenceRuntime>() = InferenceRuntime {};
     ctx.singleton<InferenceStatsData>() = InferenceStatsData {};
+    ctx.singleton<InferenceResetRoster>() = InferenceResetRoster {};
+    // A9 per-request stats split: the per-request worker entities are
+    // created lazily in initializeInference (one per request slot), so
+    // worlds without inference (and requests beyond num_requests) never
+    // pay for them. See inference_runtime.cpp.
     llm_system::init(ctx);
 
     initTrace("Sim::Sim before loadTopo", trace_mode_enabled);

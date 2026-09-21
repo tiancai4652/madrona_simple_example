@@ -27,6 +27,7 @@ namespace madsimple::llm_system
                                     ProcessingCommTasks &processingCommTasks,
                                     OneNPUFinishedFlag & oneNPUFinishedFlag,
                                     ChakraNodesForNoDP & chakraNodesForNoDP,
+                                    ChakraReadyState &chakraReadyState,
                                     InferenceNpuExecution &inferenceExecution);
 
         MADRONA_NO_INLINE void sys_removeChakraNodes(Engine &ctx,
@@ -34,7 +35,8 @@ namespace madsimple::llm_system
                                    ChakraNodes &chakraNodes,
                                    HardwareResource &hardwareResource,
                                    ProcessingCompTask &processingCompTask,
-                                   ProcessingCommTasks &processingCommTasks);
+                                   ProcessingCommTasks &processingCommTasks,
+                                   ChakraReadyState &chakraReadyState);
 
         MADRONA_NO_INLINE void sys_checkNpuFinish(Engine &ctx, CheckNpuFinishFlag &checkNpuFinishFlag);
 

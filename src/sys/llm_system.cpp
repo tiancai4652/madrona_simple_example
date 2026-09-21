@@ -6,6 +6,11 @@
 
 #include <algorithm>
 
+#ifndef MADRONA_GPU_MODE
+#include <cstdio>
+#include <cstdlib>
+#endif
+
 #include "topo_logic.hpp"
 
 #include "llm_system.hpp"
@@ -247,9 +252,9 @@ namespace madsimple::llm_system {
                             }
                             #endif
                             
-                            processingCommTask.state = TaskState::START;
-                            processingCommTask.node_id = node.id;
-                            // processingCommTasks.addTask(processingCommTask);
+                            // B1: startTask keeps the per-node live-task
+                            // counts exact (see ProcessingCommTasks).
+                            processingCommTasks.startTask(processingCommTask, node.id);
 
                             
                             // // Create ring configuration entity and set ring parameters
@@ -271,8 +276,23 @@ namespace madsimple::llm_system {
                             comm_size=comm_size/SYS_LOG_LIMIT_COMM_SIZE;
                             #endif
 
-                            // create comm entity
-                            Entity process_e = ctx.makeEntity < ProcessComm_E > ();
+                            // C1: take a preallocated comm entity from
+                            // this NPU's own pool (legacy makeEntity was a
+                            // global-allocator hotspot).
+                            NpuCommEntityPool &comm_pool =
+                                ctx.get<NpuCommEntityPool>(
+                                    ctx.data().npuEntities[id.value]);
+                            Entity process_e = comm_pool.takeComm();
+                            if (process_e == Entity::none()) {
+                                // P2: loud failure, error_code 7 = comm
+                                // entity pool exhausted.
+                                SystemStatus &pool_status =
+                                    ctx.singleton<SystemStatus>();
+                                pool_status.failed = 1;
+                                pool_status.error_code = 7;
+                                return;
+                            }
+                            ctx.get < PoolSlotActive > (process_e).active = 1;
                             // Manually initialize TaskFlows to avoid temporary object creation
                             TaskFlows &task_flows = ctx.get < TaskFlows > (process_e);
                             task_flows.is_exec = false;
@@ -367,10 +387,6 @@ namespace madsimple::llm_system {
                             LOG_NODE_INFO("Receive: %lu -> %lu", src, dst);
                         }
                         #endif
-                        processingCommTask.state = TaskState::START;
-                        processingCommTask.node_id = node.id;
-                        // processingCommTasks.addTask(processingCommTask);
-
                         #if SIMPLE_LOG_MODE
                             if (SYS_LOG_TARGET_NODE == dst) {
                                 printf("send_recv_map_recvend set 1, src(%lu),dst(%lu)\n", src, dst);
@@ -378,9 +394,27 @@ namespace madsimple::llm_system {
                             }
                         #endif
 
+                        // B1: startTask keeps the per-node live-task counts
+                        // exact (see ProcessingCommTasks).
+                        processingCommTasks.startTask(processingCommTask, node.id);
 
-                        // create comm entity
-                        Entity process_e = ctx.makeEntity < ProcessRecvComm_E > ();
+
+                        // C1: take a preallocated recv entity from this
+                        // NPU's own pool.
+                        NpuCommEntityPool &comm_pool =
+                            ctx.get<NpuCommEntityPool>(
+                                ctx.data().npuEntities[id.value]);
+                        Entity process_e = comm_pool.takeRecv();
+                        if (process_e == Entity::none()) {
+                            // P2: loud failure, error_code 7 = comm entity
+                            // pool exhausted.
+                            SystemStatus &pool_status =
+                                ctx.singleton<SystemStatus>();
+                            pool_status.failed = 1;
+                            pool_status.error_code = 7;
+                            return;
+                        }
+                        ctx.get < PoolSlotActive > (process_e).active = 1;
                         ctx.get < NpuID > (process_e).value = id.value;
                         ctx.get < NodeID > (process_e).value = node.id;
                         ctx.get < RecvNodeFlag > (process_e).comm_src = src;
@@ -395,7 +429,13 @@ namespace madsimple::llm_system {
                             ctx.data().claimRecvDone(
                                 ctx, node.comm_para, src, dst)) {
                             processingCommTasks.setFinish(node.id, getCurrentTime(ctx), id.value);
-                            ctx.destroyEntity(process_e);
+                            // C1: immediate finish returns the entity to
+                            // this NPU's own pool (serial context here --
+                            // inside this NPU's process*ChakraNodes
+                            // instance), same effect as the legacy
+                            // destroyEntity.
+                            ctx.get < PoolSlotActive > (process_e).active = 0;
+                            comm_pool.retireRecv(process_e);
                             ctx.data().npus_chakra_exec_entity[id.value][node.id] = Entity::none();
                         }
                         #if SIMPLE_LOG_MODE
@@ -456,10 +496,31 @@ namespace madsimple::llm_system {
                         if (ctx.data().npus_chakra_exec_entity[id.value][node.id] != Entity::none()) {
                             // printf("ProcessComm_E entity already exists for npu %lu node %d, reusing\n", 
                             //        id.value, node.id);
-                            ctx.destroyEntity(ctx.data().npus_chakra_exec_entity[id.value][node.id]);
+                            // C1: the recorded entity was already retired
+                            // when its task finished (or is a stale reference
+                            // to a completed task; containsNodeId guarantees
+                            // no in-flight task exists for this node here),
+                            // so the legacy destroyEntity was a safe no-op
+                            // on an already-destroyed entity. With the pool
+                            // the entity went back at retire time -- nothing
+                            // to destroy here.
                         }
-                        // create comm entity
-                        Entity process_e = ctx.makeEntity < ProcessComm_E > ();
+                        // C1: take a preallocated comm entity from this
+                        // NPU's own pool.
+                        NpuCommEntityPool &comm_pool =
+                            ctx.get<NpuCommEntityPool>(
+                                ctx.data().npuEntities[id.value]);
+                        Entity process_e = comm_pool.takeComm();
+                        if (process_e == Entity::none()) {
+                            // P2: loud failure, error_code 7 = comm entity
+                            // pool exhausted.
+                            SystemStatus &pool_status =
+                                ctx.singleton<SystemStatus>();
+                            pool_status.failed = 1;
+                            pool_status.error_code = 7;
+                            return;
+                        }
+                        ctx.get < PoolSlotActive > (process_e).active = 1;
                         // Manually initialize TaskFlows to avoid temporary object creation
                         TaskFlows &task_flows = ctx.get < TaskFlows > (process_e);
                         task_flows.is_exec = false;
@@ -581,9 +642,9 @@ namespace madsimple::llm_system {
                                     // create comm task
                                     ProcessingCommTask &processingCommTask = processingCommTasks.getNextFreeTask();
                                     processingCommTask.time_start_ns = getCurrentTime(ctx);
-                                    processingCommTask.state = TaskState::START;
-                                    processingCommTask.node_id = node.id;
-                                    // processingCommTasks.addTask(processingCommTask);
+                                    // B1: startTask keeps the per-node live-task
+                                    // counts exact (see ProcessingCommTasks).
+                                    processingCommTasks.startTask(processingCommTask, node.id);
 
                                     
 
@@ -721,6 +782,7 @@ namespace madsimple::llm_system {
         ProcessingCommTasks & processingCommTasks,
         OneNPUFinishedFlag & oneNPUFinishedFlag,
         ChakraNodesForNoDP & chakraNodesForNoDP,
+        ChakraReadyState & chakraReadyState,
         InferenceNpuExecution &inferenceExecution) {
 
         #if SYS_LOG
@@ -732,9 +794,42 @@ namespace madsimple::llm_system {
 
         // append nodes
         if (hardwareResource.one_task_finish) {
+#ifndef MADRONA_GPU_MODE
+            // B1 debug self-check (env-gated, CPU-only): the incrementally
+            // maintained ready state and the O(1) containsNodeId counts must
+            // be exactly equivalent to a full rescan. Temporary tooling for
+            // the 9-并行度优化 acceptance; remove with the probe if asked.
+            if (std::getenv("MADRONA_READY_VERIFY") != nullptr) {
+                ChakraReadyState verify;
+                buildChakraReadyState(chakraNodes, verify);
+                bool ok =
+                    verify.valid_count == chakraReadyState.valid_count &&
+                    verify.ready_count == chakraReadyState.ready_count;
+                for (int i = 0; ok && i < verify.ready_count; i++) {
+                    ok = ok && verify.ready[i] == chakraReadyState.ready[i];
+                }
+                for (int i = 0; ok && i < MAX_CHAKRA_NODES_PER_NPU; i++) {
+                    ok = ok && verify.remaining_deps[i] ==
+                        chakraReadyState.remaining_deps[i];
+                }
+                if (!ok) {
+                    std::fprintf(stderr,
+                        "[READY-VERIFY] ready-state mismatch npu=%u "
+                        "(valid %d vs %d, ready %d vs %d)\n", id.value,
+                        verify.valid_count, chakraReadyState.valid_count,
+                        verify.ready_count, chakraReadyState.ready_count);
+                    std::abort();
+                }
+            }
+#endif
             // ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
+            // B1: enumerate the incrementally maintained ready set instead
+            // of rescanning all MAX_CHAKRA_NODES_PER_NPU nodes every frame.
+            // readyNodesFromState reproduces the legacy emission order
+            // (ascending slot) and the is_none_node semantics exactly.
             bool is_none_node = true;
-            int node_count = filterNoDependencyNodes(chakraNodes, chakraNodesForNoDP.current_exec_nodes, is_none_node);
+            int node_count = readyNodesFromState(chakraNodes, chakraReadyState,
+                chakraNodesForNoDP.current_exec_nodes, is_none_node);
             
             #if SIMPLE_LOG_MODE
                 // if (id.value >=392 && id.value <= 417) {
@@ -831,7 +926,8 @@ namespace madsimple::llm_system {
         ChakraNodes & chakraNodes,
         HardwareResource & hardwareResource,
         ProcessingCompTask & processingCompTask,
-        ProcessingCommTasks & processingCommTasks) {
+        ProcessingCommTasks & processingCommTasks,
+        ChakraReadyState & chakraReadyState) {
         #if SYS_LOG
         if (SYS_LOG_TARGET_NODE == id.value) {
             LOG_SYS_HEADER("5", "Node Removal and Resource Recycling System");
@@ -844,7 +940,7 @@ namespace madsimple::llm_system {
 
             if(DEV_MODE == 0)
             {
-                removeNode(chakraNodes, processingCompTask.node_id);
+                removeNodeWithReady(chakraNodes, processingCompTask.node_id, chakraReadyState);
                 #if TEST_CHAKRA_NODE_LOG_FOR_CPU_ONLY
                 if (SYS_LOG_TARGET_NODE == id.value) {
                     printf("[TEST CHAKRA NODE] remove node: %d\n", processingCompTask.node_id);
@@ -869,7 +965,7 @@ namespace madsimple::llm_system {
             {
                 skipTime_remove_time(ctx,
                     static_cast<uint64_t>(processingCompTask.time_finish_ns));
-                removeNode(chakraNodes, processingCompTask.node_id);
+                removeNodeWithReady(chakraNodes, processingCompTask.node_id, chakraReadyState);
                 #if TEST_CHAKRA_NODE_LOG_FOR_CPU_ONLY
                 if (SYS_LOG_TARGET_NODE == id.value) {
                     printf("[TEST CHAKRA NODE] remove node: %d\n", processingCompTask.node_id);
@@ -925,7 +1021,7 @@ namespace madsimple::llm_system {
                     // }
                     // release node.
 
-                    removeNode(chakraNodes, id.result[i].node_id);
+                    removeNodeWithReady(chakraNodes, id.result[i].node_id, chakraReadyState);
                     #if TEST_CHAKRA_NODE_LOG_FOR_CPU_ONLY
                     if (SYS_LOG_TARGET_NODE == id.value) {
                         printf("[TEST CHAKRA NODE] remove node: %d\n", processingCompTask.node_id);

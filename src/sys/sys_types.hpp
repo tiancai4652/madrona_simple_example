@@ -575,6 +575,17 @@ namespace madsimple
         int32_t initialized = 0;
         int32_t finished = 0;
         int32_t failed = 0;
+        // Error semantics (latched with failed=1, first writer wins is not
+        // guaranteed -- codes are distinct per failure family):
+        //   1 = invalid system-layer init, 2/3 = bad comm src/dst,
+        //   4 = NPU flow inbox/finished-list overflow,
+        //   5 = NPU pair-state overflow,
+        //   6 = delayed-event drop / registration loss,
+        //   7 = C1 comm task entity pool exhausted (per-NPU preallocated
+        //       ProcessComm_E/ProcessRecvComm_E pool empty; raise
+        //       MAX_COMM_ENTITIES_PER_NPU),
+        //   100+ = InferenceError (invalid config, capacity, queue
+        //       overflow, ...).
         int32_t error_code = 0;
         int32_t finished_npus = 0;
         int32_t total_npus = 0;
@@ -602,6 +613,26 @@ namespace madsimple
     struct ChakraNodesForNoDP
     {
         ChakraNode current_exec_nodes[CURRENT_EXEC_NODES_MAX];
+    };
+
+    // B1 incremental "ready node" bookkeeping, one component per NPU
+    // (replaces the per-frame full O(193) filterNoDependencyNodes scan).
+    // Invariant maintained by buildChakraReadyState / removeNode:
+    //  - valid_count == number of slots whose node type != None
+    //    (the legacy is_none_node == (valid_count == 0));
+    //  - remaining_deps[i] == number of non-INVALID dependency entries on
+    //    slot i;
+    //  - ready[0..ready_count) == the slots with zero remaining
+    //    dependencies, kept in ASCENDING slot order -- the exact emission
+    //    order the legacy full scan produced (comp-device first-come-
+    //    first-served and per-NPU flow-id numbering both consume this
+    //    order, so it must not drift).
+    struct ChakraReadyState
+    {
+        int32_t ready[MAX_CHAKRA_NODES_PER_NPU] {};
+        int32_t ready_count = 0;
+        int32_t remaining_deps[MAX_CHAKRA_NODES_PER_NPU] {};
+        int32_t valid_count = 0;
     };
 
 
@@ -674,6 +705,15 @@ namespace madsimple
 
         int64_t flow_id;
 
+        // B1 per-NPU duplicate-check acceleration: node_task_count[id]
+        // counts this NPU's task slots whose state != INIT and whose
+        // node_id == id, so containsNodeId is O(1) instead of a 512-slot
+        // linear scan. Maintained by startTask / dequeueTasksByTime /
+        // getNextFreeTask's overflow fallback; reset by the ProcessingCommTasks
+        // default assignment in sys_init / resetNpuForReplay. Ids outside
+        // [0, MAX_COMM_TASK_PER_NPU) fall back to the legacy linear scan.
+        int32_t node_task_count[MAX_COMM_TASK_PER_NPU] {};
+
         // Default constructor
         ProcessingCommTasks()
         {
@@ -686,15 +726,6 @@ namespace madsimple
         // Get total flow count of all tasks
         int getFlowId()
         {
-            // int totalFlowCount = 0;
-            // for (int i = 0; i < MAX_COMM_TASK_PER_NPU; ++i)
-            // {
-            //     if (tasks[i].state != TaskState::INIT)
-            //     { // Only count valid tasks
-            //         totalFlowCount += tasks[i].flow_count;
-            //     }
-            // }
-            // return totalFlowCount;
             flow_id += 1;
             return flow_id;
         }
@@ -702,6 +733,12 @@ namespace madsimple
         // Check if a node with specified ID exists
         bool containsNodeId(int32_t node_id) const
         {
+            // B1: O(1) path via the per-node live-task counts.
+            if (node_id >= 0 && node_id < MAX_COMM_TASK_PER_NPU) {
+                return node_task_count[node_id] > 0;
+            }
+            // Fallback (ids outside the count-array range): exact legacy
+            // linear scan.
             for (int i = 0; i < MAX_COMM_TASK_PER_NPU; ++i)
             {
                 // Task state may be START or FINISH, not yet processed
@@ -711,6 +748,41 @@ namespace madsimple
                 }
             }
             return false; // No matching task found
+        }
+
+        // B1 bookkeeping: retire/acquire the per-node live-task count.
+        void retireNodeCount(int32_t node_id)
+        {
+            if (node_id >= 0 && node_id < MAX_COMM_TASK_PER_NPU &&
+                node_task_count[node_id] > 0) {
+                node_task_count[node_id] -= 1;
+            }
+        }
+
+        void acquireNodeCount(int32_t node_id)
+        {
+            if (node_id >= 0 && node_id < MAX_COMM_TASK_PER_NPU) {
+                node_task_count[node_id] += 1;
+            }
+        }
+
+        // B1: register a task slot as started (INIT -> START) with its node
+        // id, keeping the per-node count exact. Handles the
+        // getNextFreeTask() overflow fallback where an occupied slot is
+        // reused: the previous occupant's count is retired first so the
+        // counts keep matching the linear-scan semantics exactly.
+        void startTask(ProcessingCommTask &task, int32_t node_id)
+        {
+            const int32_t idx = static_cast<int32_t>(&task - tasks);
+            if (idx < 0 || idx >= MAX_COMM_TASK_PER_NPU) {
+                return;
+            }
+            if (tasks[idx].state != TaskState::INIT) {
+                retireNodeCount(tasks[idx].node_id);
+            }
+            task.node_id = node_id;
+            task.state = TaskState::START;
+            acquireNodeCount(node_id);
         }
 
         void setFinish(int32_t node_id, int64_t time_finish_ns,uint32_t npu_id)
@@ -746,6 +818,7 @@ namespace madsimple
                 {                                      // Find first position with node_id == -1
                     tasks[i] = new_task;               // Place new task
                     tasks[i].state = TaskState::START; // Mark task as valid
+                    acquireNodeCount(new_task.node_id); // B1: keep count exact
                     return true;                       // Add successful
                 }
             }
@@ -786,21 +859,9 @@ namespace madsimple
             {
                 if (tasks[i].state == TaskState::FINISH && tasks[i].time_end_ns <= t)
                 {
-                    // #if SYS_LOG
-                    // if (SYS_LOG_TARGET_NODE == id.value) {
-                    //     printf(" tasks.node_id %d FINISH\n", tasks[i].node_id);
-                    // }
-                    // #endif
-                    
-                    // #if SIMPLE_LOG_MODE
-                    // if (SYS_LOG_TARGET_NODE == id.value) {
-                    //     printf(" tasks.node_id %d FINISH\n", tasks[i].node_id);
-                    // }
-                    // #endif
                     result[count++] = tasks[i];       // Place task in result array
+                    retireNodeCount(tasks[i].node_id); // B1: keep per-node count exact
                     tasks[i].state = TaskState::INIT; // Mark task as invalid (dequeue)
-                                                      // tasks[i].node_id = -1;         // Reset node_id
-                                                      // tasks[i].time_finish_ns = 0;   // Reset time_finish_ns
                 }
             }
             return count; // Return number of tasks found
@@ -817,20 +878,26 @@ namespace madsimple
                          ProcessingCommTasks,
                          OneNPUFinishedFlag,
                          ChakraNodesForNoDP,
+                         ChakraReadyState,
                          NpuFlowInbox,
                          NpuFlowPool,
                          NpuFlowActiveList,
                          NpuFlowFinishedList,
-                         NpuFlowPairState>
+                         NpuFlowPairState,
+                         NpuKvCollectDraft,
+                         NpuFlowScheduleDraft,
+                         NpuCommEntityPool,
+                         NpuCommRetireDraft>
     {
     };
 
- 
+
 
     // ID &id, CollectiveCommType &collective_comm_type, CommParams &comm_params,TaskFlows &taskFlows
     struct ProcessComm_E : public madrona::Archetype<
                                NpuID, NodeID,
-                               TaskFlows>
+                               TaskFlows,
+                               PoolSlotActive>
     {
     };
 
@@ -862,7 +929,8 @@ namespace madsimple
 
     struct ProcessRecvComm_E : public madrona::Archetype<
     NpuID, NodeID,
-    RecvNodeFlag>
+    RecvNodeFlag,
+    PoolSlotActive>
     {
     };
 } // namespace madsimple

@@ -261,6 +261,28 @@ struct NpuFlowFinishedList {
     SysFlowRecord flows[MAX_FLOWS_PER_NPU] {};
 };
 
+// --- A1 (KV collect) draft pattern -----------------------------------------
+// Parallel per-NPU draft: each NPU scans its own NpuFlowFinishedList and
+// records raw KV-completion candidates (slot, shard, end_time) WITHOUT
+// touching the shared InferenceRuntime. A serial commit step then replays
+// every NPU's tickets in npu_id ascending order (== the legacy singleton's
+// iteration order), so the ledger mutations (kv_done_mask OR, t_kv_done
+// max, kv_done count) and -- critically -- the D-worker queue enqueue
+// order stay byte-identical. Capacity matches the finished list bound, so
+// overflow is structurally unreachable; it still fails loudly per the
+// accepted design.
+struct NpuKvCollectTicket {
+    uint32_t slot = 0;
+    uint32_t shard = 0;
+    uint64_t end_time_ns = 0;
+};
+
+struct NpuKvCollectDraft {
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    NpuKvCollectTicket tickets[MAX_FLOWS_PER_NPU] {};
+};
+
 // Persistent SEND completion mailbox owned by one destination NPU.
 // SEND completion is published from the serial network flush; concurrent
 // RECV systems only scan and atomically consume matching ready entries.
@@ -277,6 +299,109 @@ struct NpuFlowPairState {
     uint32_t count = 0;
     uint32_t overflow_count = 0;
     NpuFlowPairSlot slots[MAX_NPU_FLOW_PAIR_STATES] {};
+};
+
+// --- C1 (comm task entity pool) --------------------------------------------
+// Preallocated per-NPU pools of ProcessComm_E / ProcessRecvComm_E entities,
+// removing ctx.makeEntity/destroyEntity traffic from the per-step hot path
+// (the legacy dynamic creation is a global-allocator hotspot on GPU).
+//
+// Lifecycle: sys_init preallocates MAX_COMM_ENTITIES_PER_NPU entities of
+// each kind per NPU and fills the free lists. The per-NPU process*Node
+// systems take entities from their OWN pool (serial within the NPU
+// instance); finished comm/recv entities mark themselves retired by
+// atomically appending a retire request to the owner NPU's
+// NpuCommRetireDraft (per-entity writers, atomic slot claim -- same pattern
+// as net_sys_interface::addEvent), and a light singleton at the frame tail
+// (recycleCommEntities) replays the requests in npu_id order and moves the
+// entities back to the free lists. A same-NPU retire-from-decision-path
+// (recv immediate-finish, coll re-issue) goes straight back to the pool:
+// it runs serially inside that NPU's own process*ChakraNodes instance.
+// Pool exhaustion fails loudly with error_code 7.
+constexpr uint32_t MAX_COMM_ENTITIES_PER_NPU = 256;
+
+struct NpuCommEntityPool {
+    madrona::Entity comm_free[MAX_COMM_ENTITIES_PER_NPU] {};
+    int32_t comm_free_count = 0;
+    madrona::Entity comm_lent[MAX_COMM_ENTITIES_PER_NPU] {};
+    int32_t comm_lent_count = 0;
+    madrona::Entity recv_free[MAX_COMM_ENTITIES_PER_NPU] {};
+    int32_t recv_free_count = 0;
+    madrona::Entity recv_lent[MAX_COMM_ENTITIES_PER_NPU] {};
+    int32_t recv_lent_count = 0;
+
+    inline madrona::Entity takeComm()
+    {
+        if (comm_free_count == 0) {
+            return madrona::Entity::none();
+        }
+        madrona::Entity e = comm_free[--comm_free_count];
+        comm_free[comm_free_count] = madrona::Entity::none();
+        comm_lent[comm_lent_count++] = e;
+        return e;
+    }
+
+    inline madrona::Entity takeRecv()
+    {
+        if (recv_free_count == 0) {
+            return madrona::Entity::none();
+        }
+        madrona::Entity e = recv_free[--recv_free_count];
+        recv_free[recv_free_count] = madrona::Entity::none();
+        recv_lent[recv_lent_count++] = e;
+        return e;
+    }
+
+    // Serial-context returns (inside this NPU's own process*ChakraNodes
+    // instance): LIFO against the lent list, so lent stays a set.
+    inline void retireComm(madrona::Entity e)
+    {
+        for (int32_t i = comm_lent_count - 1; i >= 0; i--) {
+            if (comm_lent[i] == e) {
+                comm_lent[i] = comm_lent[--comm_lent_count];
+                comm_lent[comm_lent_count] = madrona::Entity::none();
+                if (comm_free_count < (int32_t)MAX_COMM_ENTITIES_PER_NPU) {
+                    comm_free[comm_free_count++] = e;
+                }
+                return;
+            }
+        }
+    }
+
+    inline void retireRecv(madrona::Entity e)
+    {
+        for (int32_t i = recv_lent_count - 1; i >= 0; i--) {
+            if (recv_lent[i] == e) {
+                recv_lent[i] = recv_lent[--recv_lent_count];
+                recv_lent[recv_lent_count] = madrona::Entity::none();
+                if (recv_free_count < (int32_t)MAX_COMM_ENTITIES_PER_NPU) {
+                    recv_free[recv_free_count++] = e;
+                }
+                return;
+            }
+        }
+    }
+};
+
+// Retire requests written concurrently by per-entity sys_checkFlow /
+// sys_checkRecvFlow workers (atomic slot claim, like the flow inbox).
+// Drained by the serial recycleCommEntities step at the frame tail.
+struct NpuCommRetireReq {
+    madrona::Entity entity = madrona::Entity::none();
+    uint32_t is_recv = 0;
+};
+
+struct NpuCommRetireDraft {
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    NpuCommRetireReq reqs[MAX_COMM_ENTITIES_PER_NPU] {};
+};
+
+// C1: liveness marker on pooled ProcessComm_E / ProcessRecvComm_E
+// entities. 0 = sitting in the pool's free list (task-graph systems that
+// iterate these archetypes must skip idle entities); 1 = lent out.
+struct PoolSlotActive {
+    int32_t active = 0;
 };
 
 // Durable FCT history for NPU-owned (dynamically injected) flows, appended
@@ -425,6 +550,29 @@ struct DelayedEvent {
     FlowArrivalEv arrival {};
     BwUpdateEv bwupd {};
     PfcControlEv pfcctrl {};
+};
+
+// --- A7 (NPU flow schedule) draft pattern ----------------------------------
+// Parallel per-NPU draft for Sim::scheduleNpuFlows' split: each NPU walks
+// its own NpuFlowActiveList, does every flow-local check/write (pending/
+// active flags, route materialization), and records a push ticket (a copy
+// of the prepared DelayedEvent) for flows with prepared != 0. The serial
+// commit inside flushScheduleStepSystem replays tickets in npu_id
+// ascending order, re-evaluating the global numDelayedEvents capacity gate
+// per ticket exactly where the legacy loop evaluated it, so the global
+// delayed-event registration order (F9 invariant) is preserved byte for
+// byte. numFlowRoutes increments are deferred to the commit via the
+// route_new flag so even the trace-log-visible counter timeline matches
+// the legacy loop.
+struct NpuScheduleTicket {
+    DelayedEvent event {};
+    int32_t route_new = 0;
+};
+
+struct NpuFlowScheduleDraft {
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    NpuScheduleTicket tickets[MAX_FLOWS_PER_NPU] {};
 };
 
 enum class NodeType : int32_t {

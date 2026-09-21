@@ -4,6 +4,8 @@
 #include "pd_router.hpp"
 
 #include <climits>
+#include <cstdio>
+#include <cstdlib>
 
 namespace madsimple {
 
@@ -211,7 +213,55 @@ bool beginInferenceKvTransfer(Engine &ctx, InferenceRuntime &runtime,
     return true;
 }
 
-void collectInferenceKvCompletions(Engine &ctx)
+// A1 draft pass (per NPU): see kv_transfer.hpp. Only entry-local filters
+// run here; the request-state checks and all ledger mutations live in the
+// commit pass, replayed in npu-major order.
+void collectInferenceKvDrafts(Engine &ctx, uint32_t npu_id,
+                              const NpuFlowFinishedList &finished,
+                              NpuKvCollectDraft &draft)
+{
+    (void)npu_id;
+    const InferenceConfigData &config =
+        ctx.get<InferenceConfigData>(ctx.data().init_entity);
+    if (config.data[IC_ENABLED] == 0) {
+        return;
+    }
+    const InferenceRuntime &runtime = ctx.singleton<InferenceRuntime>();
+    if (runtime.initialized == 0) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < finished.count; i++) {
+        const uint32_t flow_id = finished.flows[i].flow_id;
+        if (!isInferenceKvFlowID(flow_id)) {
+            continue;
+        }
+        const uint32_t slot = inferenceKvRequestSlot(flow_id);
+        const uint32_t shard = inferenceKvShard(flow_id);
+        if (slot >= static_cast<uint32_t>(runtime.num_requests) ||
+            shard >= 32) {
+            continue;
+        }
+        if (draft.count >= MAX_FLOWS_PER_NPU) {
+            // Structurally unreachable (draft entries <= finished.count
+            // <= MAX_FLOWS_PER_NPU), kept as the agreed loud failure.
+            draft.overflow_count += 1;
+            failInference(ctx, InferenceError::QueueOverflow);
+            return;
+        }
+        draft.tickets[draft.count++] = NpuKvCollectTicket {
+            .slot = slot,
+            .shard = shard,
+            .end_time_ns = finished.flows[i].end_time_ns,
+        };
+    }
+}
+
+// A1 commit pass (serial singleton): replays the draft tickets in
+// npu_id-major order with the exact legacy per-entry body, so the
+// request-ledger mutations and the D-worker queue enqueue order are
+// byte-identical to the pre-split singleton (F6/F7 invariants).
+void commitInferenceKvCollect(Engine &ctx)
 {
     const InferenceConfigData &config =
         ctx.get<InferenceConfigData>(ctx.data().init_entity);
@@ -228,19 +278,11 @@ void collectInferenceKvCompletions(Engine &ctx)
         if (entity == madrona::Entity::none()) {
             continue;
         }
-        const NpuFlowFinishedList &finished =
-            ctx.get<NpuFlowFinishedList>(entity);
-        for (uint32_t i = 0; i < finished.count; i++) {
-            const uint32_t flow_id = finished.flows[i].flow_id;
-            if (!isInferenceKvFlowID(flow_id)) {
-                continue;
-            }
-            const uint32_t slot = inferenceKvRequestSlot(flow_id);
-            const uint32_t shard = inferenceKvShard(flow_id);
-            if (slot >= static_cast<uint32_t>(runtime.num_requests) ||
-                shard >= 32) {
-                continue;
-            }
+        NpuKvCollectDraft &draft = ctx.get<NpuKvCollectDraft>(entity);
+        for (uint32_t i = 0; i < draft.count; i++) {
+            const NpuKvCollectTicket &ticket = draft.tickets[i];
+            const uint32_t slot = ticket.slot;
+            const uint32_t shard = ticket.shard;
             InferenceRequestRecord &request = runtime.requests[slot];
             const uint32_t bit = 1u << shard;
             if (request.state != InferenceRequestState::KvTransferring ||
@@ -250,7 +292,7 @@ void collectInferenceKvCompletions(Engine &ctx)
             request.kv_done_mask |= bit;
             request.kv_done++;
             const int64_t completion_ns =
-                static_cast<int64_t>(finished.flows[i].end_time_ns);
+                static_cast<int64_t>(ticket.end_time_ns);
             if (completion_ns > request.t_kv_done_ns) {
                 request.t_kv_done_ns = completion_ns;
             }
@@ -278,6 +320,7 @@ void collectInferenceKvCompletions(Engine &ctx)
                 failInference(ctx, InferenceError::QueueOverflow);
             }
         }
+        draft.count = 0;
     }
 }
 

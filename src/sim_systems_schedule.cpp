@@ -351,57 +351,76 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
     }
 }
 
-// NPU-owned counterpart of schedulePendingFlows(). Each NPU's
-// NpuFlowActiveList is small (<= MAX_FLOWS_PER_NPU) and *not* assumed to be
-// sorted by start_time, so -- unlike schedulePendingFlows's early `break` on
-// the first not-yet-ready entry -- this simply skips not-yet-ready entries
-// and keeps scanning. That is what actually fixes the head-of-line-blocking
-// bug the single global pendingFlowCursor window had: one NPU's (or the
-// static batch's) still-future flow can never prevent another NPU's
-// already-ready flow, sitting anywhere in its own small list, from being
-// activated this step.
-MADRONA_NO_INLINE void Sim::scheduleNpuFlows(Context &ctx)
+// NPU-owned counterpart of schedulePendingFlows(), A7 split into a
+// per-NPU local pass (below) plus a serial push commit
+// (commitNpuFlowSchedule, called from flushScheduleStepSystem after
+// schedulePendingFlows). Each NPU's NpuFlowActiveList is small
+// (<= MAX_FLOWS_PER_NPU) and *not* assumed to be sorted by start_time, so
+// -- unlike schedulePendingFlows's early `break` on the first not-yet-ready
+// entry -- this simply skips not-yet-ready entries and keeps scanning. That
+// is what actually fixes the head-of-line-blocking bug the single global
+// pendingFlowCursor window had: one NPU's (or the static batch's)
+// still-future flow can never prevent another NPU's already-ready flow,
+// sitting anywhere in its own small list, from being activated this step.
+//
+// Split contract: everything in this function is flow-local (reads/writes
+// only this NPU's active list entries and the flow entities it owns) --
+// except the global delayed-event push and the numFlowRoutes counter.
+// The push is the one order-sensitive global effect (per-port queue
+// insertion is stable among same-time events, so push order is
+// observable); it is deferred into the commit via the NPU's draft. The
+// numFlowRoutes increment is likewise deferred (route_new flag) so even
+// the trace-log-visible counter timeline matches the legacy loop. The
+// legacy capacity gate `numDelayedEvents < MAX_DELAYED_EVENTS` depends on
+// global push history, so it is re-evaluated by the commit per ticket at
+// exactly the replay position where the legacy loop evaluated it.
+MADRONA_NO_INLINE void Sim::scheduleNpuFlowsLocal(
+    Context &ctx, uint32_t npu_id, NpuFlowActiveList &active,
+    NpuFlowScheduleDraft &draft)
 {
-    SimRuntimeState &sim_runtime = ctx.singleton<SimRuntimeState>();
+    (void)npu_id;
     FlowCounters &counters = ctx.singleton<FlowCounters>();
 
-    for (int32_t npu_id = 0; npu_id < numNpus; npu_id++) {
-        Entity npu_entity = npuEntities[npu_id];
-        if (npu_entity == Entity::none()) {
+    for (uint32_t i = 0; i < active.count; i++) {
+        Entity flow_entity = active.active[i].flow_entity;
+        if (flow_entity == Entity::none()) {
             continue;
         }
 
-        NpuFlowActiveList &active = ctx.get<NpuFlowActiveList>(npu_entity);
-        for (uint32_t i = 0; i < active.count; i++) {
-            Entity flow_entity = active.active[i].flow_entity;
-            if (flow_entity == Entity::none()) {
-                continue;
-            }
+        FlowRuntimeState &flow_runtime =
+            ctx.get<FlowRuntimeState>(flow_entity);
+        if (flow_runtime.pending == 0) {
+            continue;
+        }
 
-            FlowRuntimeState &flow_runtime =
-                ctx.get<FlowRuntimeState>(flow_entity);
-            if (flow_runtime.pending == 0) {
-                continue;
-            }
+        const FlowScheduleState &schedule_state =
+            ctx.get<FlowScheduleState>(flow_entity);
+        if (schedule_state.ready_now == 0) {
+            continue;
+        }
 
-            const FlowScheduleState &schedule_state =
-                ctx.get<FlowScheduleState>(flow_entity);
-            if (schedule_state.ready_now == 0) {
-                continue;
+        const bool prepared = schedule_state.prepared != 0;
+        int32_t route_new = 0;
+        if (prepared) {
+            if (draft.count >= MAX_FLOWS_PER_NPU) {
+                // Structurally unreachable (tickets <= active list size
+                // <= MAX_FLOWS_PER_NPU); loud failure per the accepted
+                // A1/A7 draft design.
+                draft.overflow_count += 1;
+                SystemStatus &status = ctx.singleton<SystemStatus>();
+                status.failed = 1;
+                status.error_code = 6;
+                return;
             }
+            draft.tickets[draft.count++] = NpuScheduleTicket {
+                .event = schedule_state.prepared_event,
+                .route_new = 0,
+            };
 
-            if (schedule_state.prepared != 0 &&
-                sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
-                pushDelayedEvent(ctx, schedule_state.prepared_event);
-            }
-
-            if (schedule_state.prepared != 0 &&
-                counters.numFlowRoutes < MAX_FLOWS) {
+            if (counters.numFlowRoutes < MAX_FLOWS) {
                 const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
                 FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
-                if (route.num_steps <= 0) {
-                    counters.numFlowRoutes += 1;
-                }
+                route_new = route.num_steps <= 0 ? 1 : 0;
                 route = FlowRouteState {};
                 route.flow_id = flow.id;
                 route.num_steps = schedule_state.port_path_len - 1;
@@ -413,11 +432,40 @@ MADRONA_NO_INLINE void Sim::scheduleNpuFlows(Context &ctx)
                         schedule_state.port_path[j + 1];
                 }
                 flow_runtime.route_active = 1;
+                draft.tickets[draft.count - 1].route_new = route_new;
             }
-
-            flow_runtime.pending = 0;
-            flow_runtime.active = 1;
         }
+
+        flow_runtime.pending = 0;
+        flow_runtime.active = 1;
+    }
+}
+
+// A7 serial commit: replay the per-NPU push tickets in npu_id ascending
+// order (== the legacy scheduleNpuFlows iteration order). The capacity
+// gate and pushDelayedEvent run per ticket exactly where the legacy loop
+// ran them, so the global delayed-event registration order is unchanged.
+MADRONA_NO_INLINE void Sim::commitNpuFlowSchedule(Context &ctx)
+{
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
+    SimRuntimeState &sim_runtime = ctx.singleton<SimRuntimeState>();
+    for (int32_t npu_id = 0; npu_id < numNpus; npu_id++) {
+        Entity npu_entity = npuEntities[npu_id];
+        if (npu_entity == Entity::none()) {
+            continue;
+        }
+        NpuFlowScheduleDraft &draft =
+            ctx.get<NpuFlowScheduleDraft>(npu_entity);
+        for (uint32_t i = 0; i < draft.count; i++) {
+            const NpuScheduleTicket &ticket = draft.tickets[i];
+            if (sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
+                pushDelayedEvent(ctx, ticket.event);
+            }
+            if (ticket.route_new != 0) {
+                counters.numFlowRoutes += 1;
+            }
+        }
+        draft.count = 0;
     }
 }
 

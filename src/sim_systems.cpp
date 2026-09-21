@@ -509,97 +509,94 @@ MADRONA_NO_INLINE void sortNpuFlowInbox(NpuFlowInbox &inbox)
 
 } // namespace
 
-MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequests(Context &ctx)
+MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
+    Context &ctx, uint32_t npu_id,
+    NpuFlowInbox &inbox,
+    NpuFlowPool &pool,
+    NpuFlowActiveList &active)
 {
-    FlowCounters &counters = ctx.singleton<FlowCounters>();
-
-    for (int32_t npu_id = 0; npu_id < numNpus; npu_id++) {
-        Entity npu_entity = npuEntities[npu_id];
-        if (npu_entity == Entity::none()) {
-            continue;
-        }
-
-        NpuFlowInbox &inbox = ctx.get<NpuFlowInbox>(npu_entity);
-        if (inbox.count == 0) {
-            continue;
-        }
-        sortNpuFlowInbox(inbox);
-
-        NpuFlowPool &pool = ctx.get<NpuFlowPool>(npu_entity);
-        NpuFlowActiveList &active = ctx.get<NpuFlowActiveList>(npu_entity);
-
-        for (uint32_t i = 0; i < inbox.count; i++) {
-            const NpuFlowInboxEntry &req = inbox.entries[i];
-
-            if (pool.free_count == 0) {
-                inbox.overflow_count += 1;
-                continue;
-            }
-            if (active.count >= MAX_FLOWS_PER_NPU) {
-                inbox.overflow_count += 1;
-                continue;
-            }
-
-            Entity flow_entity = pool.free_flows[--pool.free_count];
-            pool.free_flows[pool.free_count] = Entity::none();
-
-            FlowDef flow {
-                .id = (FlowId)req.flow_id,
-                .src_node = (NodeId)req.comm_src,
-                .dst_node = (NodeId)req.comm_dst,
-                .size = (Bytes)req.flow_size,
-                .start_time = now,
-                .priority = 0,
-                .comm_para = req.comm_para,
-            };
-            ctx.get<FlowDef>(flow_entity) = flow;
-            ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};
-            ctx.get<FlowRuntimeState>(flow_entity) = FlowRuntimeState {
-                .pending = 1,
-                .active = 0,
-                .completed = 0,
-                .route_active = 0,
-                .owner_npu_id = npu_id,
-                .completion_record = FlowCompletionRecord {},
-            };
-            // flow_order = -1: this entity is NPU-owned, not part of the
-            // static flowMetaEntities[]/pendingFlowCursor window (see
-            // FlowScheduleState comment in sim.hpp).
-            ctx.get<FlowScheduleState>(flow_entity) = FlowScheduleState {
-                .flow_order = -1,
-                .ready_now = 0,
-                .prepared = 0,
-                .port_path_len = 0,
-                .port_path = {},
-                .prepared_event = DelayedEvent {},
-            };
-
-            // The flow_id -> FlowMeta lookup table stays a single shared
-            // structure (network-side routing needs to resolve any flow_id
-            // to its entity regardless of owner); insertion here is safe
-            // because createFlowsFromNpuRequests itself is a serial singleton
-            // step, so this loop never races with another NPU's insert.
-            insertFlowMetaLookup(flow.id, flow_entity);
-
-            active.active[active.count++] = NpuActiveFlow {
-                .flow_entity = flow_entity,
-                .flow_id = req.flow_id,
-            };
-
-            // NOTE: counters.numPendingFlows is intentionally left untouched
-            // here. It is exclusively the static flow-file scheduling
-            // window's size (see schedulePendingFlows's
-            // pendingFlowCursor + numPendingFlows window math in
-            // sim_systems_schedule.cpp); NPU-owned flows are scheduled
-            // through the independent scheduleNpuFlows() path below and
-            // must never grow that window, or schedulePendingFlows would
-            // start reading past the static flowMetaEntities[] contents it
-            // actually owns.
-            counters.numFlowDefs += 1;
-        }
-
-        inbox.count = 0;
+    if (inbox.count == 0) {
+        return;
     }
+
+    FlowCounters &counters = ctx.singleton<FlowCounters>();
+    sortNpuFlowInbox(inbox);
+
+    for (uint32_t i = 0; i < inbox.count; i++) {
+        const NpuFlowInboxEntry &req = inbox.entries[i];
+
+        if (pool.free_count == 0) {
+            inbox.overflow_count += 1;
+            continue;
+        }
+        if (active.count >= MAX_FLOWS_PER_NPU) {
+            inbox.overflow_count += 1;
+            continue;
+        }
+
+        Entity flow_entity = pool.free_flows[--pool.free_count];
+        pool.free_flows[pool.free_count] = Entity::none();
+
+        FlowDef flow {
+            .id = (FlowId)req.flow_id,
+            .src_node = (NodeId)req.comm_src,
+            .dst_node = (NodeId)req.comm_dst,
+            .size = (Bytes)req.flow_size,
+            .start_time = now,
+            .priority = 0,
+            .comm_para = req.comm_para,
+        };
+        ctx.get<FlowDef>(flow_entity) = flow;
+        ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};
+        ctx.get<FlowRuntimeState>(flow_entity) = FlowRuntimeState {
+            .pending = 1,
+            .active = 0,
+            .completed = 0,
+            .route_active = 0,
+            .owner_npu_id = (int32_t)npu_id,
+            .completion_record = FlowCompletionRecord {},
+        };
+        // flow_order = -1: this entity is NPU-owned, not part of the
+        // static flowMetaEntities[]/pendingFlowCursor window (see
+        // FlowScheduleState comment in sim.hpp).
+        ctx.get<FlowScheduleState>(flow_entity) = FlowScheduleState {
+            .flow_order = -1,
+            .ready_now = 0,
+            .prepared = 0,
+            .port_path_len = 0,
+            .port_path = {},
+            .prepared_event = DelayedEvent {},
+        };
+
+        // The flow_id -> FlowMeta lookup table stays a single shared
+        // structure (network-side routing needs to resolve any flow_id
+        // to its entity regardless of owner). Concurrent insertion is
+        // safe because flow ids are globally disjoint per NPU (per-NPU
+        // monotonic counters with the npu_id * 10000 base, plus the
+        // high-bit inference KV ids owned by the sending P rank), so
+        // parallel instances only ever write disjoint hash slots.
+        insertFlowMetaLookup(flow.id, flow_entity);
+
+        active.active[active.count++] = NpuActiveFlow {
+            .flow_entity = flow_entity,
+            .flow_id = req.flow_id,
+        };
+
+        // NOTE: counters.numPendingFlows is intentionally left untouched
+        // here. It is exclusively the static flow-file scheduling
+        // window's size (see schedulePendingFlows's
+        // pendingFlowCursor + numPendingFlows window math in
+        // sim_systems_schedule.cpp); NPU-owned flows are scheduled
+        // through the independent scheduleNpuFlows() path below and
+        // must never grow that window, or schedulePendingFlows would
+        // start reading past the static flowMetaEntities[] contents it
+        // actually owns.
+        // A4: global counter shared by all per-NPU instances -- atomic
+        // add keeps the total exact; integer addition is order-agnostic.
+        AtomicI32Ref(counters.numFlowDefs).fetch_add<sync::relaxed>(1);
+    }
+
+    inbox.count = 0;
 }
 
 MADRONA_NO_INLINE void Sim::pruneSystemEvents(Context &ctx)
