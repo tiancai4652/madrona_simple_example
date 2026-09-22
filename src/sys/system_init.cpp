@@ -177,7 +177,14 @@ namespace madsimple::llm_system
             // B1: build the incremental ready set once at parse time.
             buildChakraReadyState(ctx.get<ChakraNodes>(npuNode),
                                   ctx.get<ChakraReadyState>(npuNode));
-            ctx.get<ChakraTemplateNodes>(npuNode) = ChakraTemplateNodes {};
+            {
+                auto &c = ctx.get<ChakraTemplateNodes>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; i++) {
+                    c.nodes[i] = ChakraNode {};
+                }
+            }
             ctx.get<InferenceNpuExecution>(npuNode) = InferenceNpuExecution {};
             
             // Save nodeCount immediately
@@ -209,39 +216,88 @@ namespace madsimple::llm_system
             // 期2 E12; a second occurrence during C1 deleted the four
             // NpuFlow* assignments below -- garbage finished.count read as
             // 3.2e9 and crashed the A1 draft node, see E16).
-            ctx.get<NpuFlowInbox>(npuNode) = NpuFlowInbox {};
-            ctx.get<NpuFlowActiveList>(npuNode) = NpuFlowActiveList {};
-            ctx.get<NpuFlowFinishedList>(npuNode) = NpuFlowFinishedList {};
-            ctx.get<NpuFlowPairState>(npuNode) = NpuFlowPairState {};
-            ctx.get<NpuKvCollectDraft>(npuNode) = NpuKvCollectDraft {};
-            ctx.get<NpuFlowScheduleDraft>(npuNode) = NpuFlowScheduleDraft {};
+            {
+                auto &c = ctx.get<NpuFlowInbox>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_FLOWS_PER_NPU; i++) {
+                    c.entries[i] = NpuFlowInboxEntry {};
+                }
+            }
+            {
+                auto &c = ctx.get<NpuFlowActiveList>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_FLOWS_PER_NPU; i++) {
+                    c.active[i] = NpuActiveFlow {};
+                }
+            }
+            {
+                auto &c = ctx.get<NpuFlowFinishedList>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_FLOWS_PER_NPU; i++) {
+                    c.flows[i] = SysFlowRecord {};
+                }
+            }
+            {
+                auto &c = ctx.get<NpuFlowPairState>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_NPU_FLOW_PAIR_STATES; i++) {
+                    c.slots[i] = NpuFlowPairSlot {};
+                }
+            }
+            {
+                auto &c = ctx.get<NpuKvCollectDraft>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_FLOWS_PER_NPU; i++) {
+                    c.tickets[i] = NpuKvCollectTicket {};
+                }
+            }
+            {
+                auto &c = ctx.get<NpuFlowScheduleDraft>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_FLOWS_PER_NPU; i++) {
+                    c.tickets[i] = NpuScheduleTicket {};
+                }
+            }
             // C1: per-NPU comm entity pool + retire draft (same E12 rule).
             ctx.get<NpuCommEntityPool>(npuNode) = NpuCommEntityPool {};
-            ctx.get<NpuCommRetireDraft>(npuNode) = NpuCommRetireDraft {};
+            {
+                auto &c = ctx.get<NpuCommRetireDraft>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_COMM_ENTITIES_PER_NPU; i++) {
+                    c.reqs[i] = NpuCommRetireReq {};
+                }
+            }
             NpuCommEntityPool &comm_pool = ctx.get<NpuCommEntityPool>(npuNode);
             for (uint32_t pool_idx = 0;
                  pool_idx < MAX_COMM_ENTITIES_PER_NPU; pool_idx++) {
                 // ProcessComm_E pool entity. makeEntity runs no component
                 // constructors (E12): every component is assigned here.
                 Entity comm_entity = ctx.makeEntity<ProcessComm_E>();
-                ctx.get<NpuID>(comm_entity) = NpuID {};
-                ctx.get<NodeID>(comm_entity) = NodeID {};
+                zeroStruct(ctx.get<NpuID>(comm_entity));
+                zeroStruct(ctx.get<NodeID>(comm_entity));
                 ctx.get<TaskFlows>(comm_entity) = TaskFlows {};
-                ctx.get<PoolSlotActive>(comm_entity) = PoolSlotActive {};
+                zeroStruct(ctx.get<PoolSlotActive>(comm_entity));
                 comm_pool.comm_free[pool_idx] = comm_entity;
 
                 // ProcessRecvComm_E pool entity.
                 Entity recv_entity = ctx.makeEntity<ProcessRecvComm_E>();
-                ctx.get<NpuID>(recv_entity) = NpuID {};
-                ctx.get<NodeID>(recv_entity) = NodeID {};
-                ctx.get<RecvNodeFlag>(recv_entity) = RecvNodeFlag {};
-                ctx.get<PoolSlotActive>(recv_entity) = PoolSlotActive {};
+                zeroStruct(ctx.get<NpuID>(recv_entity));
+                zeroStruct(ctx.get<NodeID>(recv_entity));
+                zeroStruct(ctx.get<RecvNodeFlag>(recv_entity));
+                zeroStruct(ctx.get<PoolSlotActive>(recv_entity));
                 comm_pool.recv_free[pool_idx] = recv_entity;
             }
             comm_pool.comm_free_count = MAX_COMM_ENTITIES_PER_NPU;
             comm_pool.recv_free_count = MAX_COMM_ENTITIES_PER_NPU;
             NpuFlowPool &pool = ctx.get<NpuFlowPool>(npuNode);
-            pool = NpuFlowPool {};
+            pool = NpuFlowPool {}; // small local, value-init kept
             pool.free_count = MAX_FLOWS_PER_NPU;
             for (uint32_t flow_idx = 0;
                  flow_idx < MAX_FLOWS_PER_NPU; flow_idx++) {

@@ -7,6 +7,46 @@
 
 namespace madsimple {
 
+// GPU compile-time safety valve: NVRTC -O3 fully unrolls wholesale
+// `x = T{}` assignments of multi-KB components into tens of thousands of
+// individual stores, making every TU that runs them pay minutes of compile
+// time (PortBuffer ~64KB, InferenceRuntime ~300KB, constant-bound clear
+// loops, etc; see /app/report/优化gpu编译速度/8*.md). zeroBytes keeps the
+// stores in a non-unrollable loop (runtime ~ memset speed: word-wise with
+// pragma unroll 1).
+//
+// SEMANTIC CONTRACT: only use on structs whose value-init `T{}` is all-zero
+// bytes. Structs with non-zero NSDMIs (e.g. `= -1` or `= Entity::none()`,
+// which is 0xFFFF'FFFF) must NOT go through this: byte-zeroing would change
+// their initial state. Each call site must be audited (audited 2026-09-22,
+// see report 8 for the per-struct NSDMI check).
+inline MADRONA_NO_INLINE void zeroBytes(void *ptr, uint32_t num_bytes)
+{
+    char *p = static_cast<char *>(ptr);
+    while (((reinterpret_cast<uintptr_t>(p) & 7u) != 0) && num_bytes > 0) {
+        *p++ = 0;
+        num_bytes -= 1;
+    }
+    uint64_t *word = reinterpret_cast<uint64_t *>(p);
+    uint32_t num_words = num_bytes / 8;
+#pragma unroll 1
+    for (uint32_t i = 0; i < num_words; i++) {
+        word[i] = 0;
+    }
+    p += num_words * 8;
+    uint32_t num_tail = num_bytes % 8;
+#pragma unroll 1
+    for (uint32_t i = 0; i < num_tail; i++) {
+        p[i] = 0;
+    }
+}
+
+template <typename T>
+inline MADRONA_NO_INLINE void zeroStruct(T &obj)
+{
+    zeroBytes(&obj, static_cast<uint32_t>(sizeof(T)));
+}
+
 enum class ExportID : uint32_t {
     Reset,
     Action,

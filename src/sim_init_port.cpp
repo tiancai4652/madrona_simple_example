@@ -7,6 +7,15 @@ namespace madsimple {
 
 namespace {
 
+// GPU compile-time note: wholesale `x = T{}` on multi-KB components makes
+// NVRTC -O3 emit tens of thousands of unrolled stores (PortBuffer alone is
+// ~64KB), costing minutes of compile time per TU. The helpers below use
+// zeroStruct() for the bulk zero plus per-element value-init loops that
+// restore every array element's exact `T{}` state (NSDMIs like
+// PortTagLookupEntry's flow_id=-1 / Entity::none() are honored). Each loop
+// carries #pragma unroll 1 so NVRTC keeps it a loop.
+// See /app/report/优化gpu编译速度/8*.md.
+
 MADRONA_NO_INLINE void initPortCore(
     Context &ctx,
     Entity port_entity,
@@ -23,8 +32,15 @@ MADRONA_NO_INLINE void initPortCore(
         .connected = 0,
         .next_port_id = -1,
     };
-    ctx.get<PortBuffer>(port_entity) = PortBuffer {};
-    ctx.get<DirtyPort>(port_entity) = DirtyPort {};
+    {
+        auto &c = ctx.get<PortBuffer>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < PFC_MAX_PRIORITY; i++) {
+            c.prior_bufs[i] = PriorityBuffer {};
+        }
+    }
+    zeroStruct(ctx.get<DirtyPort>(port_entity));
 }
 
 MADRONA_NO_INLINE void initPortPfc(
@@ -43,36 +59,108 @@ MADRONA_NO_INLINE void initPortPfc(
         }
     }
     ctx.get<PortPfcConfig>(port_entity) = pfc_cfg;
-    ctx.get<PortPfcState>(port_entity) = PortPfcState {};
+    zeroStruct(ctx.get<PortPfcState>(port_entity));
 }
 
 MADRONA_NO_INLINE void initPortScratch(
     Context &ctx,
     Entity port_entity)
 {
-    ctx.get<PortCachedHints>(port_entity) = PortCachedHints {};
-    ctx.get<PortDrainHint>(port_entity) = PortDrainHint {};
+    zeroStruct(ctx.get<PortCachedHints>(port_entity));
+    zeroStruct(ctx.get<PortDrainHint>(port_entity));
     ctx.get<PortTimers>(port_entity) = PortTimers {
         .backlog_drain = Sim::timerInactiveSentinel(),
         .pfc_pause = Sim::timerInactiveSentinel(),
         .pfc_resume = Sim::timerInactiveSentinel(),
     };
-    ctx.get<PortTraceLast>(port_entity) = PortTraceLast {};
-    ctx.get<PortFinishedSourceList>(port_entity) = PortFinishedSourceList {};
-    ctx.get<PortDelayedQueue>(port_entity) = PortDelayedQueue {};
+    zeroStruct(ctx.get<PortTraceLast>(port_entity));
+    {
+        auto &c = ctx.get<PortFinishedSourceList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_CLEANUP; i++) {
+            c.tags[i] = Entity {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortDelayedQueue>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_DELAYED_EVENTS; i++) {
+            c.events[i] = DelayedEvent {};
+        }
+    }
 }
 
 MADRONA_NO_INLINE void initPortQueues(
     Context &ctx,
     Entity port_entity)
 {
-    ctx.get<PortCleanup>(port_entity) = PortCleanup {};
-    ctx.get<PortOutbox>(port_entity) = PortOutbox {};
-    ctx.get<PortTagLookup>(port_entity) = PortTagLookup {};
-    ctx.get<PortTagList>(port_entity) = PortTagList {};
-    ctx.get<PortSourceTagList>(port_entity) = PortSourceTagList {};
-    ctx.get<PortInbox>(port_entity) = PortInbox {};
-    ctx.get<PortCreateList>(port_entity) = PortCreateList {};
+    {
+        auto &c = ctx.get<PortCleanup>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_CLEANUP; i++) {
+            c.tags[i] = Entity {};
+            c.propagate[i] = 0;
+        }
+    }
+    {
+        auto &c = ctx.get<PortOutbox>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_OUTBOX; i++) {
+            c.events[i] = DelayedEvent {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortTagLookup>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_TAG_LOOKUP; i++) {
+            c.entries[i] = PortTagLookupEntry {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortTagList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_TAGS_PER_PORT; i++) {
+            c.tags[i] = Entity {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortSourceTagList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_TAGS_PER_PORT; i++) {
+            c.tags[i] = Entity {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortInbox>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_INBOX_ARRIVAL; i++) {
+            c.arrivals[i] = FlowArrivalEv {};
+        }
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_INBOX_BWUPD; i++) {
+            c.bwupds[i] = BwUpdateEv {};
+        }
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_INBOX_PFC; i++) {
+            c.pfcs[i] = PfcControlEv {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortCreateList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_CREATE; i++) {
+            c.reqs[i] = PortCreateReq {};
+        }
+    }
     PortTagPool pool {};
     pool.free_count = INITIAL_TAGS_PER_PORT;
     pool.allocated_count = INITIAL_TAGS_PER_PORT;
@@ -83,11 +171,46 @@ MADRONA_NO_INLINE void initPortQueues(
         pool.free_tags[i] = tag_entity;
     }
     ctx.get<PortTagPool>(port_entity) = pool;
-    ctx.get<PortIngressLinkList>(port_entity) = PortIngressLinkList {};
-    ctx.get<PortIngressUnlinkList>(port_entity) = PortIngressUnlinkList {};
-    ctx.get<PortDirtyMarkList>(port_entity) = PortDirtyMarkList {};
-    ctx.get<PortCompletionList>(port_entity) = PortCompletionList {};
-    ctx.get<IngressTagList>(port_entity) = IngressTagList {};
+    {
+        auto &c = ctx.get<PortIngressLinkList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_INGRESS_LINKS; i++) {
+            c.reqs[i] = PortIngressLinkReq {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortIngressUnlinkList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_INGRESS_UNLINKS; i++) {
+            c.reqs[i] = PortIngressUnlinkReq {};
+        }
+    }
+    {
+        auto &c = ctx.get<PortDirtyMarkList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_DIRTY_MARKS; i++) {
+            c.port_ids[i] = 0;
+        }
+    }
+    {
+        auto &c = ctx.get<PortCompletionList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_PORT_COMPLETE; i++) {
+            c.reqs[i] = PortCompletionReq {};
+        }
+    }
+    {
+        auto &c = ctx.get<IngressTagList>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_TAGS_PER_INGRESS; i++) {
+            c.tags[i] = Entity {};
+        }
+    }
 }
 
 } // namespace
