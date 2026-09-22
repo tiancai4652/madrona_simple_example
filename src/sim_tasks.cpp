@@ -247,11 +247,15 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
     // error_code 6 = delayed event drop (4/5 are the NPU overflow codes).
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     if (runtime.delayedDropCount != 0 && status.failed == 0) {
+#ifndef MADRONA_GPU_MODE
+        // stderr only exists host-side; the loud failure below must also
+        // fire on GPU (error_code 6 is observable via the status tensor).
         std::fprintf(stderr,
             "[SIM][FATAL] delayed events dropped: count=%d "
             "(pfc=%d) -- results are incomplete; raise the per-port "
             "event queue capacity or add overflow backpressure\n",
             runtime.delayedDropCount, runtime.delayedPfcDropCount);
+#endif
         status.failed = 1;
         status.error_code = 6;
     }

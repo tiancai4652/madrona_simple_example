@@ -182,7 +182,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     ctx.get<WorkloadParamsTableData>(sys_input) = WorkloadParamsTableData {};
     init_entity = sys_input;
     ctx.singleton<SystemStatus>() = SystemStatus {};
-    ctx.singleton<InferenceRuntime>() = InferenceRuntime {};
+    zeroInferenceRuntime(ctx.singleton<InferenceRuntime>());
     ctx.singleton<InferenceStatsData>() = InferenceStatsData {};
     ctx.singleton<InferenceResetRoster>() = InferenceResetRoster {};
     // A9 per-request stats split: the per-request worker entities are

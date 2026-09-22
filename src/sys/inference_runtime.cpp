@@ -58,7 +58,7 @@ MADRONA_NO_INLINE bool initializeInference(
     const InferenceConfigData &config,
     const InferenceRequestData &input)
 {
-    runtime = InferenceRuntime {};
+    zeroInferenceRuntime(runtime);
     runtime.enabled = config.data[IC_ENABLED] != 0;
     if (runtime.enabled == 0) {
         runtime.initialized = 1;

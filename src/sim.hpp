@@ -140,7 +140,9 @@ struct Sim : public madrona::WorldBase {
         int32_t perf_fct_only = 1;
     };
 
-    static void registerTypes(madrona::ECSRegistry &registry,
+    // MADRONA_NO_INLINE: device initECS kernel calls this; keep its body out
+    // of the caller's IR to bound GPU compile time.
+    static MADRONA_NO_INLINE void registerTypes(madrona::ECSRegistry &registry,
                               const Config &cfg);
 
     static MADRONA_NO_INLINE void setupTasks(

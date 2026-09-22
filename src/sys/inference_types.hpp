@@ -177,6 +177,21 @@ struct InferenceRuntime {
     InferenceWorker d_workers[MAX_INFERENCE_WORKERS] {};
 };
 
+// NVRTC -O3 fully unrolls a wholesale `x = InferenceRuntime{}` into ~40K
+// individual stores (the object is ~300KB), making every TU that assigns it
+// pay minutes of GPU compile time (sim.cpp / inference_runtime.cpp, see
+// report 7). Zero it byte-wise in a non-unrollable loop instead: for this
+// trivially-copyable aggregate the end state (all fields zero, including
+// padding) is identical to value-initialization.
+inline MADRONA_NO_INLINE void zeroInferenceRuntime(InferenceRuntime &rt)
+{
+    char *bytes = reinterpret_cast<char *>(&rt);
+#pragma unroll 1
+    for (uint32_t i = 0; i < sizeof(InferenceRuntime); i++) {
+        bytes[i] = 0;
+    }
+}
+
 // Rows are request slots. Columns:
 // id, arrival, p-start, p-finish, d-route, kv-start, kv-done, d-start,
 // finish, P worker, D worker, output target, output done, kv bytes, state,

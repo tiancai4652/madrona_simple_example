@@ -29,28 +29,37 @@ void Sim::resetNetworkState()
     qosMode = 0;
     systemLogStep = 0;
 
+    // #pragma unroll 1: these loops run over compile-time-constant bounds
+    // (up to 1,048,576 iterations). NVRTC -O3 fully unrolls them, producing
+    // megabytes of PTX and a ~400s compile for this TU. The pragma keeps
+    // them as loops; runtime cost is memory-bound and unchanged.
     for (int32_t i = 0; i < PFC_MAX_PRIORITY; i++) {
         priorWeights[i] = 0.0;
     }
 
+#pragma unroll 1
     for (int32_t i = 0; i < MAX_TOPO_NODES; i++) {
         topoNodes[i] = TopoNodeState {};
         nodeSlotLookup[i] = -1;
     }
 
+#pragma unroll 1
     for (int32_t i = 0; i < MAX_TOPO_LINKS; i++) {
         topoLinks[i] = TopoLinkState {};
     }
 
+#pragma unroll 1
     for (int32_t i = 0; i < MAX_FLOW_META_LOOKUP; i++) {
         flowMetaLookupIds[i] = -1;
         flowMetaEntityLookup[i] = Entity::none();
     }
 
+#pragma unroll 1
     for (int32_t i = 0; i < MAX_FLOWS; i++) {
         flowMetaEntities[i] = Entity::none();
     }
 
+#pragma unroll 1
     for (uint32_t i = 0; i < MAX_NPUS; i++) {
         npuEntities[i] = Entity::none();
     }
