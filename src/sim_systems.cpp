@@ -194,11 +194,15 @@ MADRONA_NO_INLINE int32_t Sim::findFlowMetaLookupSlot(
     FlowId flow_id) const
 {
     int32_t slot = hashFlowMetaLookupKey(flow_id);
+    int32_t start_slot = slot;
     while (flowMetaLookupIds[slot] != -1) {
         if (flowMetaLookupIds[slot] == flow_id) {
             return slot;
         }
         slot = (slot + 1) & flowMetaLookupMask();
+        if (slot == start_slot) {
+            break;
+        }
     }
 
     return -1;
@@ -208,9 +212,14 @@ MADRONA_NO_INLINE void Sim::insertFlowMetaLookup(FlowId flow_id,
                                                  Entity entity)
 {
     int32_t slot = hashFlowMetaLookupKey(flow_id);
+    int32_t probes = 0;
     while (flowMetaLookupIds[slot] != -1 &&
            flowMetaLookupIds[slot] != flow_id) {
         slot = (slot + 1) & flowMetaLookupMask();
+        if (++probes > MAX_FLOW_META_LOOKUP) {
+            FATAL("capacity exceeded: MAX_FLOW_META_LOOKUP=%d (flow-meta lookup table full -- would spin forever) -- raise MAX_FLOW_META_LOOKUP together with MAX_FLOWS",
+                  (int)MAX_FLOW_META_LOOKUP);
+        }
     }
 
     flowMetaLookupIds[slot] = flow_id;
@@ -298,10 +307,15 @@ MADRONA_NO_INLINE void Sim::insertTagLookup(
     Entity entity)
 {
     int32_t slot = hashTagLookupKey(flow_id);
+    int32_t probes = 0;
 
     while (lookup.entries[slot].flow_id != -1 &&
            !tagLookupMatches(lookup.entries[slot], flow_id)) {
         slot = (slot + 1) & tagLookupMask();
+        if (++probes > MAX_PORT_TAG_LOOKUP) {
+            FATAL("capacity exceeded: MAX_PORT_TAG_LOOKUP=%d (port tag lookup table full -- would spin forever) -- raise MAX_PORT_TAG_LOOKUP together with MAX_TAGS_PER_PORT",
+                  (int)MAX_PORT_TAG_LOOKUP);
+        }
     }
 
     lookup.entries[slot].flow_id = flow_id;
@@ -527,11 +541,12 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
 
         if (pool.free_count == 0) {
             inbox.overflow_count += 1;
-            continue;
+            FATAL("capacity exceeded: NPU flow pool exhausted (free_count==0) while creating a dynamic flow -- raise the NPU flow pool capacity");
         }
         if (active.count >= MAX_FLOWS_PER_NPU) {
             inbox.overflow_count += 1;
-            continue;
+            FATAL("capacity exceeded: MAX_FLOWS_PER_NPU=%d (active list full) while activating a dynamic flow -- raise MAX_FLOWS_PER_NPU",
+                  (int)MAX_FLOWS_PER_NPU);
         }
 
         Entity flow_entity = pool.free_flows[--pool.free_count];

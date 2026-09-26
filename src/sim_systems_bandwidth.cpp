@@ -86,11 +86,13 @@ MADRONA_NO_INLINE void materializeAllocPortBuffer(
                 if (p != pri) {
                     continue;
                 }
-                if (weight_count < MAX_CHUNK_WEIGHTS) {
-                    comp.weights[weight_count].flow_id = tag.flow_id;
-                    comp.weights[weight_count].weight = 1.0;
-                    weight_count += 1;
+                if (weight_count >= MAX_CHUNK_WEIGHTS) {
+                    FATAL("capacity exceeded: MAX_CHUNK_WEIGHTS=%d (comp-chunk weights, %d tags in port list) -- raise MAX_CHUNK_WEIGHTS",
+                          (int)MAX_CHUNK_WEIGHTS, (int)tag_list.count);
                 }
+                comp.weights[weight_count].flow_id = tag.flow_id;
+                comp.weights[weight_count].weight = 1.0;
+                weight_count += 1;
             }
             comp.num_weights = weight_count;
             if (weight_count > 0) {
@@ -151,6 +153,9 @@ MADRONA_NO_INLINE void collectAllocTagScratch(
                 printFlowWatchEmit(sim.systemLogStep, sim.now,
                     "alloc_cleanup_destroy", tag.port_id,
                     sim.portToNode[tag.port_id], tag);
+            }
+            if (cleanup.num >= MAX_PORT_CLEANUP) {
+                FATAL("capacity exceeded: MAX_PORT_CLEANUP (alloc cleanup) -- raise MAX_PORT_CLEANUP");
             }
             tag.backlog = 0.0;
             if (cleanup.num < MAX_PORT_CLEANUP) {
@@ -675,6 +680,7 @@ MADRONA_NO_INLINE bool allocOnePortDefault(
         pb.num_chunks -= 1;
     }
     bool has_buffer = pb.buf_cnt > 1e-15 && pb.num_chunks > 0;
+
     if (!has_buffer && live_sum_in < 1e-18) {
         return false;
     }
@@ -872,6 +878,10 @@ void Sim::emitOnePort(
         }
         if (tag.downstream_created == 0) {
             if (tag.out_bw > 1e-15) {
+                if (outbox.num_events >= MAX_PORT_OUTBOX) {
+                    FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (emit) -- raise MAX_PORT_OUTBOX",
+                          (int)MAX_PORT_OUTBOX, (int)port_id);
+                }
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};
@@ -900,6 +910,10 @@ void Sim::emitOnePort(
         }
         if (isClose(tag.out_bw, tag.prev_out_bw)) {
             continue;
+        }
+        if (outbox.num_events >= MAX_PORT_OUTBOX) {
+            FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (emit bwupdate) -- bandwidth update lost; raise MAX_PORT_OUTBOX",
+                  (int)MAX_PORT_OUTBOX, (int)port_id);
         }
         if (outbox.num_events < MAX_PORT_OUTBOX) {
             DelayedEvent &ev = outbox.events[outbox.num_events++];

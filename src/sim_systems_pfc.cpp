@@ -396,6 +396,10 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
                 int32_t up = upstream_ports[j];
                 state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = up;
                 Time pfc_delay = getPortLinkDelay(port_id, up);
+                if (outbox.num_events >= MAX_PORT_OUTBOX) {
+                    FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (PFC detect emit) -- pause/resume would be lost; raise MAX_PORT_OUTBOX",
+                          (int)MAX_PORT_OUTBOX, (int)port_id);
+                }
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};
@@ -426,6 +430,10 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
             for (int32_t j = 0; j < state.paused_upstream_count[pri]; j++) {
                 int32_t up = state.paused_upstreams[pri][j];
                 Time pfc_delay = getPortLinkDelay(port_id, up);
+                if (outbox.num_events >= MAX_PORT_OUTBOX) {
+                    FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (PFC detect emit) -- pause/resume would be lost; raise MAX_PORT_OUTBOX",
+                          (int)MAX_PORT_OUTBOX, (int)port_id);
+                }
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};
@@ -552,6 +560,10 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             if (upstream_port >= 0) {
                 state.paused_upstreams[pri][state.paused_upstream_count[pri]++] = upstream_port;
                 Time pfc_delay = getPortLinkDelay(port_id, upstream_port);
+                if (outbox.num_events >= MAX_PORT_OUTBOX) {
+                    FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (PFC detect emit) -- pause/resume would be lost; raise MAX_PORT_OUTBOX",
+                          (int)MAX_PORT_OUTBOX, (int)port_id);
+                }
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};
@@ -583,6 +595,10 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             for (int32_t k = 0; k < state.paused_upstream_count[pri]; k++) {
                 int32_t up = state.paused_upstreams[pri][k];
                 Time pfc_delay = getPortLinkDelay(port_id, up);
+                if (outbox.num_events >= MAX_PORT_OUTBOX) {
+                    FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (PFC detect emit) -- pause/resume would be lost; raise MAX_PORT_OUTBOX",
+                          (int)MAX_PORT_OUTBOX, (int)port_id);
+                }
                 if (outbox.num_events < MAX_PORT_OUTBOX) {
                     DelayedEvent &ev = outbox.events[outbox.num_events++];
                     ev = DelayedEvent {};

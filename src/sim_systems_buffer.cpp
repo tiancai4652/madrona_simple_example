@@ -100,6 +100,10 @@ void Sim::alignChunksWithBufCnt(PriorityBuffer &pb)
     double diff = pb.buf_cnt - chunk_sum;
     constexpr double EPS = 1.0;
     if (diff > EPS) {
+        if (pb.num_chunks >= MAX_BUFFER_CHUNKS) {
+            FATAL("capacity exceeded: MAX_BUFFER_CHUNKS=%d (queue full while aligning buffer ledger)",
+                  (int)MAX_BUFFER_CHUNKS);
+        }
         if (pb.num_chunks > 0 && pb.num_chunks < MAX_BUFFER_CHUNKS) {
             int32_t back_idx = (pb.tail - 1 + MAX_BUFFER_CHUNKS) % MAX_BUFFER_CHUNKS;
             BufferChunk gc {};
@@ -265,6 +269,11 @@ void Sim::advanceOnePortBuffer(
             double out_total = pri_out[pri];
 
             if (pb.buf_cnt > 1.0 && pb.num_chunks == 0) {
+                if (pri_counts[pri] > MAX_CHUNK_WEIGHTS) {
+                    FATAL("capacity exceeded: MAX_CHUNK_WEIGHTS=%d < %d active flows on port %d (raise MAX_CHUNK_WEIGHTS)",
+                          (int)MAX_CHUNK_WEIGHTS, (int)pri_counts[pri],
+                          (int)port_id);
+                }
                 BufferChunk comp {};
                 comp.chunk_bytes = pb.buf_cnt;
                 int32_t wcnt = 0;
@@ -289,14 +298,20 @@ void Sim::advanceOnePortBuffer(
                 BufferChunk comp {};
                 comp.chunk_bytes = pb.buf_cnt;
                 int32_t wcnt = 0;
-                for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
-                    FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                int32_t wi = 0;
+                for (; wi < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; wi++) {
+                    FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][wi]);
                     materializeBacklog(tag, now);
                     if (tag.backlog > 1e-15) {
                         comp.weights[wcnt].flow_id = tag.flow_id;
                         comp.weights[wcnt].weight = 1.0;
                         wcnt += 1;
                     }
+                }
+                if (wi < pri_counts[pri]) {
+                    FATAL("capacity exceeded: MAX_CHUNK_WEIGHTS=%d < %d active flows on port %d (raise MAX_CHUNK_WEIGHTS)",
+                          (int)MAX_CHUNK_WEIGHTS, (int)pri_counts[pri],
+                          (int)port_id);
                 }
                 comp.num_weights = wcnt;
                 if (wcnt > 0) {
@@ -330,14 +345,20 @@ void Sim::advanceOnePortBuffer(
                     BufferChunk chunk {};
                     chunk.chunk_bytes = add_amount;
                     int32_t wcnt = 0;
-                    for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
-                        FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                    int32_t wi = 0;
+                    for (; wi < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; wi++) {
+                        FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][wi]);
                         double effective_in = (tag.is_source != 0) ? tag.out_bw : tag.in_bw;
                         if (effective_in > 1e-18) {
                             chunk.weights[wcnt].flow_id = tag.flow_id;
                             chunk.weights[wcnt].weight = effective_in / in_total;
                             wcnt += 1;
                         }
+                    }
+                    if (wi < pri_counts[pri]) {
+                        FATAL("capacity exceeded: MAX_CHUNK_WEIGHTS=%d < %d active flows on port %d (raise MAX_CHUNK_WEIGHTS)",
+                              (int)MAX_CHUNK_WEIGHTS, (int)pri_counts[pri],
+                              (int)port_id);
                     }
                     chunk.num_weights = wcnt;
                     bool merged = false;
@@ -357,6 +378,10 @@ void Sim::advanceOnePortBuffer(
                         if (merged) {
                             back.chunk_bytes += add_amount;
                         }
+                    }
+                    if (!merged && wcnt > 0 && pb.num_chunks >= MAX_BUFFER_CHUNKS) {
+                        FATAL("capacity exceeded: MAX_BUFFER_CHUNKS=%d (chunk queue full) on port %d (raise MAX_BUFFER_CHUNKS)",
+                              (int)MAX_BUFFER_CHUNKS, (int)port_id);
                     }
                     if (!merged && wcnt > 0 && pb.num_chunks < MAX_BUFFER_CHUNKS) {
                         pb.buf_chunks[pb.tail] = chunk;
@@ -429,8 +454,9 @@ void Sim::advanceOnePortBuffer(
                     chunk.chunk_bytes = delta;
                     int32_t wcnt = 0;
                     if (in_total > 1e-18) {
-                        for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
-                            FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][i]);
+                        int32_t wi = 0;
+                        for (; wi < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; wi++) {
+                            FlowTagState &tag = ctx.get<FlowTagState>(pri_tags[pri][wi]);
                             double effective_in = (tag.is_source != 0) ? tag.out_bw : tag.in_bw;
                             if (effective_in > 1e-18) {
                                 chunk.weights[wcnt].flow_id = tag.flow_id;
@@ -442,8 +468,17 @@ void Sim::advanceOnePortBuffer(
                             }
                             tag.last_backlog_time = frame_end;
                         }
+                        if (wi < pri_counts[pri]) {
+                            FATAL("capacity exceeded: MAX_CHUNK_WEIGHTS=%d < %d active flows on port %d (raise MAX_CHUNK_WEIGHTS)",
+                                  (int)MAX_CHUNK_WEIGHTS, (int)pri_counts[pri],
+                                  (int)port_id);
+                        }
                     }
                     chunk.num_weights = wcnt;
+                    if (wcnt > 0 && pb.num_chunks >= MAX_BUFFER_CHUNKS) {
+                        FATAL("capacity exceeded: MAX_BUFFER_CHUNKS=%d (chunk queue full) on port %d (raise MAX_BUFFER_CHUNKS)",
+                              (int)MAX_BUFFER_CHUNKS, (int)port_id);
+                    }
                     if (wcnt > 0 && pb.num_chunks < MAX_BUFFER_CHUNKS) {
                         pb.buf_chunks[pb.tail] = chunk;
                         pb.tail = (pb.tail + 1) % MAX_BUFFER_CHUNKS;
@@ -466,6 +501,10 @@ void Sim::advanceOnePortBuffer(
                 bool upstream_alive = upstreamTagAlive(ctx, tag);
 
                 if (tag.backlog < 1e-15) {
+                    if (!upstream_alive && cleanup.num >= MAX_PORT_CLEANUP) {
+                        FATAL("capacity exceeded: MAX_PORT_CLEANUP=%d on port %d (raise MAX_PORT_CLEANUP)",
+                              (int)MAX_PORT_CLEANUP, (int)port_id);
+                    }
                     if (!upstream_alive && cleanup.num < MAX_PORT_CLEANUP) {
                         cleanup.tags[cleanup.num] = pri_tags[pri][i];
                         cleanup.propagate[cleanup.num] = 1;
@@ -493,6 +532,10 @@ void Sim::advanceOnePortBuffer(
                     }
 
                     if (!pfc_paused && !upstream_alive && !sp_starved) {
+                        if (cleanup.num >= MAX_PORT_CLEANUP) {
+                            FATAL("capacity exceeded: MAX_PORT_CLEANUP=%d on port %d (raise MAX_PORT_CLEANUP)",
+                                  (int)MAX_PORT_CLEANUP, (int)port_id);
+                        }
                         tag.backlog = 0.0;
                         if (cleanup.num < MAX_PORT_CLEANUP) {
                             cleanup.tags[cleanup.num] = pri_tags[pri][i];

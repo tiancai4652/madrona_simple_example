@@ -174,7 +174,7 @@ int32_t Sim::getPath(NodeId src,
         }
 
         if (!appendPathNode(src_leaf, out_path, count, max_path)) {
-            return 0;
+            return -1;
         }
 
         if (src_leaf != dst_leaf) {
@@ -189,8 +189,11 @@ int32_t Sim::getPath(NodeId src,
                     continue;
                 }
 
-                if (findNeighborSlot(neigh_slot, dst_leaf) >= 0 &&
-                    ecmp_count < MAX_ECMP_NEXT_HOPS) {
+                if (findNeighborSlot(neigh_slot, dst_leaf) >= 0) {
+                    if (ecmp_count >= MAX_ECMP_NEXT_HOPS) {
+                        FATAL("capacity exceeded: MAX_ECMP_NEXT_HOPS=%d (ECMP fan-out towards leaf %d) -- raise MAX_ECMP_NEXT_HOPS",
+                              (int)MAX_ECMP_NEXT_HOPS, (int)dst_leaf);
+                    }
                     ecmp_next[ecmp_count++] = neighbor.neighbor_id;
                 }
             }
@@ -202,12 +205,12 @@ int32_t Sim::getPath(NodeId src,
             int32_t idx = hashFlowIndex(flow_id, ecmp_count);
             if (!appendPathNode(ecmp_next[idx], out_path, count, max_path) ||
                 !appendPathNode(dst_leaf, out_path, count, max_path)) {
-                return 0;
+                return -1;
             }
         }
 
         if (!appendPathNode(dst, out_path, count, max_path)) {
-            return 0;
+            return -1;
         }
 
         return count;
@@ -282,8 +285,11 @@ int32_t Sim::getPath(NodeId src,
             }
 
             if (bfsDist[neighbor_slot] >= 0 &&
-                bfsDist[neighbor_slot] + 1 == shortest_dist &&
-                ecmp_num < MAX_ECMP_NEXT_HOPS) {
+                bfsDist[neighbor_slot] + 1 == shortest_dist) {
+                if (ecmp_num >= MAX_ECMP_NEXT_HOPS) {
+                    FATAL("capacity exceeded: MAX_ECMP_NEXT_HOPS=%d (ECMP fan-out at node %d) -- raise MAX_ECMP_NEXT_HOPS",
+                          (int)MAX_ECMP_NEXT_HOPS, (int)curr_slot);
+                }
                 next_hops[ecmp_num++] = neighbor.neighbor_id;
             }
         }
@@ -297,6 +303,9 @@ int32_t Sim::getPath(NodeId src,
     }
 
     if (count <= 0 || out_path[count - 1] != dst) {
+        if (count >= max_path) {
+            return -1;
+        }
         return 0;
     }
 

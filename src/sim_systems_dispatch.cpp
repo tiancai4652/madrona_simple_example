@@ -60,6 +60,10 @@ void Sim::deliverEventsOnePort(Context &ctx,
             if (log_enabled) {
                 printSystemDeliverArrival(step, now, ev);
             }
+            if (inbox.num_arrival >= MAX_PORT_INBOX_ARRIVAL) {
+                FATAL("capacity exceeded: MAX_PORT_INBOX_ARRIVAL=%d on port %d -- arrival event would be dropped silently; raise it",
+                      (int)MAX_PORT_INBOX_ARRIVAL, (int)port_id);
+            }
             if (inbox.num_arrival < MAX_PORT_INBOX_ARRIVAL) {
                 inbox.arrivals[inbox.num_arrival++] = ev;
             }
@@ -68,6 +72,10 @@ void Sim::deliverEventsOnePort(Context &ctx,
             trace.deliver_bwupdate_count += 1;
             if (log_enabled) {
                 printSystemDeliverBwUpdate(step, now, ev);
+            }
+            if (inbox.num_bwupd >= MAX_PORT_INBOX_BWUPD) {
+                FATAL("capacity exceeded: MAX_PORT_INBOX_BWUPD=%d on port %d -- bwupdate event would be dropped silently; raise it",
+                      (int)MAX_PORT_INBOX_BWUPD, (int)port_id);
             }
             if (inbox.num_bwupd < MAX_PORT_INBOX_BWUPD) {
                 inbox.bwupds[inbox.num_bwupd++] = ev;
@@ -82,6 +90,8 @@ void Sim::deliverEventsOnePort(Context &ctx,
                 inbox.pfcs[inbox.num_pfc++] = ev;
             } else {
                 trace.deliver_pfc_dropped += 1;
+                FATAL("capacity exceeded: MAX_PORT_INBOX_PFC=%d on port %d -- PFC control event dropped (pause/resume state would diverge); raise it",
+                      (int)MAX_PORT_INBOX_PFC, (int)port_id);
             }
         }
     }

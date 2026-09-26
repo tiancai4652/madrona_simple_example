@@ -137,7 +137,7 @@ constexpr int32_t PFC_MAX_PRIORITY = 1;
 
 // Must be >= the maximum number of flows/events per hot port so buffer chunks
 // and per-port queues do not silently drop same-timestamp fan-in.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 256;
+constexpr int32_t MAX_CHUNK_WEIGHTS = 512; // [002-validation] 256->512: fix PFC staircase (was truncating hosts 22-31 of each leaf)
 constexpr int32_t MAX_BUFFER_CHUNKS = 16;
 constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 
@@ -151,23 +151,23 @@ constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 // pushDelayedEvent now FAILS loudly on overflow (error_code=6), so an
 // underestimated capacity in a future workload surfaces as a failed run
 // rather than wrong results. Per-experiment tuning stays compile-time.
-constexpr int32_t MAX_PORT_CLEANUP = 512;
-constexpr int32_t MAX_PORT_OUTBOX = 512;
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 512;
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 512;
-constexpr int32_t MAX_TAGS_PER_PORT = 256;
+constexpr int32_t MAX_PORT_CLEANUP = 1024;
+constexpr int32_t MAX_PORT_OUTBOX = 2048;
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 1024;
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 8192;
+constexpr int32_t MAX_TAGS_PER_PORT = 1024;
 // Do not create FlowTag entities inside the single-threaded GPU initWorlds
 // kernel. Tags are allocated lazily by createTagOnPort and recycled through
 // PortTagPool after first use.
 constexpr int32_t INITIAL_TAGS_PER_PORT = 0;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 448;
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 512;
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 512;
-constexpr int32_t MAX_PORT_INBOX_PFC = 64;
-constexpr int32_t MAX_PORT_CREATE = 512;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 1024;
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 2048;
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 2048;
+constexpr int32_t MAX_PORT_INBOX_PFC = 512;
+constexpr int32_t MAX_PORT_CREATE = 2048;
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
 constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
-constexpr int32_t MAX_PORT_COMPLETE = 320;
+constexpr int32_t MAX_PORT_COMPLETE = 1024;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 // Time-skip event queue (SystemEventQueue) capacity. Raised from 1024 so the
 // sys-layer COMP/COMM scheduling events can't silently fill the queue and be

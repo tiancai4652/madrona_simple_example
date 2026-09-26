@@ -48,11 +48,11 @@ inline void appendPortSourceTag(PortSourceTagList &source_list,
         return;
     }
 
-    if (source_list.count < MAX_TAGS_PER_PORT) {
-        source_list.tags[source_list.count++] = tag_entity;
-    } else {
-        source_list.overflow = 1;
+    if (source_list.count >= MAX_TAGS_PER_PORT) {
+        FATAL("capacity exceeded: PortSourceTagList full (MAX_TAGS_PER_PORT=%d) -- more source tags than the per-port tag pool allows",
+              (int)MAX_TAGS_PER_PORT);
     }
+    source_list.tags[source_list.count++] = tag_entity;
 }
 
 } // namespace
@@ -161,6 +161,10 @@ void Sim::flowArrivalOnePort(Context &ctx,
             continue;
         }
 
+        if (create_list.num >= MAX_PORT_CREATE) {
+            FATAL("capacity exceeded: MAX_PORT_CREATE=%d on port %d (arrival tag create) -- raise MAX_PORT_CREATE",
+                  (int)MAX_PORT_CREATE, (int)port_id);
+        }
         if (create_list.num < MAX_PORT_CREATE) {
             PortCreateReq &req = create_list.reqs[create_list.num++];
             req.from_arrival = 1;
@@ -256,6 +260,10 @@ void Sim::bwUpdateOnePort(Context &ctx,
                     }
                 } else {
                     FlowTagState tag_copy = tag;
+                    if (cleanup.num >= MAX_PORT_CLEANUP) {
+                        FATAL("capacity exceeded: MAX_PORT_CLEANUP=%d on port %d (bwupdate destroy) -- raise MAX_PORT_CLEANUP",
+                              (int)MAX_PORT_CLEANUP, (int)port_id);
+                    }
                     if (cleanup.num < MAX_PORT_CLEANUP) {
                         cleanup.tags[cleanup.num] = existing;
                         cleanup.propagate[cleanup.num] = 1;
@@ -307,6 +315,10 @@ void Sim::bwUpdateOnePort(Context &ctx,
                         .flow_id = ev.flow_id,
                         .in_bw = 0.0,
                     };
+                    if (outbox.num_events >= MAX_PORT_OUTBOX) {
+                        FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (bwupdate forward) -- raise MAX_PORT_OUTBOX",
+                              (int)MAX_PORT_OUTBOX, (int)port_id);
+                    }
                     if (outbox.num_events < MAX_PORT_OUTBOX) {
                         outbox.events[outbox.num_events++] = cleanup_ev;
                     }
@@ -318,6 +330,10 @@ void Sim::bwUpdateOnePort(Context &ctx,
                             ev.port_id, next_port);
                     }
                 } else {
+                    if (completions.num >= MAX_PORT_COMPLETE) {
+                        FATAL("capacity exceeded: MAX_PORT_COMPLETE=%d on port %d (completion record) -- flow would never complete; raise MAX_PORT_COMPLETE",
+                              (int)MAX_PORT_COMPLETE, (int)port_id);
+                    }
                     if (completions.num < MAX_PORT_COMPLETE) {
                         completions.reqs[completions.num++] =
                             PortCompletionReq {
@@ -335,6 +351,10 @@ void Sim::bwUpdateOnePort(Context &ctx,
                 continue;
             }
 
+            if (create_list.num >= MAX_PORT_CREATE) {
+                FATAL("capacity exceeded: MAX_PORT_CREATE=%d on port %d (bwupdate tag create) -- raise MAX_PORT_CREATE",
+                      (int)MAX_PORT_CREATE, (int)port_id);
+            }
             if (create_list.num < MAX_PORT_CREATE) {
                 int32_t pri = 0;
                 const FlowDef *flow_def = getFlowDef(ctx, ev.flow_id);
@@ -412,6 +432,7 @@ void Sim::materializeTagCreateOnePort(Context &ctx,
                 req.from_arrival != 0 ? "arrival_create" : "bw_create",
                 port_id, portToNode[port_id], tag);
         }
+
         if (tag.ingress_port_id >= 0) {
             if (ingress_links.num >= MAX_PORT_INGRESS_LINKS) {
                 FATAL("PortIngressLinkList overflow");

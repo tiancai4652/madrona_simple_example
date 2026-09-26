@@ -15,11 +15,11 @@ inline void appendPortSourceTag(PortSourceTagList &source_list,
         return;
     }
 
-    if (source_list.count < MAX_TAGS_PER_PORT) {
-        source_list.tags[source_list.count++] = tag_entity;
-    } else {
-        source_list.overflow = 1;
+    if (source_list.count >= MAX_TAGS_PER_PORT) {
+        FATAL("capacity exceeded: PortSourceTagList full (MAX_TAGS_PER_PORT=%d) -- more source tags than the per-port tag pool allows",
+              (int)MAX_TAGS_PER_PORT);
     }
+    source_list.tags[source_list.count++] = tag_entity;
 }
 
 inline void removePortSourceTag(PortSourceTagList &source_list,
@@ -142,6 +142,11 @@ MADRONA_NO_INLINE bool Sim::destroyTagCollectCleanupEvent(
             }
 
             PortTagPool &pool = ctx.get<PortTagPool>(tag.port_entity);
+            if (pool.free_count >= MAX_TAGS_PER_PORT) {
+                FATAL("capacity exceeded: PortTagPool full on port %d (free_count=%d) -- more live tags than MAX_TAGS_PER_PORT=%d; invariant violated",
+                      (int)tag.port_id, (int)pool.free_count,
+                      (int)MAX_TAGS_PER_PORT);
+            }
             if (pool.free_count < MAX_TAGS_PER_PORT) {
                 ctx.get<FlowTagState>(tag_entity) = FlowTagState {};
                 ctx.get<FlowTagProgress>(tag_entity) = FlowTagProgress {};
@@ -211,6 +216,12 @@ MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
             const FlowDef &flow_def = ctx.get<FlowDef>(flow_entity);
             if (runtime.completed != 0 &&
                 flow_def.src_node / 32 == flow_def.dst_node / 32 &&
+                completions.num >= MAX_PORT_COMPLETE) {
+                FATAL("capacity exceeded: MAX_PORT_COMPLETE=%d on port %d (same-leaf completion) -- raise MAX_PORT_COMPLETE",
+                      (int)MAX_PORT_COMPLETE, (int)tag.port_id);
+            }
+            if (runtime.completed != 0 &&
+                flow_def.src_node / 32 == flow_def.dst_node / 32 &&
                 completions.num < MAX_PORT_COMPLETE) {
                 Time delay = getPortLinkDelay(tag.port_id, tag.next_port_id);
                 completions.reqs[completions.num++] = PortCompletionReq {
@@ -222,6 +233,10 @@ MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
     }
 
     if (tag.next_port_id < 0) {
+        if (completions.num >= MAX_PORT_COMPLETE) {
+            FATAL("capacity exceeded: MAX_PORT_COMPLETE=%d on port %d (terminal completion) -- raise MAX_PORT_COMPLETE",
+                  (int)MAX_PORT_COMPLETE, (int)tag.port_id);
+        }
         if (completions.num < MAX_PORT_COMPLETE) {
             completions.reqs[completions.num++] = PortCompletionReq {
                 .flow_id = tag.flow_id,
@@ -234,6 +249,10 @@ MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
         if (tag.downstream_created != 0) {
             Time delay = getPortLinkDelay(tag.port_id, tag.next_port_id);
 
+            if (outbox.num_events >= MAX_PORT_OUTBOX) {
+                FATAL("capacity exceeded: MAX_PORT_OUTBOX=%d on port %d (destroy bwupdate) -- raise MAX_PORT_OUTBOX",
+                      (int)MAX_PORT_OUTBOX, (int)tag.port_id);
+            }
             if (outbox.num_events < MAX_PORT_OUTBOX) {
                 DelayedEvent &ev = outbox.events[outbox.num_events++];
                 ev = DelayedEvent {};
@@ -289,6 +308,11 @@ MADRONA_NO_INLINE bool Sim::destroyTagMaterializeOnePort(
             }
 
             PortTagPool &pool = ctx.get<PortTagPool>(tag.port_entity);
+            if (pool.free_count >= MAX_TAGS_PER_PORT) {
+                FATAL("capacity exceeded: PortTagPool full on port %d (free_count=%d) -- more live tags than MAX_TAGS_PER_PORT=%d; invariant violated",
+                      (int)tag.port_id, (int)pool.free_count,
+                      (int)MAX_TAGS_PER_PORT);
+            }
             if (pool.free_count < MAX_TAGS_PER_PORT) {
                 ctx.get<FlowTagState>(tag_entity) = FlowTagState {};
                 ctx.get<FlowTagProgress>(tag_entity) = FlowTagProgress {};
@@ -354,7 +378,8 @@ MADRONA_NO_INLINE Entity Sim::createTagOnPort(Context &ctx,
         pool.free_tags[pool.free_count] = Entity::none();
     } else {
         if (pool.allocated_count >= MAX_TAGS_PER_PORT) {
-            return Entity::none();
+            FATAL("capacity exceeded: MAX_TAGS_PER_PORT=%d on port %d (tag allocation) -- raise MAX_TAGS_PER_PORT",
+                  (int)MAX_TAGS_PER_PORT, (int)port_id);
         }
         // The warm pool is deliberately smaller than the hard per-port
         // capacity so initWorlds does not perform tens of thousands of

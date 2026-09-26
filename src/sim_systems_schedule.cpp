@@ -64,6 +64,10 @@ MADRONA_NO_INLINE bool Sim::injectFlowDef(Context &ctx,
         return false;
     }
 
+    if (counters.numFlowRoutes >= MAX_FLOWS) {
+        FATAL("capacity exceeded: MAX_FLOWS=%d (flow routes) -- flow would be injected with no route; raise MAX_FLOWS",
+              (int)MAX_FLOWS);
+    }
     if (counters.numFlowRoutes < MAX_FLOWS) {
         if (route.num_steps <= 0) {
             counters.numFlowRoutes += 1;
@@ -89,7 +93,14 @@ MADRONA_NO_INLINE bool Sim::prepareFlowScheduleState(
     NodeId path[MAX_PATH_NODES] {};
     int32_t path_len = getPath(flow.src_node, flow.dst_node, flow.id,
         path, MAX_PATH_NODES);
+    if (path_len < 0) {
+        FATAL("route from node %d to node %d exceeds MAX_PATH_NODES=%d (path truncated) -- raise MAX_PATH_NODES for this topology",
+              (int)flow.src_node, (int)flow.dst_node, (int)MAX_PATH_NODES);
+    }
     if (path_len < 2) {
+        // Legitimately routable-less flows: NPU-internal/sentinel flows carry
+        // node_id < 0 and have no network route by design; also genuinely
+        // unroutable pairs. Same graceful skip as the original behaviour.
         return false;
     }
 
@@ -243,8 +254,18 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
                 }
                 DelayedEvent ev = schedule_state.prepared_event;
                 if (schedule_state.prepared != 0 &&
+                    sim_runtime.numDelayedEvents >= MAX_DELAYED_EVENTS) {
+                    FATAL("capacity exceeded: MAX_DELAYED_EVENTS=%d (flow schedule) -- a scheduled flow event would be silently dropped; raise MAX_DELAYED_EVENTS",
+                          (int)MAX_DELAYED_EVENTS);
+                }
+                if (schedule_state.prepared != 0 &&
                     sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
                     pushDelayedEvent(ctx, ev);
+                }
+                if (schedule_state.prepared != 0 &&
+                    counters.numFlowRoutes >= MAX_FLOWS) {
+                    FATAL("capacity exceeded: MAX_FLOWS=%d (flow routes) -- flow would be activated with no route; raise MAX_FLOWS",
+                          (int)MAX_FLOWS);
                 }
                 if (schedule_state.prepared != 0 &&
                     counters.numFlowRoutes < MAX_FLOWS) {
@@ -317,8 +338,18 @@ MADRONA_NO_INLINE void Sim::schedulePendingFlows(Context &ctx)
             continue;
         }
         if (schedule_state.prepared != 0 &&
+            sim_runtime.numDelayedEvents >= MAX_DELAYED_EVENTS) {
+            FATAL("capacity exceeded: MAX_DELAYED_EVENTS=%d (flow schedule) -- a scheduled flow event would be silently dropped; raise MAX_DELAYED_EVENTS",
+                  (int)MAX_DELAYED_EVENTS);
+        }
+        if (schedule_state.prepared != 0 &&
             sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
             pushDelayedEvent(ctx, schedule_state.prepared_event);
+        }
+        if (schedule_state.prepared != 0 &&
+            counters.numFlowRoutes >= MAX_FLOWS) {
+            FATAL("capacity exceeded: MAX_FLOWS=%d (flow routes) -- flow would be activated with no route; raise MAX_FLOWS",
+                  (int)MAX_FLOWS);
         }
         if (schedule_state.prepared != 0 &&
             counters.numFlowRoutes < MAX_FLOWS) {
@@ -417,6 +448,10 @@ MADRONA_NO_INLINE void Sim::scheduleNpuFlowsLocal(
                 .route_new = 0,
             };
 
+            if (counters.numFlowRoutes >= MAX_FLOWS) {
+                FATAL("capacity exceeded: MAX_FLOWS=%d (flow routes) -- NPU flow would be activated with no route; raise MAX_FLOWS",
+                      (int)MAX_FLOWS);
+            }
             if (counters.numFlowRoutes < MAX_FLOWS) {
                 const FlowDef &flow = ctx.get<FlowDef>(flow_entity);
                 FlowRouteState &route = ctx.get<FlowRouteState>(flow_entity);
@@ -458,6 +493,10 @@ MADRONA_NO_INLINE void Sim::commitNpuFlowSchedule(Context &ctx)
             ctx.get<NpuFlowScheduleDraft>(npu_entity);
         for (uint32_t i = 0; i < draft.count; i++) {
             const NpuScheduleTicket &ticket = draft.tickets[i];
+            if (sim_runtime.numDelayedEvents >= MAX_DELAYED_EVENTS) {
+                FATAL("capacity exceeded: MAX_DELAYED_EVENTS=%d (NPU flow schedule) -- a scheduled flow event would be silently dropped; raise MAX_DELAYED_EVENTS",
+                      (int)MAX_DELAYED_EVENTS);
+            }
             if (sim_runtime.numDelayedEvents < MAX_DELAYED_EVENTS) {
                 pushDelayedEvent(ctx, ticket.event);
             }
