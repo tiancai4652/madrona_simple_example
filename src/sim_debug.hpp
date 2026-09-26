@@ -184,4 +184,61 @@ void printFlowWatchPfcMark(uint64_t step, Time now,
                            NodeId egress_node,
                            const FlowTagState &tag);
 
+// [002-pfc-instrumentation] Lightweight PFC event log for the source-side
+// staircase diagnosis. Gated by env `pfc_event_log` (off by default; zero
+// cost when off). Logs every pause/resume APPLIED at a port (i.e. the
+// upstream/source port's own pause-state change), so per-source-port pause
+// timelines can be reconstructed and compared with HPCC's pfc.txt.
+bool pfcEventLogEnabled();
+void printPfcEventLog(uint64_t step, Time now,
+                      int32_t port_id,
+                      NodeId node_id,
+                      int32_t priority,
+                      int32_t paused);
+void printPfcDetectLog(uint64_t step, Time now,
+                       int32_t detect_port,
+                       int32_t target_port,
+                       NodeId target_node,
+                       int32_t priority,
+                       int32_t paused,
+                       double buf,
+                       int32_t n_tags,
+                       int32_t n_out,
+                       int32_t n_recon,
+                       int32_t n_front,
+                       double sum_out);
+void printPfcSampleLog(uint64_t step, Time now,
+                       int32_t detect_port,
+                       int32_t target_port,
+                       NodeId target_node,
+                       int32_t n_tags,
+                       int32_t n_out,
+                       int32_t n_recon,
+                       int32_t n_front,
+                       double sum_out,
+                       double buf);
+void printPfcEgressLog(uint64_t step, Time now,
+                       int32_t port_id,
+                       NodeId node_id,
+                       int32_t n_chunks,
+                       double buf_cnt,
+                       double chunk_sum,
+                       int32_t has_buffer,
+                       int32_t n_head,
+                       const int32_t *head_ids);
+void printPfcTagCreateLog(uint64_t step, Time now,
+                          int32_t port_id,
+                          NodeId node_id,
+                          FlowId flow_id);
+void printPfcEpisodeLog(uint64_t step, Time now,
+                        int32_t port_id,
+                        NodeId node_id,
+                        int32_t target_node,
+                        int32_t frames_paused,
+                        int32_t frames_marked_dirty,
+                        int32_t frames_marked_watchdog,
+                        int32_t frames_unmarked,
+                        double buf);
+
 }
+

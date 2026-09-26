@@ -93,6 +93,18 @@ void printFlowWatchEmit(uint64_t, Time, const char *, int32_t, NodeId,
                         const FlowTagState &) {}
 void printFlowWatchPfcMark(uint64_t, Time, int32_t, NodeId, int32_t, NodeId,
                            int32_t, NodeId, const FlowTagState &) {}
+bool pfcEventLogEnabled() { return false; }
+void printPfcEventLog(uint64_t, Time, int32_t, NodeId, int32_t, int32_t) {}
+void printPfcDetectLog(uint64_t, Time, int32_t, int32_t, NodeId, int32_t,
+                       int32_t, double, int32_t, int32_t, int32_t, int32_t,
+                       double) {}
+void printPfcSampleLog(uint64_t, Time, int32_t, int32_t, NodeId, int32_t,
+                       int32_t, int32_t, int32_t, double, double) {}
+void printPfcEgressLog(uint64_t, Time, int32_t, NodeId, int32_t, double,
+                       double, int32_t, int32_t, const int32_t *) {}
+void printPfcTagCreateLog(uint64_t, Time, int32_t, NodeId, FlowId) {}
+void printPfcEpisodeLog(uint64_t, Time, int32_t, NodeId, int32_t, int32_t,
+                        int32_t, int32_t, int32_t, double) {}
 #else
 const bool init_log_print_enabled = envFlagEnabled("init_log_print_enabled");
 const bool system_log_print_enabled = envFlagEnabled("system_log_print_enabled");
@@ -549,6 +561,151 @@ void printFlowWatchPfcMark(uint64_t step, Time now,
               << " out_bw=" << tag.out_bw
               << " backlog=" << tag.backlog
               << " is_source=" << tag.is_source
+              << "\n";
+}
+
+// [002-pfc-instrumentation] See sim_debug.hpp. Cached env flag so the hot
+// per-event path does not call getenv repeatedly.
+bool pfcEventLogEnabled()
+{
+    static const bool enabled = envFlagEnabled("pfc_event_log");
+    return enabled;
+}
+
+void printPfcEventLog(uint64_t step, Time now,
+                      int32_t port_id,
+                      NodeId node_id,
+                      int32_t priority,
+                      int32_t paused)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[PFCEV] now=" << now
+              << " step=" << step
+              << " port=" << port_id
+              << " node=" << node_id
+              << " pri=" << priority
+              << " paused=" << paused
+              << "\n";
+}
+
+void printPfcDetectLog(uint64_t step, Time now,
+                       int32_t detect_port,
+                       int32_t target_port,
+                       NodeId target_node,
+                       int32_t priority,
+                       int32_t paused,
+                       double buf,
+                       int32_t n_tags,
+                       int32_t n_out,
+                       int32_t n_recon,
+                       int32_t n_front,
+                       double sum_out)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[PFCDET] now=" << now
+              << " step=" << step
+              << " detect_port=" << detect_port
+              << " target_port=" << target_port
+              << " target_node=" << target_node
+              << " pri=" << priority
+              << " paused=" << paused
+              << " buf=" << buf
+              << " n_tags=" << n_tags
+              << " n_out=" << n_out
+              << " n_recon=" << n_recon
+              << " n_front=" << n_front
+              << " sum_out=" << sum_out
+              << "\n";
+}
+
+void printPfcSampleLog(uint64_t step, Time now,
+                       int32_t detect_port,
+                       int32_t target_port,
+                       NodeId target_node,
+                       int32_t n_tags,
+                       int32_t n_out,
+                       int32_t n_recon,
+                       int32_t n_front,
+                       double sum_out,
+                       double buf)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[PFCSAMP] now=" << now
+              << " step=" << step
+              << " detect_port=" << detect_port
+              << " target_port=" << target_port
+              << " target_node=" << target_node
+              << " n_tags=" << n_tags
+              << " n_out=" << n_out
+              << " n_recon=" << n_recon
+              << " n_front=" << n_front
+              << " sum_out=" << sum_out
+              << " buf=" << buf
+              << "\n";
+}
+
+void printPfcEgressLog(uint64_t step, Time now,
+                       int32_t port_id,
+                       NodeId node_id,
+                       int32_t n_chunks,
+                       double buf_cnt,
+                       double chunk_sum,
+                       int32_t has_buffer,
+                       int32_t n_head,
+                       const int32_t *head_ids)
+{
+    std::cout << std::fixed << std::setprecision(3)
+              << "[PFCEG] now=" << now
+              << " step=" << step
+              << " port=" << port_id
+              << " node=" << node_id
+              << " n_chunks=" << n_chunks
+              << " buf_cnt=" << buf_cnt
+              << " chunk_sum=" << chunk_sum
+              << " has_buffer=" << has_buffer
+              << " n_head=" << n_head
+              << " head_ids=";
+    for (int32_t i = 0; i < n_head; i++) {
+        std::cout << (i ? "," : "") << head_ids[i];
+    }
+    std::cout << "\n";
+}
+
+void printPfcTagCreateLog(uint64_t step, Time now,
+                          int32_t port_id,
+                          NodeId node_id,
+                          FlowId flow_id)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[PFCTAG] now=" << now
+              << " step=" << step
+              << " port=" << port_id
+              << " node=" << node_id
+              << " flow_id=" << flow_id
+              << "\n";
+}
+
+void printPfcEpisodeLog(uint64_t step, Time now,
+                        int32_t port_id,
+                        NodeId node_id,
+                        int32_t target_node,
+                        int32_t frames_paused,
+                        int32_t frames_marked_dirty,
+                        int32_t frames_marked_watchdog,
+                        int32_t frames_unmarked,
+                        double buf)
+{
+    std::cout << std::fixed << std::setprecision(6)
+              << "[PFCEP] now=" << now
+              << " step=" << step
+              << " port=" << port_id
+              << " node=" << node_id
+              << " target_node=" << target_node
+              << " frames_paused=" << frames_paused
+              << " marked_dirty=" << frames_marked_dirty
+              << " marked_watchdog=" << frames_marked_watchdog
+              << " unmarked=" << frames_unmarked
+              << " buf=" << buf
               << "\n";
 }
 #endif

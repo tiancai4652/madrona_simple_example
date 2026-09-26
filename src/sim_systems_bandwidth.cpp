@@ -681,6 +681,39 @@ MADRONA_NO_INLINE bool allocOnePortDefault(
     }
     bool has_buffer = pb.buf_cnt > 1e-15 && pb.num_chunks > 0;
 
+    // [002-pfc-instrumentation] periodic egress ledger / head-chunk probe
+    // (switch ports, every 100us of sim-time). Exposes (a) chunk-queue depth
+    // vs the MAX_BUFFER_CHUNKS capacity, (b) ledger drift buf_cnt-chunk_sum
+    // (bytes counted in the port ledger but attributed to no chunk), and
+    // (c) the head-chunk contributor set -- the only set served under
+    // QoS-NONE, which is what decides whether a paused host's flows keep
+    // draining or freeze.
+    if (pfcEventLogEnabled()) {
+        int64_t slot = (int64_t)std::llround(sim.now * 1000.0);
+        if (slot % 100 == 0 && sim.portToNode[port_id] >= 128) {
+            double chunk_sum = 0.0;
+            for (int32_t ci = 0; ci < pb.num_chunks; ci++) {
+                chunk_sum += pb.buf_chunks[(pb.head + ci) %
+                    MAX_BUFFER_CHUNKS].chunk_bytes;
+            }
+            int32_t n_head = 0;
+            int32_t head_ids[MAX_CHUNK_WEIGHTS];
+            if (pb.num_chunks > 0) {
+                const BufferChunk &hc = pb.buf_chunks[pb.head];
+                n_head = hc.num_weights;
+                if (n_head > MAX_CHUNK_WEIGHTS) {
+                    n_head = MAX_CHUNK_WEIGHTS;
+                }
+                for (int32_t wi = 0; wi < n_head; wi++) {
+                    head_ids[wi] = hc.weights[wi].flow_id;
+                }
+            }
+            printPfcEgressLog(sim.systemLogStep, sim.now, port_id,
+                sim.portToNode[port_id], pb.num_chunks, pb.buf_cnt,
+                chunk_sum, has_buffer ? 1 : 0, n_head, head_ids);
+        }
+    }
+
     if (!has_buffer && live_sum_in < 1e-18) {
         return false;
     }

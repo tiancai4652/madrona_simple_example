@@ -91,6 +91,10 @@ void Sim::pfcPropagateOnePort(Context &ctx,
             if (keep_trace) {
                 trace.pfc_applied += 1;
             }
+            if (pfcEventLogEnabled()) {
+                printPfcEventLog(step, now, port_id, portToNode[port_id],
+                    ev.priority, ev.paused);
+            }
             if (log_enabled) {
                 printSystemPfcState(step, now, ev,
                     pfc_state.paused[ev.priority], dirty.isDirty);
@@ -432,7 +436,10 @@ void Sim::materializeTagCreateOnePort(Context &ctx,
                 req.from_arrival != 0 ? "arrival_create" : "bw_create",
                 port_id, portToNode[port_id], tag);
         }
-
+        if (tag.is_source != 0 && pfcEventLogEnabled()) {
+            printPfcTagCreateLog(systemLogStep, now, port_id,
+                portToNode[port_id], tag.flow_id);
+        }
         if (tag.ingress_port_id >= 0) {
             if (ingress_links.num >= MAX_PORT_INGRESS_LINKS) {
                 FATAL("PortIngressLinkList overflow");

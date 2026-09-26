@@ -698,6 +698,17 @@ struct PortPfcState {
     // Consecutive frames this port has been pause_active while outside the
     // dirty-derived check-target set (starvation watchdog, sim_systems_pfc).
     int32_t stalled_frames = 0;
+    // [002-pfc-instrumentation] Per-pause-episode frame accounting, reset
+    // whenever the port is not paused and printed by printPfcEpisodeLog at
+    // the resume detect. Answers "was the paused port actually being
+    // re-checked (dirty mark) or did it wait on the watchdog".
+    int32_t ep_frames_paused = 0;
+    int32_t ep_frames_marked_dirty = 0;
+    int32_t ep_frames_marked_watchdog = 0;
+    int32_t ep_frames_unmarked = 0;
+    // Next sim-time (ms) at which to emit a [PFCSAMP] serving-state sample
+    // while this port stays paused; 0 = sample on the first qualifying frame.
+    double ep_next_sample = 0.0;
     int32_t paused_upstream_count[PFC_MAX_PRIORITY] {};
     int32_t paused_upstreams[PFC_MAX_PRIORITY][MAX_PAUSED_UPSTREAMS] {};
     int32_t pfc_cnt[PFC_MAX_PRIORITY] {};

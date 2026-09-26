@@ -261,9 +261,21 @@ MADRONA_NO_INLINE void Sim::markPfcIngressCheckTargets(Context &ctx)
             }
             if (pfc.stalled_frames >= kPfcStagnationFrames) {
                 pfc.pfc_check_target = 1;
+                pfc.ep_frames_marked_watchdog += 1;
+            } else {
+                pfc.ep_frames_unmarked += 1;
             }
+            pfc.ep_frames_paused += 1;
+        } else if (paused) {
+            pfc.stalled_frames = 0;
+            pfc.ep_frames_paused += 1;
+            pfc.ep_frames_marked_dirty += 1;
         } else {
             pfc.stalled_frames = 0;
+            pfc.ep_frames_paused = 0;
+            pfc.ep_frames_marked_dirty = 0;
+            pfc.ep_frames_marked_watchdog = 0;
+            pfc.ep_frames_unmarked = 0;
         }
     }
 }
@@ -504,6 +516,11 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
 
     double buf_by_pri[PFC_MAX_PRIORITY] {};
     double net_rate_by_pri[PFC_MAX_PRIORITY] {};
+    // [002-pfc-instrumentation] serving-state aggregates for this ingress list
+    int32_t n_tags = 0;
+    int32_t n_out_pos = 0;
+    int32_t n_recon = 0;
+    double sum_out = 0.0;
     for (int32_t i = 0; i < ingress_list.count; i++) {
         Entity te = ingress_list.tags[i];
         if (te == Entity::none()) {
@@ -537,13 +554,59 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
             if (actual < 1.0 && tag.backlog > 1.0) {
                 tag.backlog = actual;
                 tag.last_backlog_time = now;
+                n_recon += 1;
             }
         }
 
         int32_t pri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
         buf_by_pri[pri] += tag.backlog;
         net_rate_by_pri[pri] += (tag.in_bw - tag.out_bw);
+        n_tags += 1;
+        if (tag.out_bw > 1e-18) {
+            n_out_pos += 1;
+        }
+        sum_out += tag.out_bw;
     }
+
+    // [002] How many of this ingress's tags sit in the FRONT chunk of their
+    // egress port -- under QoS-NONE only the head chunk receives service
+    // (assignChunkWeightedOutBW only ever serves pb.buf_chunks[head]).
+    auto count_front_members = [&]() -> int32_t {
+        int32_t n = 0;
+        for (int32_t i = 0; i < ingress_list.count; i++) {
+            Entity te = ingress_list.tags[i];
+            if (te == Entity::none()) {
+                continue;
+            }
+            const FlowTagState &tag = ctx.get<FlowTagState>(te);
+            if (tag.is_source != 0 || tag.port_entity == Entity::none()) {
+                continue;
+            }
+            int32_t ep = tag.port_id;
+            if (ep < 0 || ep >= numPorts ||
+                tag.port_entity != portEntities[ep]) {
+                continue;
+            }
+            Entity pe = portEntities[ep];
+            if (pe == Entity::none()) {
+                continue;
+            }
+            const PortBuffer &pbu = ctx.get<PortBuffer>(pe);
+            int32_t epri = std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1);
+            const PriorityBuffer &pp = pbu.prior_bufs[epri];
+            if (pp.num_chunks <= 0) {
+                continue;
+            }
+            const BufferChunk &hc = pp.buf_chunks[pp.head];
+            for (int32_t w = 0; w < hc.num_weights; w++) {
+                if (hc.weights[w].flow_id == tag.flow_id) {
+                    n += 1;
+                    break;
+                }
+            }
+        }
+        return n;
+    };
 
     int32_t upstream_port = -1;
     if (port_id >= 0 && port_id < numPorts) {
@@ -589,9 +652,31 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
                 }
             }
             state.pfc_cnt[pri] += 1;
+            if (pfcEventLogEnabled()) {
+                printPfcDetectLog(systemLogStep, now, port_id, upstream_port,
+                    upstream_port >= 0 ? portToNode[upstream_port] : -1,
+                    pri, 1, buf, n_tags, n_out_pos, n_recon,
+                    count_front_members(), sum_out);
+            }
         } else if (state.pause_active[pri] != 0 && buf <= cfg.xon[pri] + 0.5) {
             state.pause_active[pri] = 0;
             state_changed = true;
+            if (pfcEventLogEnabled()) {
+                printPfcDetectLog(systemLogStep, now, port_id, upstream_port,
+                    upstream_port >= 0 ? portToNode[upstream_port] : -1,
+                    pri, 0, buf, n_tags, n_out_pos, n_recon,
+                    count_front_members(), sum_out);
+                printPfcEpisodeLog(systemLogStep, now, port_id,
+                    portToNode[port_id],
+                    upstream_port >= 0 ? portToNode[upstream_port] : -1,
+                    state.ep_frames_paused, state.ep_frames_marked_dirty,
+                    state.ep_frames_marked_watchdog, state.ep_frames_unmarked,
+                    buf);
+                state.ep_frames_paused = 0;
+                state.ep_frames_marked_dirty = 0;
+                state.ep_frames_marked_watchdog = 0;
+                state.ep_frames_unmarked = 0;
+            }
             for (int32_t k = 0; k < state.paused_upstream_count[pri]; k++) {
                 int32_t up = state.paused_upstreams[pri][k];
                 Time pfc_delay = getPortLinkDelay(port_id, up);
@@ -630,6 +715,28 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortIngress(
     if (state_changed) {
         state.want_clear_pause = 1;
         state.want_clear_resume = 1;
+    }
+
+    // [002] periodic serving-state sample while this port stays paused
+    // (50us wall of sim-time): tells whether the target host's tags are
+    // actually being served (out_bw>0 / in front chunk) during the pause.
+    {
+        bool any_paused = false;
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            if (state.pause_active[pri] != 0) {
+                any_paused = true;
+                break;
+            }
+        }
+        if (!any_paused) {
+            state.ep_next_sample = 0.0;
+        } else if (pfcEventLogEnabled() && now >= state.ep_next_sample) {
+            printPfcSampleLog(systemLogStep, now, port_id, upstream_port,
+                upstream_port >= 0 ? portToNode[upstream_port] : -1,
+                n_tags, n_out_pos, n_recon, count_front_members(), sum_out,
+                buf_by_pri[0]);
+            state.ep_next_sample = now + 0.05;
+        }
     }
 
     // Rebuild timers from the post-transition state so a newly entered
