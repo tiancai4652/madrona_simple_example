@@ -37,7 +37,13 @@ MADRONA_NO_INLINE void initPortCore(
         zeroStruct(c);
 #pragma unroll 1
         for (int32_t i = 0; i < PFC_MAX_PRIORITY; i++) {
-            c.prior_bufs[i] = PriorityBuffer {};
+#pragma unroll 1
+            for (int32_t ch = 0; ch < MAX_BUFFER_CHUNKS; ch++) {
+#pragma unroll 1
+                for (int32_t w = 0; w < MAX_CHUNK_WEIGHTS; w++) {
+                    c.prior_bufs[i].buf_chunks[ch].weights[w].flow_id = -1;
+                }
+            }
         }
     }
     zeroStruct(ctx.get<DirtyPort>(port_entity));
