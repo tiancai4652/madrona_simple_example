@@ -16,7 +16,7 @@
 // Each ChakraNode occupies 51 ints with new 3-int attribute format
 #define INTS_PER_NODE 51
 
-#define NPU_NUM 16
+#define NPU_NUM 32
 
 
 // #define MAX_CHAKRA_NODES_PER_NPU 9 * 9999

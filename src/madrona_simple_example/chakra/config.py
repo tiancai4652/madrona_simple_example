@@ -7,7 +7,7 @@ import numpy as np
 from .conversion import folder_to_int_array
 
 
-MAX_NPUS = 16
+MAX_NPUS = 32
 CHAKRA_NODES_DATA_LENGTH = 10000
 PROCESS_PARAMS_LENGTH = 1000
 
