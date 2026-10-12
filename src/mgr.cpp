@@ -144,6 +144,20 @@ inline CompileConfig::OptMode getGPUOptMode()
 }
 #endif
 
+inline int64_t resolveWorldIdx(int64_t num_worlds, int32_t world_idx)
+{
+    // 004-多世界 P0: per-world readback. Clamp defensively so an
+    // out-of-range index can never read out of bounds; Python validates
+    // strictly and raises instead.
+    if (world_idx < 0) {
+        return 0;
+    }
+    if ((int64_t)world_idx >= num_worlds) {
+        return num_worlds - 1;
+    }
+    return (int64_t)world_idx;
+}
+
 } // namespace
 
 struct Manager::Impl {
@@ -167,15 +181,16 @@ struct Manager::Impl {
     virtual void run() = 0;
     virtual Tensor exportTensor(ExportID slot, TensorElementType type,
                                 Span<const int64_t> dims) = 0;
-    virtual double simulationTime() = 0;
-    virtual int32_t numFlowDefs() = 0;
-    virtual int32_t numPendingFlows() = 0;
-    virtual int32_t numDelayedEvents() = 0;
-    virtual int32_t numActiveTags() = 0;
-    virtual int32_t numSourceTags() = 0;
-    virtual int32_t numFlowCompletions() = 0;
-    virtual FlowCompletionRecord flowCompletion(int32_t idx) = 0;
-    virtual StepPhaseTimes lastStepPhaseTimes() = 0;
+    virtual double simulationTime(int32_t world_idx) = 0;
+    virtual int32_t numFlowDefs(int32_t world_idx) = 0;
+    virtual int32_t numPendingFlows(int32_t world_idx) = 0;
+    virtual int32_t numDelayedEvents(int32_t world_idx) = 0;
+    virtual int32_t numActiveTags(int32_t world_idx) = 0;
+    virtual int32_t numSourceTags(int32_t world_idx) = 0;
+    virtual int32_t numFlowCompletions(int32_t world_idx) = 0;
+    virtual FlowCompletionRecord flowCompletion(int32_t idx,
+                                                int32_t world_idx) = 0;
+    virtual StepPhaseTimes lastStepPhaseTimes(int32_t world_idx) = 0;
 
     static inline Impl * init(const Config &cfg,
                               const GridState &src_grid,
@@ -215,63 +230,66 @@ struct Manager::CPUImpl final : Manager::Impl {
         return Tensor(dev_ptr, type, dims, Optional<int>::none());
     }
 
-    inline SimStats &fetchSimStats()
+    inline SimStats &fetchSimStats(int32_t world_idx)
     {
         auto *stats = (SimStats *)cpuExec.getExported(
             (uint32_t)ExportID::SimStats);
-        return stats[0];
+        return stats[resolveWorldIdx(cfg.numWorlds, world_idx)];
     }
 
-    inline virtual double simulationTime() final
+    inline virtual double simulationTime(int32_t world_idx) final
     {
-        return fetchSimStats().simulationTime;
+        return fetchSimStats(world_idx).simulationTime;
     }
 
-    inline virtual int32_t numFlowDefs() final
+    inline virtual int32_t numFlowDefs(int32_t world_idx) final
     {
-        return fetchSimStats().numFlowDefs;
+        return fetchSimStats(world_idx).numFlowDefs;
     }
 
-    inline virtual int32_t numPendingFlows() final
+    inline virtual int32_t numPendingFlows(int32_t world_idx) final
     {
-        return fetchSimStats().numPendingFlows;
+        return fetchSimStats(world_idx).numPendingFlows;
     }
 
-    inline virtual int32_t numDelayedEvents() final
+    inline virtual int32_t numDelayedEvents(int32_t world_idx) final
     {
-        return fetchSimStats().numDelayedEvents;
+        return fetchSimStats(world_idx).numDelayedEvents;
     }
 
-    inline virtual int32_t numActiveTags() final
+    inline virtual int32_t numActiveTags(int32_t world_idx) final
     {
-        return fetchSimStats().numActiveTags;
+        return fetchSimStats(world_idx).numActiveTags;
     }
 
-    inline virtual int32_t numSourceTags() final
+    inline virtual int32_t numSourceTags(int32_t world_idx) final
     {
-        return fetchSimStats().numSourceTags;
+        return fetchSimStats(world_idx).numSourceTags;
     }
 
-    inline virtual int32_t numFlowCompletions() final
+    inline virtual int32_t numFlowCompletions(int32_t world_idx) final
     {
-        return fetchSimStats().numFlowCompletions;
+        return fetchSimStats(world_idx).numFlowCompletions;
     }
 
-    inline virtual FlowCompletionRecord flowCompletion(int32_t idx) final
+    inline virtual FlowCompletionRecord flowCompletion(
+        int32_t idx, int32_t world_idx) final
     {
-        if (idx < 0 || idx >= fetchSimStats().numFlowCompletions) {
+        int64_t w = resolveWorldIdx(cfg.numWorlds, world_idx);
+        if (idx < 0 || idx >= fetchSimStats(world_idx).numFlowCompletions) {
             return FlowCompletionRecord {};
         }
         auto *buf = (FlowCompletionBuf *)cpuExec.getExported(
             (uint32_t)ExportID::FlowCompletionBuf);
-        return buf[0].records[idx];
+        return buf[w].records[idx];
     }
 
-    inline virtual StepPhaseTimes lastStepPhaseTimes() final
+    inline virtual StepPhaseTimes lastStepPhaseTimes(
+        int32_t world_idx) final
     {
         auto *times = (StepPhaseTimes *)cpuExec.getExported(
             (uint32_t)ExportID::StepPhaseTimes);
-        return times[0];
+        return times[resolveWorldIdx(cfg.numWorlds, world_idx)];
     }
 };
 
@@ -330,72 +348,77 @@ struct Manager::GPUImpl final : Manager::Impl {
     // a synchronous cudaMemcpy of sizeof(SimStats) (~32 bytes) from the
     // GPU exported column. This latency is only paid on Python-visible
     // inspection calls, never inside the hot step loop on GPU.
-    inline SimStats fetchSimStats()
+    inline SimStats fetchSimStats(int32_t world_idx)
     {
         auto *dev_ptr = (SimStats *)gpuExec.getExported(
             (uint32_t)ExportID::SimStats);
+        int64_t w = resolveWorldIdx(cfg.numWorlds, world_idx);
         SimStats host_stats {};
-        REQ_CUDA(cudaMemcpy(&host_stats, dev_ptr, sizeof(SimStats),
+        REQ_CUDA(cudaMemcpy(&host_stats, dev_ptr + w, sizeof(SimStats),
                             cudaMemcpyDeviceToHost));
         return host_stats;
     }
 
-    inline virtual double simulationTime() final
+    inline virtual double simulationTime(int32_t world_idx) final
     {
-        return fetchSimStats().simulationTime;
+        return fetchSimStats(world_idx).simulationTime;
     }
 
-    inline virtual int32_t numFlowDefs() final
+    inline virtual int32_t numFlowDefs(int32_t world_idx) final
     {
-        return fetchSimStats().numFlowDefs;
+        return fetchSimStats(world_idx).numFlowDefs;
     }
 
-    inline virtual int32_t numPendingFlows() final
+    inline virtual int32_t numPendingFlows(int32_t world_idx) final
     {
-        return fetchSimStats().numPendingFlows;
+        return fetchSimStats(world_idx).numPendingFlows;
     }
 
-    inline virtual int32_t numDelayedEvents() final
+    inline virtual int32_t numDelayedEvents(int32_t world_idx) final
     {
-        return fetchSimStats().numDelayedEvents;
+        return fetchSimStats(world_idx).numDelayedEvents;
     }
 
-    inline virtual int32_t numActiveTags() final
+    inline virtual int32_t numActiveTags(int32_t world_idx) final
     {
-        return fetchSimStats().numActiveTags;
+        return fetchSimStats(world_idx).numActiveTags;
     }
 
-    inline virtual int32_t numSourceTags() final
+    inline virtual int32_t numSourceTags(int32_t world_idx) final
     {
-        return fetchSimStats().numSourceTags;
+        return fetchSimStats(world_idx).numSourceTags;
     }
 
-    inline virtual int32_t numFlowCompletions() final
+    inline virtual int32_t numFlowCompletions(int32_t world_idx) final
     {
-        return fetchSimStats().numFlowCompletions;
+        return fetchSimStats(world_idx).numFlowCompletions;
     }
 
-    inline virtual FlowCompletionRecord flowCompletion(int32_t idx) final
+    inline virtual FlowCompletionRecord flowCompletion(
+        int32_t idx, int32_t world_idx) final
     {
-        int32_t n = fetchSimStats().numFlowCompletions;
+        int32_t n = fetchSimStats(world_idx).numFlowCompletions;
         if (idx < 0 || idx >= n) {
             return FlowCompletionRecord {};
         }
         auto *dev_buf = (FlowCompletionBuf *)gpuExec.getExported(
             (uint32_t)ExportID::FlowCompletionBuf);
+        int64_t w = resolveWorldIdx(cfg.numWorlds, world_idx);
         FlowCompletionRecord rec {};
-        REQ_CUDA(cudaMemcpy(&rec, &dev_buf->records[idx],
+        REQ_CUDA(cudaMemcpy(&rec, &(dev_buf[w].records[idx]),
                             sizeof(FlowCompletionRecord),
                             cudaMemcpyDeviceToHost));
         return rec;
     }
 
-    inline virtual StepPhaseTimes lastStepPhaseTimes() final
+    inline virtual StepPhaseTimes lastStepPhaseTimes(
+        int32_t world_idx) final
     {
         auto *dev_ptr = (StepPhaseTimes *)gpuExec.getExported(
             (uint32_t)ExportID::StepPhaseTimes);
+        int64_t w = resolveWorldIdx(cfg.numWorlds, world_idx);
         StepPhaseTimes host_times {};
-        REQ_CUDA(cudaMemcpy(&host_times, dev_ptr, sizeof(StepPhaseTimes),
+        REQ_CUDA(cudaMemcpy(&host_times, dev_ptr + w, sizeof(StepPhaseTimes),
                             cudaMemcpyDeviceToHost));
         return host_times;
     }
@@ -682,49 +705,49 @@ Tensor Manager::inferenceStatsTensor() const
          INFERENCE_STATS_FIELDS});
 }
 
-double Manager::simulationTime()
+double Manager::simulationTime(int32_t world_idx)
 {
-    return impl_->simulationTime();
+    return impl_->simulationTime(world_idx);
 }
 
-int32_t Manager::numFlowDefs()
+int32_t Manager::numFlowDefs(int32_t world_idx)
 {
-    return impl_->numFlowDefs();
+    return impl_->numFlowDefs(world_idx);
 }
 
-int32_t Manager::numPendingFlows()
+int32_t Manager::numPendingFlows(int32_t world_idx)
 {
-    return impl_->numPendingFlows();
+    return impl_->numPendingFlows(world_idx);
 }
 
-int32_t Manager::numDelayedEvents()
+int32_t Manager::numDelayedEvents(int32_t world_idx)
 {
-    return impl_->numDelayedEvents();
+    return impl_->numDelayedEvents(world_idx);
 }
 
-int32_t Manager::numActiveTags()
+int32_t Manager::numActiveTags(int32_t world_idx)
 {
-    return impl_->numActiveTags();
+    return impl_->numActiveTags(world_idx);
 }
 
-int32_t Manager::numSourceTags()
+int32_t Manager::numSourceTags(int32_t world_idx)
 {
-    return impl_->numSourceTags();
+    return impl_->numSourceTags(world_idx);
 }
 
-int32_t Manager::numFlowCompletions()
+int32_t Manager::numFlowCompletions(int32_t world_idx)
 {
-    return impl_->numFlowCompletions();
+    return impl_->numFlowCompletions(world_idx);
 }
 
-FlowCompletionRecord Manager::flowCompletion(int32_t idx)
+FlowCompletionRecord Manager::flowCompletion(int32_t idx, int32_t world_idx)
 {
-    return impl_->flowCompletion(idx);
+    return impl_->flowCompletion(idx, world_idx);
 }
 
-StepPhaseTimes Manager::lastStepPhaseTimes()
+StepPhaseTimes Manager::lastStepPhaseTimes(int32_t world_idx)
 {
-    return impl_->lastStepPhaseTimes();
+    return impl_->lastStepPhaseTimes(world_idx);
 }
 
 }

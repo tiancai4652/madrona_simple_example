@@ -112,6 +112,18 @@ def build_parser():
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--out-csv", default=None,
                         help="optional serving statistics CSV path")
+    # 004-多世界 P0: multi-world inputs. The *_w1 options feed world1;
+    # when omitted world1 reuses the world0 value (broadcast).
+    parser.add_argument("--num-worlds", type=int, default=1,
+                        help="number of madrona worlds (P0 supports 1 or 2)")
+    parser.add_argument("--request-trace-w1", default=None,
+                        help="world1 request trace JSON, JSONL, or CSV")
+    parser.add_argument("--workload-params-w1", default=None,
+                        help="optional world1 workload params table")
+    parser.add_argument("--workload-w1", default=None,
+                        help="optional world1 Chakra workload dir or JSON")
+    parser.add_argument("--out-csv-w1", default=None,
+                        help="optional world1 serving statistics CSV path")
     parser.add_argument("--max-steps", type=int, default=200000)
     parser.add_argument("--print-every", type=int, default=10)
     return parser
@@ -119,7 +131,17 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
+    if args.num_worlds not in (1, 2):
+        sys.exit(f"error: --num-worlds {args.num_worlds} not supported "
+                 f"(P0 supports 1 or 2)")
     rows = load_workload_rows(args.workload)
+    rows_w1 = (load_workload_rows(args.workload_w1)
+               if args.workload_w1 else None)
+    if args.num_worlds == 1 and (args.request_trace_w1 is not None or
+                                 args.workload_params_w1 is not None or
+                                 rows_w1 is not None or
+                                 args.out_csv_w1 is not None):
+        sys.exit("error: *-w1 options require --num-worlds 2")
     npu_count = args.npu_count or len(rows)
     if npu_count != len(rows):
         sys.exit(
@@ -152,8 +174,9 @@ def main():
     )
 
     network_inputs = load_network_inputs_from_files(args.topo, None)
+    num_worlds = args.num_worlds
     world = GridWorld(
-        num_worlds=1,
+        num_worlds=num_worlds,
         start_cell=np.array([0, 0]),
         end_cells=np.array([[0, 0]], dtype=np.int32),
         rewards=np.zeros((1, 1), dtype=np.float32),
@@ -164,23 +187,28 @@ def main():
         system_config=system_config,
         inference_config=inference_config,
         request_trace=args.request_trace,
-        workload_params_table=args.workload_params_table,
+        workload_params_table=args.workload_params,
+        system_workload_w1=rows_w1,
+        request_trace_w1=args.request_trace_w1,
+        workload_params_table_w1=args.workload_params_w1,
     )
 
     finished_step = 0
     for step in range(1, args.max_steps + 1):
         world.step()
-        status = world.system_status()
+        statuses = [world.system_status(w) for w in range(num_worlds)]
         if step == 1 or step % args.print_every == 0:
-            print(
-                f"[serving] step={step} "
-                f"time_ms={world.simulation_time():.4f} status={status}",
-                flush=True)
-        if status["failed"]:
-            sys.exit(
-                f"error: inference simulation failed at step {step}, "
-                f"error_code={status['error_code']}")
-        if status["finished"]:
+            for w, status in enumerate(statuses):
+                print(
+                    f"[serving] step={step} world={w} "
+                    f"time_ms={world.simulation_time(w):.4f} status={status}",
+                    flush=True)
+        for w, status in enumerate(statuses):
+            if status["failed"]:
+                sys.exit(
+                    f"error: inference simulation failed at step {step} "
+                    f"in world {w}, error_code={status['error_code']}")
+        if all(status["finished"] for status in statuses):
             finished_step = step
             break
 
@@ -189,11 +217,22 @@ def main():
             f"error: inference simulation did not finish in "
             f"{args.max_steps} steps")
     if args.out_csv:
-        world.write_inference_stats_csv(args.out_csv)
-        print(f"[serving] wrote statistics to {args.out_csv}")
+        if num_worlds == 2 and args.out_csv_w1:
+            world.write_inference_stats_csv(
+                (args.out_csv, args.out_csv_w1), world_idx=None)
+            print(f"[serving] wrote statistics to {args.out_csv} "
+                  f"(world0) and {args.out_csv_w1} (world1)")
+        else:
+            for w in range(num_worlds):
+                path = args.out_csv if num_worlds == 1 else (
+                    args.out_csv if w == 0 else
+                    args.out_csv_w1 or f"{args.out_csv}.w{w}")
+                world.write_inference_stats_csv(path, w)
+                print(f"[serving] wrote world{w} statistics to {path}")
     print(
-        f"[serving] finished at step {finished_step}, "
-        f"sim_time_ms={world.simulation_time():.4f}")
+        f"[serving] finished at step {finished_step}, " +
+        ", ".join(f"world{w}_sim_time_ms={world.simulation_time(w):.4f}"
+                   for w in range(num_worlds)))
 
 
 if __name__ == "__main__":

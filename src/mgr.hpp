@@ -53,15 +53,16 @@ public:
     MGR_EXPORT madrona::py::Tensor workloadParamsTableTensor() const;
     MGR_EXPORT madrona::py::Tensor inferenceStatsTensor() const;
 
-    MGR_EXPORT double simulationTime();
-    MGR_EXPORT int32_t numFlowDefs();
-    MGR_EXPORT int32_t numPendingFlows();
-    MGR_EXPORT int32_t numDelayedEvents();
-    MGR_EXPORT int32_t numActiveTags();
-    MGR_EXPORT int32_t numSourceTags();
-    MGR_EXPORT int32_t numFlowCompletions();
-    MGR_EXPORT FlowCompletionRecord flowCompletion(int32_t idx);
-    MGR_EXPORT StepPhaseTimes lastStepPhaseTimes();
+    MGR_EXPORT double simulationTime(int32_t world_idx = 0);
+    MGR_EXPORT int32_t numFlowDefs(int32_t world_idx = 0);
+    MGR_EXPORT int32_t numPendingFlows(int32_t world_idx = 0);
+    MGR_EXPORT int32_t numDelayedEvents(int32_t world_idx = 0);
+    MGR_EXPORT int32_t numActiveTags(int32_t world_idx = 0);
+    MGR_EXPORT int32_t numSourceTags(int32_t world_idx = 0);
+    MGR_EXPORT int32_t numFlowCompletions(int32_t world_idx = 0);
+    MGR_EXPORT FlowCompletionRecord flowCompletion(int32_t idx,
+                                                   int32_t world_idx = 0);
+    MGR_EXPORT StepPhaseTimes lastStepPhaseTimes(int32_t world_idx = 0);
 
 private:
     struct Impl;

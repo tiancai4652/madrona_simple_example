@@ -212,6 +212,26 @@ def make_default_network_inputs():
     }
 
 
+def _as_per_world(value_w0, value_w1, num_worlds, name):
+    """Broadcast-or-split helper for per-world inputs (004-多世界 P0).
+
+    Single-world callers keep passing one value (old behavior, broadcast
+    when num_worlds == 1). Two-world callers optionally pass a distinct
+    second value via the ``*_w1`` parameter; otherwise world1 reuses the
+    world0 value. Only 1/2 worlds are supported in P0.
+    """
+    if num_worlds == 1:
+        if value_w1 is not None:
+            raise ValueError(f"{name}_w1 requires num_worlds=2")
+        return [value_w0]
+    if num_worlds == 2:
+        if value_w1 is None:
+            return [value_w0, value_w0]
+        return [value_w0, value_w1]
+    raise ValueError(
+        f"num_worlds={num_worlds} is not supported in P0 (only 1 or 2)")
+
+
 class GridWorld:
     def __init__(self,
                  num_worlds,
@@ -235,6 +255,13 @@ class GridWorld:
                  inference_config = None,
                  request_trace = None,
                  workload_params_table = None,
+                 # 004-多世界 P0: optional per-world overrides for world1.
+                 # When None they broadcast the world0 value (old behavior).
+                 system_workload_w1 = None,
+                 system_config_w1 = None,
+                 inference_config_w1 = None,
+                 request_trace_w1 = None,
+                 workload_params_table_w1 = None,
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -252,23 +279,52 @@ class GridWorld:
         if inference_config is not None and system_config is None:
             raise ValueError(
                 "inference_config requires system_workload and system_config")
-        if system_config is not None:
-            system_config.validate()
-            node_ids = np.asarray(self.network_inputs['node_ids'])
-            node_types = np.asarray(self.network_inputs['node_types'])
-            host_ids = set(node_ids[node_types == 0].astype(int).tolist())
-            missing = [npu_id for npu_id in range(system_config.npu_count)
-                       if npu_id not in host_ids]
-            if missing:
-                raise ValueError(
-                    f"network topology is missing NPU host ids: {missing[:8]}")
+        self.num_worlds = num_worlds
+        if num_worlds not in (1, 2):
+            raise ValueError(
+                f"num_worlds={num_worlds} is not supported in P0 (only 1 or 2)")
 
-        inference_trace = None
-        inference_profiles = None
-        if inference_config is not None:
-            inference_trace = load_request_trace(request_trace)
-            inference_profiles = load_workload_params_table(workload_params_table)
-            inference_config.validate(system_config.npu_count)
+        system_workloads = _as_per_world(
+            system_workload, system_workload_w1, num_worlds,
+            "system_workload")
+        system_configs = _as_per_world(
+            system_config, system_config_w1, num_worlds, "system_config")
+        inference_configs = _as_per_world(
+            inference_config, inference_config_w1, num_worlds,
+            "inference_config")
+        request_traces = _as_per_world(
+            request_trace, request_trace_w1, num_worlds, "request_trace")
+        workload_params_tables = _as_per_world(
+            workload_params_table, workload_params_table_w1, num_worlds,
+            "workload_params_table")
+
+        for world_idx, cfg in enumerate(system_configs):
+            if cfg is not None:
+                cfg.validate()
+                node_ids = np.asarray(self.network_inputs['node_ids'])
+                node_types = np.asarray(self.network_inputs['node_types'])
+                host_ids = set(node_ids[node_types == 0].astype(int).tolist())
+                missing = [npu_id for npu_id in range(cfg.npu_count)
+                           if npu_id not in host_ids]
+                if missing:
+                    raise ValueError(
+                        f"world{world_idx}: network topology is missing NPU "
+                        f"host ids: {missing[:8]}")
+
+        # Per-world parsed inference inputs (None entry when disabled).
+        # Row counts may differ per world (变长/变大小兼容: different
+        # lengths/sizes/counts/intervals are row values, not shapes).
+        inference_traces = [None] * num_worlds
+        inference_profiles = [None] * num_worlds
+        for world_idx in range(num_worlds):
+            if inference_configs[world_idx] is not None:
+                inference_configs[world_idx].validate(
+                    system_configs[world_idx].npu_count
+                    if system_configs[world_idx] is not None else None)
+                inference_traces[world_idx] = load_request_trace(
+                    request_traces[world_idx])
+                inference_profiles[world_idx] = load_workload_params_table(
+                    workload_params_tables[world_idx])
 
         if prior_weights is None:
             prior_weights = np.zeros(8, dtype=np.float64)
@@ -316,32 +372,42 @@ class GridWorld:
         self.rewards = self.sim.reward_tensor().to_torch()
         self.dones = self.sim.done_tensor().to_torch()
 
-        self._system_enabled = system_workload is not None
-        self._inference_enabled = inference_config is not None
-        self._num_inference_requests = (
-            len(inference_trace) if inference_trace is not None else 0)
+        self._system_enabled = system_workloads[0] is not None
+        self._inference_enabled = inference_configs[0] is not None
+        # Per-world request counts (backward compat: single int when
+        # num_worlds == 1, list when 2). Use num_inference_requests().
+        self._num_inference_requests = [
+            len(trace) if trace is not None else 0
+            for trace in inference_traces
+        ]
         if self._system_enabled:
-            chakra_data = load_chakra_workload(
-                system_workload, system_config.npu_count)
-            process_params = build_process_params(system_config)
             chakra_tensor = self.sim.chakra_nodes_data_tensor().to_torch()
             params_tensor = self.sim.process_params_tensor().to_torch()
-            chakra_row = torch.from_numpy(chakra_data)
-            params_row = torch.from_numpy(process_params)
             for world_idx in range(num_worlds):
-                chakra_tensor[world_idx].copy_(chakra_row)
-                params_tensor[world_idx].copy_(params_row)
+                chakra_data = load_chakra_workload(
+                    system_workloads[world_idx],
+                    system_configs[world_idx].npu_count)
+                process_params = build_process_params(
+                    system_configs[world_idx])
+                chakra_tensor[world_idx].copy_(
+                    torch.from_numpy(chakra_data))
+                params_tensor[world_idx].copy_(
+                    torch.from_numpy(process_params))
 
         if self._inference_enabled:
             config_tensor = self.sim.inference_config_tensor().to_torch()
             request_tensor = self.sim.inference_request_tensor().to_torch()
             profile_tensor = self.sim.workload_params_table_tensor().to_torch()
-            config_row = torch.from_numpy(inference_config.pack(
-                self._num_inference_requests, system_config.npu_count,
-                len(inference_profiles)))
-            request_row = torch.from_numpy(pack_request_trace(inference_trace))
-            profile_row = torch.from_numpy(pack_workload_params_table(inference_profiles))
             for world_idx in range(num_worlds):
+                config_row = torch.from_numpy(
+                    inference_configs[world_idx].pack(
+                        self._num_inference_requests[world_idx],
+                        system_configs[world_idx].npu_count,
+                        len(inference_profiles[world_idx])))
+                request_row = torch.from_numpy(pack_request_trace(
+                    inference_traces[world_idx]))
+                profile_row = torch.from_numpy(pack_workload_params_table(
+                    inference_profiles[world_idx]))
                 config_tensor[world_idx].copy_(config_row)
                 request_tensor[world_idx].copy_(request_row)
                 profile_tensor[world_idx].copy_(profile_row)
@@ -349,11 +415,27 @@ class GridWorld:
     def step(self):
         self.sim.step()
 
-    def simulation_time(self):
-        return self.sim.simulation_time()
+    def _check_world(self, world_idx):
+        if not 0 <= world_idx < self.num_worlds:
+            raise ValueError(
+                f"world_idx={world_idx} out of range "
+                f"(num_worlds={self.num_worlds})")
+        return world_idx
 
-    def system_status(self):
-        raw = self.sim.system_status_tensor().to_torch()[0].cpu().tolist()
+    def num_inference_requests(self, world_idx=0):
+        """Per-world request count (list form stored internally)."""
+        self._check_world(world_idx)
+        counts = self._num_inference_requests
+        if isinstance(counts, list):
+            return counts[world_idx]
+        return counts
+
+    def simulation_time(self, world_idx=0):
+        return self.sim.simulation_time(self._check_world(world_idx))
+
+    def system_status(self, world_idx=0):
+        raw = self.sim.system_status_tensor().to_torch()[
+            self._check_world(world_idx)].cpu().tolist()
         return {
             'initialized': bool(raw[0]),
             'finished': bool(raw[1]),
@@ -363,54 +445,80 @@ class GridWorld:
             'total_npus': int(raw[5]),
         }
 
-    def system_finished(self):
-        return self.system_status()['finished']
+    def system_finished(self, world_idx=0):
+        return self.system_status(world_idx)['finished']
 
-    def system_failed(self):
-        return self.system_status()['failed']
+    def system_failed(self, world_idx=0):
+        return self.system_status(world_idx)['failed']
 
-    def num_flow_defs(self):
-        return self.sim.num_flow_defs()
+    def all_worlds_finished(self):
+        return all(self.system_finished(w) for w in range(self.num_worlds))
 
-    def num_pending_flows(self):
-        return self.sim.num_pending_flows()
+    def num_flow_defs(self, world_idx=0):
+        return self.sim.num_flow_defs(self._check_world(world_idx))
 
-    def num_delayed_events(self):
-        return self.sim.num_delayed_events()
+    def num_pending_flows(self, world_idx=0):
+        return self.sim.num_pending_flows(self._check_world(world_idx))
 
-    def num_active_tags(self):
-        return self.sim.num_active_tags()
+    def num_delayed_events(self, world_idx=0):
+        return self.sim.num_delayed_events(self._check_world(world_idx))
 
-    def num_source_tags(self):
-        return self.sim.num_source_tags()
+    def num_active_tags(self, world_idx=0):
+        return self.sim.num_active_tags(self._check_world(world_idx))
 
-    def num_flow_completions(self):
-        return self.sim.num_flow_completions()
+    def num_source_tags(self, world_idx=0):
+        return self.sim.num_source_tags(self._check_world(world_idx))
 
-    def last_step_phase_times(self):
-        return dict(self.sim.last_step_phase_times())
+    def num_flow_completions(self, world_idx=0):
+        return self.sim.num_flow_completions(self._check_world(world_idx))
 
-    def flow_completions(self):
+    def last_step_phase_times(self, world_idx=0):
+        return dict(self.sim.last_step_phase_times(
+            self._check_world(world_idx)))
+
+    def flow_completions(self, world_idx=0):
+        self._check_world(world_idx)
         return [
-            self.sim.flow_completion(i)
-            for i in range(self.sim.num_flow_completions())
+            self.sim.flow_completion(i, world_idx)
+            for i in range(self.sim.num_flow_completions(world_idx))
         ]
 
-    def inference_stats(self):
+    def inference_stats(self, world_idx=0):
         if not self._inference_enabled:
             return []
-        raw = self.sim.inference_stats_tensor().to_torch()[0].cpu().numpy()
-        return parse_inference_stats(raw, self._num_inference_requests)
+        self._check_world(world_idx)
+        raw = self.sim.inference_stats_tensor().to_torch()[world_idx].cpu().numpy()
+        return parse_inference_stats(raw, self.num_inference_requests(world_idx))
 
-    def write_inference_stats_csv(self, output_path):
-        rows = self.inference_stats()
+    def write_inference_stats_csv(self, output_path, world_idx=0):
+        # world_idx=None + a (path_w0, path_w1) pair writes one CSV per
+        # world (dual output for multi-world runs).
+        if world_idx is None:
+            paths = list(output_path)
+            if len(paths) != self.num_worlds:
+                raise ValueError(
+                    "dual output requires one path per world, got "
+                    f"{len(paths)} for num_worlds={self.num_worlds}")
+            for world, path in enumerate(paths):
+                self.write_inference_stats_csv(path, world)
+            return
+        rows = self.inference_stats(world_idx)
         with open(output_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=INFERENCE_STATS_OUTPUT_FIELDS)
             writer.writeheader()
             writer.writerows(rows)
 
-    def write_flow_completion_csv(self, output_path):
-        rows = sorted(self.flow_completions(), key=lambda row: row['flow_id'])
+    def write_flow_completion_csv(self, output_path, world_idx=0):
+        if world_idx is None:
+            paths = list(output_path)
+            if len(paths) != self.num_worlds:
+                raise ValueError(
+                    "dual output requires one path per world, got "
+                    f"{len(paths)} for num_worlds={self.num_worlds}")
+            for world, path in enumerate(paths):
+                self.write_flow_completion_csv(path, world)
+            return
+        rows = sorted(self.flow_completions(world_idx), key=lambda row: row['flow_id'])
         with open(output_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([

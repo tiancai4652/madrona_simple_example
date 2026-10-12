@@ -348,15 +348,22 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
         .def("inference_request_tensor", &Manager::inferenceRequestTensor)
         .def("workload_params_table_tensor", &Manager::workloadParamsTableTensor)
         .def("inference_stats_tensor", &Manager::inferenceStatsTensor)
-        .def("simulation_time", &Manager::simulationTime)
-        .def("num_flow_defs", &Manager::numFlowDefs)
-        .def("num_pending_flows", &Manager::numPendingFlows)
-        .def("num_delayed_events", &Manager::numDelayedEvents)
-        .def("num_active_tags", &Manager::numActiveTags)
-        .def("num_source_tags", &Manager::numSourceTags)
-        .def("num_flow_completions", &Manager::numFlowCompletions)
-        .def("last_step_phase_times", [](Manager &mgr) {
-            StepPhaseTimes times = mgr.lastStepPhaseTimes();
+        .def("simulation_time", &Manager::simulationTime,
+             nb::arg("world_idx") = 0)
+        .def("num_flow_defs", &Manager::numFlowDefs,
+             nb::arg("world_idx") = 0)
+        .def("num_pending_flows", &Manager::numPendingFlows,
+             nb::arg("world_idx") = 0)
+        .def("num_delayed_events", &Manager::numDelayedEvents,
+             nb::arg("world_idx") = 0)
+        .def("num_active_tags", &Manager::numActiveTags,
+             nb::arg("world_idx") = 0)
+        .def("num_source_tags", &Manager::numSourceTags,
+             nb::arg("world_idx") = 0)
+        .def("num_flow_completions", &Manager::numFlowCompletions,
+             nb::arg("world_idx") = 0)
+        .def("last_step_phase_times", [](Manager &mgr, int64_t world_idx) {
+            StepPhaseTimes times = mgr.lastStepPhaseTimes((int32_t)world_idx);
             nb::dict result;
             result["step"] = nb::int_(times.step);
             result["total_wall_time_s"] = nb::float_(times.totalWallTimeS);
@@ -375,9 +382,11 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
             result["buffer_progress_wall_time_s"] =
                 nb::float_(times.phaseWallTimeS[(uint32_t)StepPhaseID::BufferProgress]);
             return result;
-        })
-        .def("flow_completion", [](Manager &mgr, int64_t idx) {
-            FlowCompletionRecord record = mgr.flowCompletion((int32_t)idx);
+        }, nb::arg("world_idx") = 0)
+        .def("flow_completion", [](Manager &mgr, int64_t idx,
+                                   int64_t world_idx) {
+            FlowCompletionRecord record = mgr.flowCompletion(
+                (int32_t)idx, (int32_t)world_idx);
             nb::dict result;
             result["flow_id"] = nb::int_(record.flow_id);
             result["src_node"] = nb::int_(record.src_node);
@@ -388,7 +397,7 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
             result["fct_ms"] = nb::float_(record.fct());
             result["priority"] = nb::int_(record.priority);
             return result;
-        })
+        }, nb::arg("idx"), nb::arg("world_idx") = 0)
     ;
 }
 
