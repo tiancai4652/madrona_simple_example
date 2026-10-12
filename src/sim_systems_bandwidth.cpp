@@ -689,7 +689,7 @@ MADRONA_NO_INLINE bool allocOnePortDefault(
     // QoS-NONE, which is what decides whether a paused host's flows keep
     // draining or freeze.
     if (pfcEventLogEnabled()) {
-        int64_t slot = (int64_t)std::llround(sim.now * 1000.0);
+        int64_t slot = (int64_t)(sim.now * 1000.0 + 0.5);
         if (slot % 100 == 0 && sim.portToNode[port_id] >= 128) {
             double chunk_sum = 0.0;
             for (int32_t ci = 0; ci < pb.num_chunks; ci++) {
