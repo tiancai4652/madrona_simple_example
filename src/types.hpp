@@ -138,7 +138,7 @@ constexpr int32_t PFC_MAX_PRIORITY = 1;
 // Must be >= the maximum number of flows/events per hot port so buffer chunks
 // and per-port queues do not silently drop same-timestamp fan-in.
 constexpr int32_t MAX_CHUNK_WEIGHTS = 512; // [002-validation] 256->512: fix PFC staircase (was truncating hosts 22-31 of each leaf)
-constexpr int32_t MAX_BUFFER_CHUNKS = 16;
+constexpr int32_t MAX_BUFFER_CHUNKS = 128;
 constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
