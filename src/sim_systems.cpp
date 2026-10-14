@@ -527,7 +527,8 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
     Context &ctx, uint32_t npu_id,
     NpuFlowInbox &inbox,
     NpuFlowPool &pool,
-    NpuFlowActiveList &active)
+    NpuFlowActiveList &active,
+    NpuFlowCreateDraft &draft)
 {
     if (inbox.count == 0) {
         return;
@@ -583,14 +584,28 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
             .prepared_event = DelayedEvent {},
         };
 
-        // The flow_id -> FlowMeta lookup table stays a single shared
-        // structure (network-side routing needs to resolve any flow_id
-        // to its entity regardless of owner). Concurrent insertion is
-        // safe because flow ids are globally disjoint per NPU (per-NPU
-        // monotonic counters with the npu_id * 10000 base, plus the
-        // high-bit inference KV ids owned by the sending P rank), so
-        // parallel instances only ever write disjoint hash slots.
-        insertFlowMetaLookup(flow.id, flow_entity);
+        // 013-bug修复 M1: the flow_id -> FlowMeta lookup table stays a
+        // single shared structure (network-side routing needs to resolve
+        // any flow_id to its entity regardless of owner), but its
+        // open-addressing insert is NOT safe under parallel NPU instances:
+        // concurrent inserts can land on overlapping linear-probe paths
+        // (lost insert) and the ids/entity double-store tears. Record an
+        // insert ticket into this NPU's own draft; the serial
+        // commitNpuFlowCreate replays it right after the fan-out.
+        if (draft.count >= MAX_FLOWS_PER_NPU) {
+            // Structurally unreachable (tickets <= inbox entries drained
+            // this step <= MAX_FLOWS_PER_NPU); loud failure per the
+            // accepted A1/A7 draft design.
+            draft.overflow_count += 1;
+            SystemStatus &status = ctx.singleton<SystemStatus>();
+            status.failed = 1;
+            status.error_code = 6;
+            return;
+        }
+        draft.tickets[draft.count++] = NpuFlowCreateTicket {
+            .flow_id = flow.id,
+            .entity = flow_entity,
+        };
 
         active.active[active.count++] = NpuActiveFlow {
             .flow_entity = flow_entity,
@@ -612,6 +627,28 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
     }
 
     inbox.count = 0;
+}
+
+// 013-bug修复 M1 serial commit: replays each NPU's flow-meta insert
+// tickets in npu_id ascending order (== the legacy per-NPU loop order).
+// The key->entity mapping registered here is order-independent (open
+// addressing resolves the same key to the same entity regardless of probe
+// layout; slot indices are never persisted), so this is byte-identical to
+// the pre-fix serial execution on every backend.
+MADRONA_NO_INLINE void Sim::commitNpuFlowCreate(Context &ctx)
+{
+    for (int32_t npu_id = 0; npu_id < numNpus; npu_id++) {
+        Entity npu_entity = npuEntities[npu_id];
+        if (npu_entity == Entity::none()) {
+            continue;
+        }
+        NpuFlowCreateDraft &draft = ctx.get<NpuFlowCreateDraft>(npu_entity);
+        for (uint32_t i = 0; i < draft.count; i++) {
+            const NpuFlowCreateTicket &ticket = draft.tickets[i];
+            insertFlowMetaLookup(ticket.flow_id, ticket.entity);
+        }
+        draft.count = 0;
+    }
 }
 
 MADRONA_NO_INLINE void Sim::pruneSystemEvents(Context &ctx)

@@ -56,6 +56,31 @@ def load_workload_rows(workload):
     raise FileNotFoundError(f"workload path does not exist: {workload}")
 
 
+def split_per_world_paths(value):
+    """Split a comma-separated per-world path list (011-十世界验证).
+
+    Empty entries (``""``) mean broadcast: that world reuses the world0
+    value. Returns None when the option was not given.
+    """
+    if value is None:
+        return None
+    return [item.strip() or None for item in value.split(",")]
+
+
+def resolve_per_world(values_w0, per_world, num_worlds, name):
+    """Merge a world0 default with an optional per-world list.
+
+    Returns a length-N list where None entries broadcast values_w0.
+    """
+    if per_world is None:
+        return [values_w0] * num_worlds
+    if len(per_world) != num_worlds:
+        raise ValueError(
+            f"{name} has {len(per_world)} entries != "
+            f"num_worlds={num_worlds}")
+    return [values_w0 if v is None else v for v in per_world]
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         description="Run the PD serving simulator")
@@ -114,16 +139,30 @@ def build_parser():
                         help="optional serving statistics CSV path")
     # 004-多世界 P0: multi-world inputs. The *_w1 options feed world1;
     # when omitted world1 reuses the world0 value (broadcast).
+    # 011-十世界验证: N-world lists (*-per-world, comma-separated, empty
+    # entry = broadcast). Mutually exclusive with the *_w1 pair.
     parser.add_argument("--num-worlds", type=int, default=1,
-                        help="number of madrona worlds (P0 supports 1 or 2)")
+                        help="number of madrona worlds (011 supports 1..10)")
     parser.add_argument("--request-trace-w1", default=None,
                         help="world1 request trace JSON, JSONL, or CSV")
+    parser.add_argument("--request-trace-per-world", default=None,
+                        help="comma-separated per-world request traces "
+                             "(N entries, empty entry = reuse world0)")
     parser.add_argument("--workload-params-w1", default=None,
                         help="optional world1 workload params table")
+    parser.add_argument("--workload-params-per-world", default=None,
+                        help="comma-separated per-world workload params "
+                             "tables (N entries, empty = reuse world0)")
     parser.add_argument("--workload-w1", default=None,
                         help="optional world1 Chakra workload dir or JSON")
+    parser.add_argument("--workload-per-world", default=None,
+                        help="comma-separated per-world Chakra workloads "
+                             "(N entries, empty = reuse world0)")
     parser.add_argument("--out-csv-w1", default=None,
                         help="optional world1 serving statistics CSV path")
+    parser.add_argument("--out-csv-per-world", default=None,
+                        help="comma-separated per-world statistics CSV "
+                             "paths (N entries, empty = <out-csv>.w{i})")
     parser.add_argument("--max-steps", type=int, default=200000)
     parser.add_argument("--print-every", type=int, default=10)
     return parser
@@ -131,17 +170,63 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
-    if args.num_worlds not in (1, 2):
+    if not 1 <= args.num_worlds <= 10:
         sys.exit(f"error: --num-worlds {args.num_worlds} not supported "
-                 f"(P0 supports 1 or 2)")
+                 f"(011 supports 1..10)")
+    per_world_given = (
+        args.request_trace_per_world is not None
+        or args.workload_params_per_world is not None
+        or args.workload_per_world is not None
+        or args.out_csv_per_world is not None)
+    w1_given = (
+        args.request_trace_w1 is not None
+        or args.workload_params_w1 is not None
+        or args.workload_w1 is not None
+        or args.out_csv_w1 is not None)
+    if per_world_given and w1_given:
+        sys.exit("error: *-per-world options and *-w1 options are "
+                 "mutually exclusive")
+    if args.num_worlds == 1 and (w1_given or per_world_given):
+        sys.exit("error: *-w1 / *-per-world options require "
+                 "--num-worlds >= 2")
+    if args.num_worlds > 2 and w1_given:
+        sys.exit(f"error: *-w1 options only support --num-worlds 2 "
+                 f"(use *-per-world for {args.num_worlds} worlds)")
+    for flag, val in (("--request-trace-per-world",
+                        args.request_trace_per_world),
+                       ("--workload-params-per-world",
+                        args.workload_params_per_world),
+                       ("--workload-per-world", args.workload_per_world),
+                       ("--out-csv-per-world", args.out_csv_per_world)):
+        if val is not None and len(split_per_world_paths(val)) != args.num_worlds:
+            sys.exit(f"error: {flag} needs {args.num_worlds} comma-separated "
+                     f"entries (empty entry = reuse world0)")
     rows = load_workload_rows(args.workload)
-    rows_w1 = (load_workload_rows(args.workload_w1)
-               if args.workload_w1 else None)
-    if args.num_worlds == 1 and (args.request_trace_w1 is not None or
-                                 args.workload_params_w1 is not None or
-                                 rows_w1 is not None or
-                                 args.out_csv_w1 is not None):
-        sys.exit("error: *-w1 options require --num-worlds 2")
+    if w1_given:
+        # Legacy 004 dual path (N=2 old calls unchanged).
+        rows_w1 = (load_workload_rows(args.workload_w1)
+                   if args.workload_w1 else None)
+        list_kwargs = {}
+    else:
+        rows_w1 = None
+        workload_paths = resolve_per_world(
+            args.workload, split_per_world_paths(args.workload_per_world),
+            args.num_worlds, "--workload-per-world")
+        rows_list = [rows if p == args.workload else load_workload_rows(p)
+                     for p in workload_paths]
+        request_paths = resolve_per_world(
+            args.request_trace,
+            split_per_world_paths(args.request_trace_per_world),
+            args.num_worlds, "--request-trace-per-world")
+        params_paths = resolve_per_world(
+            args.workload_params,
+            split_per_world_paths(args.workload_params_per_world),
+            args.num_worlds, "--workload-params-per-world")
+        list_kwargs = {
+            "system_workloads": rows_list,
+            "request_traces": request_paths,
+            "workload_params_tables": params_paths,
+        }
     npu_count = args.npu_count or len(rows)
     if npu_count != len(rows):
         sys.exit(
@@ -191,6 +276,7 @@ def main():
         system_workload_w1=rows_w1,
         request_trace_w1=args.request_trace_w1,
         workload_params_table_w1=args.workload_params_w1,
+        **list_kwargs,
     )
 
     finished_step = 0
@@ -222,6 +308,19 @@ def main():
                 (args.out_csv, args.out_csv_w1), world_idx=None)
             print(f"[serving] wrote statistics to {args.out_csv} "
                   f"(world0) and {args.out_csv_w1} (world1)")
+        elif args.out_csv_per_world is not None:
+            per = split_per_world_paths(args.out_csv_per_world)
+            if len(per) != num_worlds:
+                sys.exit(f"error: --out-csv-per-world has {len(per)} "
+                         f"entries != num_worlds={num_worlds}")
+            paths = [
+                entry if entry else (args.out_csv if w == 0
+                                     else f"{args.out_csv}.w{w}")
+                for w, entry in enumerate(per)
+            ]
+            world.write_inference_stats_csv(tuple(paths), world_idx=None)
+            for w, path in enumerate(paths):
+                print(f"[serving] wrote world{w} statistics to {path}")
         else:
             for w in range(num_worlds):
                 path = args.out_csv if num_worlds == 1 else (

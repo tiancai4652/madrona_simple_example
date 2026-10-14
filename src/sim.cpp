@@ -88,6 +88,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     // A1/A7 per-NPU draft components (parallel scan -> serial commit).
     registry.registerComponent<NpuKvCollectDraft>();
     registry.registerComponent<NpuFlowScheduleDraft>();
+    // 013-bug修复 M1: per-NPU flow-meta insert draft (serial commit).
+    registry.registerComponent<NpuFlowCreateDraft>();
     // C1 per-NPU comm entity pool + retire draft.
     registry.registerComponent<NpuCommEntityPool>();
     registry.registerComponent<NpuCommRetireDraft>();

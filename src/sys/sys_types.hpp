@@ -884,9 +884,10 @@ namespace madsimple
                          NpuFlowActiveList,
                          NpuFlowFinishedList,
                          NpuFlowPairState,
-                         NpuKvCollectDraft,
-                         NpuFlowScheduleDraft,
-                         NpuCommEntityPool,
+                          NpuKvCollectDraft,
+                          NpuFlowScheduleDraft,
+                          NpuFlowCreateDraft,
+                          NpuCommEntityPool,
                          NpuCommRetireDraft>
     {
     };

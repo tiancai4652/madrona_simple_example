@@ -615,6 +615,29 @@ struct NpuFlowScheduleDraft {
     NpuScheduleTicket tickets[MAX_FLOWS_PER_NPU] {};
 };
 
+// --- 013-bug修复 (M1) create-draft pattern ----------------------------------
+// Parallel per-NPU draft: createFlowsFromNpuRequestsOneNpu materializes the
+// FlowDef/Route/Runtime/Schedule components on its OWN pool entities (safe)
+// but must NOT touch the shared flowMetaLookupIds/EntityLookup hash table:
+// parallel inserts from concurrent NPU instances can land on overlapping
+// linear-probe paths (lost insert) and the ids/entity double-store tears.
+// Each instance therefore records (flow_id, entity) tickets here, in the
+// inbox-sorted order it already processes; the serial commitNpuFlowSchedule
+// companion (commitNpuFlowCreate, replayed in npu_id ascending order right
+// after the create fan-out) inserts them single-threaded. Ticket count per
+// step per NPU <= inbox.count <= MAX_FLOWS_PER_NPU, so overflow is
+// structurally unreachable; it still fails loudly per the A1/A7 design.
+struct NpuFlowCreateTicket {
+    FlowId flow_id = -1;
+    madrona::Entity entity = madrona::Entity::none();
+};
+
+struct NpuFlowCreateDraft {
+    uint32_t count = 0;
+    uint32_t overflow_count = 0;
+    NpuFlowCreateTicket tickets[MAX_FLOWS_PER_NPU] {};
+};
+
 enum class NodeType : int32_t {
     Host,
     Switch,

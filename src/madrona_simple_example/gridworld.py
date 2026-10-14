@@ -212,14 +212,28 @@ def make_default_network_inputs():
     }
 
 
-def _as_per_world(value_w0, value_w1, num_worlds, name):
-    """Broadcast-or-split helper for per-world inputs (004-多世界 P0).
+def _as_per_world(value_w0, value_w1, num_worlds, name,
+                   list_values=None):
+    """Broadcast-or-split helper for per-world inputs (004-多世界 P0,
+    011-十世界验证 N-world extension).
 
     Single-world callers keep passing one value (old behavior, broadcast
     when num_worlds == 1). Two-world callers optionally pass a distinct
     second value via the ``*_w1`` parameter; otherwise world1 reuses the
-    world0 value. Only 1/2 worlds are supported in P0.
+    world0 value. N-world (3..10) callers pass ``list_values`` (a list
+    with num_worlds entries; None entries broadcast the world0 value).
+    ``*_w1`` and ``list_values`` are mutually exclusive; ``*_w1`` with
+    num_worlds != 2 keeps the P0 error behavior.
     """
+    if list_values is not None:
+        if value_w1 is not None:
+            raise ValueError(
+                f"{name}_w1 and {name}s are mutually exclusive")
+        if len(list_values) != num_worlds:
+            raise ValueError(
+                f"{name}s length {len(list_values)} != "
+                f"num_worlds={num_worlds}")
+        return [value_w0 if v is None else v for v in list_values]
     if num_worlds == 1:
         if value_w1 is not None:
             raise ValueError(f"{name}_w1 requires num_worlds=2")
@@ -228,8 +242,12 @@ def _as_per_world(value_w0, value_w1, num_worlds, name):
         if value_w1 is None:
             return [value_w0, value_w0]
         return [value_w0, value_w1]
-    raise ValueError(
-        f"num_worlds={num_worlds} is not supported in P0 (only 1 or 2)")
+    # N > 2 without a list: broadcast world0 (same base).
+    if value_w1 is not None:
+        raise ValueError(
+            f"{name}_w1 only supports num_worlds=2; "
+            f"use {name}s for num_worlds={num_worlds}")
+    return [value_w0] * num_worlds
 
 
 class GridWorld:
@@ -255,13 +273,21 @@ class GridWorld:
                  inference_config = None,
                  request_trace = None,
                  workload_params_table = None,
-                 # 004-多世界 P0: optional per-world overrides for world1.
-                 # When None they broadcast the world0 value (old behavior).
-                 system_workload_w1 = None,
-                 system_config_w1 = None,
-                 inference_config_w1 = None,
-                 request_trace_w1 = None,
-                 workload_params_table_w1 = None,
+                  # 004-多世界 P0: optional per-world overrides for world1.
+                  # When None they broadcast the world0 value (old behavior).
+                  system_workload_w1 = None,
+                  system_config_w1 = None,
+                  inference_config_w1 = None,
+                  request_trace_w1 = None,
+                  workload_params_table_w1 = None,
+                  # 011-十世界验证: optional per-world lists (length ==
+                  # num_worlds; None entries broadcast the world0 value).
+                  # Mutually exclusive with the ``*_w1`` pair above.
+                  system_workloads = None,
+                  system_configs = None,
+                  inference_configs = None,
+                  request_traces = None,
+                  workload_params_tables = None,
             ):
         self.size = np.array(walls.shape)
         self.start_cell = start_cell
@@ -280,23 +306,26 @@ class GridWorld:
             raise ValueError(
                 "inference_config requires system_workload and system_config")
         self.num_worlds = num_worlds
-        if num_worlds not in (1, 2):
+        if not 1 <= num_worlds <= 10:
             raise ValueError(
-                f"num_worlds={num_worlds} is not supported in P0 (only 1 or 2)")
+                f"num_worlds={num_worlds} is not supported "
+                f"(011 supports 1..10)")
 
         system_workloads = _as_per_world(
             system_workload, system_workload_w1, num_worlds,
-            "system_workload")
+            "system_workload", system_workloads)
         system_configs = _as_per_world(
-            system_config, system_config_w1, num_worlds, "system_config")
+            system_config, system_config_w1, num_worlds, "system_config",
+            system_configs)
         inference_configs = _as_per_world(
             inference_config, inference_config_w1, num_worlds,
-            "inference_config")
+            "inference_config", inference_configs)
         request_traces = _as_per_world(
-            request_trace, request_trace_w1, num_worlds, "request_trace")
+            request_trace, request_trace_w1, num_worlds, "request_trace",
+            request_traces)
         workload_params_tables = _as_per_world(
             workload_params_table, workload_params_table_w1, num_worlds,
-            "workload_params_table")
+            "workload_params_table", workload_params_tables)
 
         for world_idx, cfg in enumerate(system_configs):
             if cfg is not None:
@@ -491,13 +520,13 @@ class GridWorld:
         return parse_inference_stats(raw, self.num_inference_requests(world_idx))
 
     def write_inference_stats_csv(self, output_path, world_idx=0):
-        # world_idx=None + a (path_w0, path_w1) pair writes one CSV per
-        # world (dual output for multi-world runs).
+        # world_idx=None + a per-world path list writes one CSV per
+        # world (multi output for multi-world runs).
         if world_idx is None:
             paths = list(output_path)
             if len(paths) != self.num_worlds:
                 raise ValueError(
-                    "dual output requires one path per world, got "
+                    "multi output requires one path per world, got "
                     f"{len(paths)} for num_worlds={self.num_worlds}")
             for world, path in enumerate(paths):
                 self.write_inference_stats_csv(path, world)
@@ -513,7 +542,7 @@ class GridWorld:
             paths = list(output_path)
             if len(paths) != self.num_worlds:
                 raise ValueError(
-                    "dual output requires one path per world, got "
+                    "multi output requires one path per world, got "
                     f"{len(paths)} for num_worlds={self.num_worlds}")
             for world, path in enumerate(paths):
                 self.write_flow_completion_csv(path, world)

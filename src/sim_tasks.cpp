@@ -325,11 +325,22 @@ MADRONA_NO_INLINE void createFlowsFromNpuRequestsStepSystem(
     NpuID &npu,
     NpuFlowInbox &inbox,
     NpuFlowPool &pool,
-    NpuFlowActiveList &active)
+    NpuFlowActiveList &active,
+    NpuFlowCreateDraft &draft)
 {
     SIM_PROBE_RECORD("createFlowsFromNpuRequests");
     ctx.data().createFlowsFromNpuRequestsOneNpu(ctx, npu.value, inbox, pool,
-                                                active);
+                                                active, draft);
+}
+
+// 013-bug修复 M1 serial commit: replays each NPU's flow-meta insert
+// tickets in npu_id ascending order right after the create fan-out,
+// before any lookup reader (prepare/schedule only touch per-flow
+// components directly). Position matches the legacy insert timing.
+MADRONA_NO_INLINE void commitNpuFlowCreateStepSystem(Engine &ctx, SimDriver &)
+{
+    SIM_PROBE_RECORD("commitNpuFlowCreate");
+    ctx.data().commitNpuFlowCreate(ctx);
 }
 
 MADRONA_NO_INLINE void preparePendingFlowMetaStepSystem(
@@ -861,13 +872,29 @@ MADRONA_NO_INLINE void cleanupFinishedSourcesOnePortStepSystem(
     Engine &ctx,
     PortState &port_state,
     PortCachedHints &hints,
-    PortFinishedSourceList &finished_list)
+    PortFinishedSourceList &finished_list,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox)
 {
     SIM_PROBE_RECORD("cleanupFinishedSourcesOnePort");
     Sim &sim = ctx.data();
     const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     sim.cleanupFinishedSourcesOnePort(ctx, sim.now + runtime.nextDT,
-        port_state.port_id, hints, finished_list);
+        port_state.port_id, hints, finished_list,
+        ingress_unlinks, completions, outbox);
+}
+
+// 013-bug修复 M2 serial commit: replays every port's deferred destroy
+// effects (ingress unlinks + flow completions) in port_id ascending order
+// immediately after the per-port cleanup fan-out. The port outbox keeps
+// its legacy flush position (flushProgressOutbox below): this phase's
+// destroys use propagate_cleanup=false and produce no outbox traffic.
+MADRONA_NO_INLINE void flushProgressCleanupStepSystem(Engine &ctx, SimDriver &)
+{
+    SIM_PROBE_RECORD("flushProgressCleanup");
+    Sim &sim = ctx.data();
+    sim.flushProgressCleanup(ctx);
 }
 
 MADRONA_NO_INLINE void progressBacklogDrainTimerOnePortStepSystem(
@@ -1150,11 +1177,16 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     // before preparePendingFlowMeta).
     auto n0createFlows = builder.addToGraph<ParallelForNode<Engine,
         createFlowsFromNpuRequestsStepSystem,
-        NpuID, NpuFlowInbox, NpuFlowPool, NpuFlowActiveList>>(
+        NpuID, NpuFlowInbox, NpuFlowPool, NpuFlowActiveList,
+        NpuFlowCreateDraft>>(
             {n0statspost});
+    // 013-bug修复 M1: serial replay of the per-NPU flow-meta insert
+    // drafts (npu_id ascending), before any lookup reader.
+    auto n0createCommit = builder.addToGraph<ParallelForNode<Engine,
+        commitNpuFlowCreateStepSystem, SimDriver>>({n0createFlows});
     auto n0prepare = builder.addToGraph<ParallelForNode<Engine,
         preparePendingFlowMetaStepSystem,
-        FlowDef, FlowRuntimeState, FlowScheduleState>>({n0createFlows});
+        FlowDef, FlowRuntimeState, FlowScheduleState>>({n0createCommit});
     // A7 per-NPU local pass: flow-local work + push tickets; the serial
     // push commit lives at the tail of flushScheduleStepSystem (after
     // schedulePendingFlows), preserving the legacy registration order.
@@ -1297,10 +1329,16 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         PortFinishedSourceList, PortTraceLast, PortOutbox>>({n10a});
     auto n11cleanup = builder.addToGraph<ParallelForNode<Engine,
         cleanupFinishedSourcesOnePortStepSystem,
-        PortState, PortCachedHints, PortFinishedSourceList>>({n11progress});
+        PortState, PortCachedHints, PortFinishedSourceList,
+        PortIngressUnlinkList, PortCompletionList, PortOutbox>>(
+            {n11progress});
+    // 013-bug修复 M2: serial replay of the per-port deferred destroy
+    // effects (port_id ascending), before the drain-timer pass.
+    auto n11progressFlush = builder.addToGraph<ParallelForNode<Engine,
+        flushProgressCleanupStepSystem, SimDriver>>({n11cleanup});
     auto n11drain = builder.addToGraph<ParallelForNode<Engine,
         progressBacklogDrainTimerOnePortStepSystem,
-        DirtyPort, PortTimers>>({n11cleanup});
+        DirtyPort, PortTimers>>({n11progressFlush});
     auto n11flushout = builder.addToGraph<ParallelForNode<Engine,
         flushProgressOutboxStepSystem, SimDriver>>({n11drain});
     auto n11pfctimers = builder.addToGraph<ParallelForNode<Engine,

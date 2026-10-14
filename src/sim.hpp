@@ -224,12 +224,31 @@ struct Sim : public madrona::WorldBase {
         PortFinishedSourceList &finished_list,
         PortTraceLast &trace,
         PortOutbox &outbox);
+    // 013-bug修复 M2: the per-port parallel worker must NOT call the
+    // immediate destroyTag (it mutates shared state: completion counters,
+    // dyn completion log, the owning NPU's finished/active/pool lists, the
+    // shared flowMetaLookup table via retireFlowMeta, other ports'
+    // DelayedQueues, cross-port IngressTagLists). It instead materializes
+    // each destroy into this port's OWN draft lists
+    // (completions/unlinks/outbox, all already on the Port archetype);
+    // the flushProgressCleanup singleton replays them in port_id ascending
+    // order. Own-port tag-list/pool/lookup writes stay inline (safe).
+    // propagate_cleanup is always false here, so the outbox draft stays
+    // empty and keeps its legacy flush position (flushProgressOutbox).
     MADRONA_NO_INLINE void cleanupFinishedSourcesOnePort(
         madrona::Context &ctx,
         Time next_now,
         int32_t port_id,
         PortCachedHints &hints,
-        PortFinishedSourceList &finished_list);
+        PortFinishedSourceList &finished_list,
+        PortIngressUnlinkList &ingress_unlinks,
+        PortCompletionList &completions,
+        PortOutbox &outbox);
+    // 013-bug修复 M2 serial commit: replays every port's deferred destroy
+    // effects (ingress unlinks + flow completions) in port_id ascending
+    // order. Runs as a SimDriver singleton immediately after the per-port
+    // cleanup fan-out.
+    MADRONA_NO_INLINE void flushProgressCleanup(madrona::Context &ctx);
     MADRONA_NO_INLINE void progressBacklogDrainTimers(
         madrona::Context &ctx,
         Time dt);
@@ -529,11 +548,14 @@ struct Sim : public madrona::WorldBase {
     // (lock-free) NpuFlowInbox, popping a preallocated entity from that
     // NPU's own NpuFlowPool per request and filling in
     // FlowDef/FlowRouteState/FlowRuntimeState/FlowScheduleState in place
-    // (flow_order = -1). Registers the new flow_id into the shared
-    // flowMetaEntityLookup table -- safe concurrently because each NPU's
-    // flow ids are disjoint (per-NPU monotonic counters, npu_id * 10000
-    // base, plus the high-bit inference KV ids owned by the sending P
-    // rank), so parallel inserts touch disjoint hash slots. The global
+    // (flow_order = -1). The flow_id -> entity registration into the shared
+    // flowMetaEntityLookup table is NOT done here: parallel inserts from
+    // concurrent NPU instances race on overlapping linear-probe paths
+    // (013-bug修复 M1: lost insert + ids/entity double-store tear). Each
+    // instance records (flow_id, entity) tickets into its own
+    // NpuFlowCreateDraft instead (inbox-sorted order); the serial
+    // commitNpuFlowCreate replays them in npu_id ascending order right
+    // after the fan-out. The global
     // numFlowDefs counter is bumped with an atomic add (value must be
     // exact; order is irrelevant). Bounded by MAX_FLOWS_PER_NPU per step
     // per NPU, not by total flows ever created.
@@ -542,7 +564,14 @@ struct Sim : public madrona::WorldBase {
         uint32_t npu_id,
         NpuFlowInbox &inbox,
         NpuFlowPool &pool,
-        NpuFlowActiveList &active);
+        NpuFlowActiveList &active,
+        NpuFlowCreateDraft &draft);
+    // 013-bug修复 M1 serial commit: replays each NPU's flow-meta insert
+    // tickets in npu_id ascending order (== the legacy per-NPU loop order),
+    // so the key->entity mapping is byte-identical to the pre-fix serial
+    // execution. Runs as a SimDriver singleton immediately after the
+    // create fan-out, before any lookup reader. Clears the drafts.
+    MADRONA_NO_INLINE void commitNpuFlowCreate(madrona::Context &ctx);
     // A7 per-NPU split of the former serial scheduleNpuFlows singleton.
     // Local pass (one task-graph instance per NPU): walks that NPU's own
     // bounded NpuFlowActiveList, performs every flow-local check and write

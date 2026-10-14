@@ -141,7 +141,10 @@ MADRONA_NO_INLINE void Sim::cleanupFinishedSourcesOnePort(
     Time next_now,
     int32_t,
     PortCachedHints &,
-    PortFinishedSourceList &finished_list)
+    PortFinishedSourceList &finished_list,
+    PortIngressUnlinkList &ingress_unlinks,
+    PortCompletionList &completions,
+    PortOutbox &outbox)
 {
     int32_t local_num = finished_list.num;
     Entity local_finished[MAX_PORT_CLEANUP] {};
@@ -151,6 +154,20 @@ MADRONA_NO_INLINE void Sim::cleanupFinishedSourcesOnePort(
     }
     finished_list.num = 0;
 
+    // 013-bug修复 M2: never call the immediate destroyTag here -- this
+    // runs inside a per-port ParallelForNode, and destroyTag mutates
+    // shared state (completion counters, dyn completion log, the owning
+    // NPU's finished/active/pool lists, the shared flowMetaLookup table
+    // via retireFlowMeta, other ports' DelayedQueues, cross-port
+    // IngressTagLists). Materialize into this port's OWN draft lists
+    // instead; flushProgressCleanup replays them serially in port_id
+    // order. Own-port tag-list/pool/lookup writes stay inline (safe).
+    // propagate_cleanup is false, so no outbox traffic is produced; the
+    // port's progress outbox keeps its legacy flush position.
+    // Bound: completion reqs <= finished tags <= MAX_PORT_CLEANUP ==
+    // MAX_PORT_COMPLETE, and the completions/unlinks drafts enter this
+    // node empty (flushed at postAlloc, untouched since), so no new FATAL
+    // is reachable; at-capacity still fails loudly inside the materialize.
     for (int32_t i = 0; i < local_num; i++) {
         Entity tag_e = local_finished[i];
         if (tag_e == Entity::none()) {
@@ -162,9 +179,18 @@ MADRONA_NO_INLINE void Sim::cleanupFinishedSourcesOnePort(
             continue;
         }
 
-        progress.pending_source_destroy = 0;
-        destroyTag(ctx, tag_e, false, next_now);
+        destroyTagMaterializeOnePort(ctx, tag_e, false, next_now,
+            ingress_unlinks, completions, outbox);
     }
+}
+
+// 013-bug修复 M2 serial commit: replays every port's deferred destroy
+// effects in port_id ascending order (== the legacy serial order), so the
+// completion mailbox/log order and counter timelines stay byte-identical.
+void Sim::flushProgressCleanup(Context &ctx)
+{
+    flushIngressTagUnlinks(ctx);
+    flushFlowCompletion(ctx);
 }
 
 void Sim::progressBacklogDrainTimers(Context &ctx, Time dt)

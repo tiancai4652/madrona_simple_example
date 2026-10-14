@@ -264,6 +264,15 @@ namespace madsimple::llm_system
                     c.tickets[i] = NpuScheduleTicket {};
                 }
             }
+            // 013-bug修复 M1: per-NPU flow-meta insert draft (same rule).
+            {
+                auto &c = ctx.get<NpuFlowCreateDraft>(npuNode);
+                zeroStruct(c);
+#pragma unroll 1
+                for (int32_t i = 0; i < MAX_FLOWS_PER_NPU; i++) {
+                    c.tickets[i] = NpuFlowCreateTicket {};
+                }
+            }
             // C1: per-NPU comm entity pool + retire draft (same E12 rule).
             ctx.get<NpuCommEntityPool>(npuNode) = NpuCommEntityPool {};
             {
