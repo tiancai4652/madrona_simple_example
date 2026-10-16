@@ -2,6 +2,8 @@
 #include "net_sys_interface.hpp"
 #include "sys_config.hpp"
 
+#include <madrona/sync.hpp>
+
 using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::phys;
@@ -91,16 +93,37 @@ namespace madsimple::llm_system
         return min_time;
     }
 
+    // 014-F-b: concurrent duplicate-value removal must retire exactly one
+    // slot per caller. The legacy "clear first equal slot and stop" let two
+    // n0remove workers zero the SAME slot while a second equal slot leaked
+    // forever (pool 1->193, add_time then silently drops wake-ups).
+    // Claim each slot with a 64-bit CAS (x_ns -> 0): hardware grants the
+    // slot to exactly one worker; the loser observes 0 and keeps scanning
+    // for the next equal slot. Order-independent; the serial (CPU) path is
+    // unaffected (single worker, first-try CAS success).
     void skipTime_remove_time(Engine &ctx, uint64_t x_ns)
     {
+        if (x_ns == 0) {
+            return;
+        }
+        uint64_t *slots = ctx.get<NextProcessTimes>(
+            ctx.data().next_process_time_entity).times_abs;
         for (size_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; ++i)
         {
-            uint64_t &candidate = ctx.get<NextProcessTimes>(
-                ctx.data().next_process_time_entity).times_abs[i];
-            if (candidate == x_ns) {
-                candidate = 0;
-                break;
+            if (slots[i] != x_ns) {
+                continue;
             }
+            madrona::AtomicU64Ref slot_ref(slots[i]);
+            uint64_t expected = x_ns;
+            while (expected == x_ns) {
+                if (slot_ref.compare_exchange_weak<
+                        madrona::sync::acq_rel,
+                        madrona::sync::relaxed>(expected, uint64_t(0))) {
+                    return;
+                }
+            }
+            // CAS lost (expected != x_ns): another worker claimed this
+            // slot -- keep scanning for the next equal slot.
         }
 
         // SystemEventQueue slots are NOT reclaimed here: this helper runs
