@@ -1,0 +1,26 @@
+[
+    {
+        "arrival_time_ns": 0,
+        "output_len": 8,
+        "prompt_len": 4096,
+        "request_id": 0
+    },
+    {
+        "arrival_time_ns": 1000000,
+        "output_len": 8,
+        "prompt_len": 4096,
+        "request_id": 1
+    },
+    {
+        "arrival_time_ns": 2000000,
+        "output_len": 8,
+        "prompt_len": 4096,
+        "request_id": 2
+    },
+    {
+        "arrival_time_ns": 3000000,
+        "output_len": 8,
+        "prompt_len": 4096,
+        "request_id": 3
+    }
+]

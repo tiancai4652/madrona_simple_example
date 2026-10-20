@@ -1,0 +1,1868 @@
+{
+ "profiles": [
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 10458345,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 14481387,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 6760374,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 543333,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 7246830,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 22020096
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 11010048
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 58720256
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 653230080
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 653230080
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 3,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 5637144576
+  },
+  {
+   "stage": 1,
+   "node_type": 2,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 5637144576
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  },
+  {
+   "stage": 1,
+   "node_type": 1,
+   "batch_size": -1,
+   "sequence_tokens": -1,
+   "duration_ns": 0,
+   "comm_size_bytes": 0
+  }
+ ]
+}

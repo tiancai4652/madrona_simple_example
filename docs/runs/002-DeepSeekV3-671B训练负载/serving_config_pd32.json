@@ -1,0 +1,32 @@
+{
+    "bytes_per_elem": 2,
+    "d_max_batch": 16,
+    "d_max_tokens": 32768,
+    "decode_reference_tokens": 4096,
+    "decode_workers": "16-31",
+    "head_dim": 128,
+    "kv_latent_dim": 576,
+    "kv_mode": "mla",
+    "kv_partition_factor": 0,
+    "num_kv_heads": 128,
+    "num_layers": 61,
+    "p_max_batch": 16,
+    "p_max_tokens": 8192,
+    "prefill_reference_tokens": 4096,
+    "prefill_workers": "0-15",
+    "why": {
+        "bytes_per_elem": "bf16 占位，MLA KV 公式用此换算字节",
+        "d_max_batch/d_max_tokens": "沿用上一轮 runner 默认；4 请求上下文 4x(4096+8)=16416 < 32768，不限流",
+        "decode_reference_tokens": "沿用上一轮：模板即 seq4096 实测值，Decode 缺 profile 命中走线性回退 duration/comm x tokens/ref；ref 取 4096 使回退中性",
+        "kv_latent_dim": "DeepSeekV3 MLA 合并隐宽 512+64=576，KV=61xprompt_lenx576x2",
+        "kv_mode": "MLA 真口径（kv_transfer.cpp MLA 分支），非稠密近似",
+        "kv_partition_factor": "MLA 下只能 0/1，取 0=auto（shards==d_width=16）；单请求 KV=16x287.8MB 由 P 经 fabric 发往 D 各 rank",
+        "num_kv_heads/head_dim": "MLA 下仅占位正数（V3 注意力头 128、head_dim 128 标记）",
+        "num_layers": "DeepSeekV3 61 层",
+        "p_max_batch/p_max_tokens": "沿用上一轮 runner 默认；prompt 4096 时每批恰容 2 个请求，4 请求分 2 批",
+        "prefill_reference_tokens": "Prefill 命中 stage=1 通配 profile、ref 不参与；取 4096 与模板尺度一致、留档",
+        "topo": "n32_4leaf/leafspine_h32_topo.txt：32 主机 H0..H31（4 leaf x 8 host + 2 spine），全链路 209.7Gbps/0.001ms；npu_count=32，ring_dims=(32,1,1)，rank r 对 H 主机顺序映射",
+        "workload": "本轮 workload_pd32/：P 侧 npu.0..15=原文件字节复制；D 侧 npu.16..31=副本（comm_src/dst +16，comm_para 不动，name 前缀同步+16）；P/D 各自内部闭合、无跨边",
+        "workers": "1 个 P worker（rank 0-15）+ 1 个 D worker（rank 16-31）：P/D 各跑完整一份 16-rank workload、各自内部闭合（用户新设计，替代已证伪的 P 0-7/D 8-15 切半）；连续等宽不重叠约束全满足；runner 参数写法沿用 run_serving_ds671b.py Workaround（--prefill-workers/--decode-workers 范围语法，原入口脚本 --workload-params bug 未修故仍用本轮 runner）"
+    }
+}
