@@ -56,11 +56,12 @@
 git branch --show-current
 # 期望：llm-inferebce-v3-multiworld
 
-ls /app/exps/inputs/topo/n32_4leaf/leafspine_h32_topo.txt \
+ls docs/runs/002-DeepSeekV3-671B训练负载/topo_leafspine_h32.txt \
    docs/runs/002-DeepSeekV3-671B训练负载/workload_pd32 \
    docs/runs/002-DeepSeekV3-671B训练负载/request_trace.json \
    docs/runs/002-DeepSeekV3-671B训练负载/op_profile.json
 # 期望：4 个路径都存在（workload_pd32 下应有 npu.0..31.json 共 32 个）
+# 注：topo 是 `/app/exps/inputs/topo/n32_4leaf/leafspine_h32_topo.txt` 的逐字节副本（md5 ab94efa4…），已入库，开箱即用。
 
 python3 -m pytest tests/test_inference_config.py tests/test_inference_integration.py -q
 # 期望：43 passed, 25 subtests passed
@@ -84,7 +85,7 @@ python3 docs/runs/002-DeepSeekV3-671B训练负载/probe_pd32.py 5000 \
 
 ```bash
 python3 scripts/run_serving_simulator.py \
-  --topo /app/exps/inputs/topo/n32_4leaf/leafspine_h32_topo.txt \
+  --topo docs/runs/002-DeepSeekV3-671B训练负载/topo_leafspine_h32.txt \
   --workload docs/runs/002-DeepSeekV3-671B训练负载/workload_pd32 \
   --request-trace docs/runs/002-DeepSeekV3-671B训练负载/request_trace.json \
   --workload-params docs/runs/002-DeepSeekV3-671B训练负载/op_profile.json \
