@@ -48,9 +48,34 @@
 | `src/sim_systems_*.cpp`、`src/sim_tasks.cpp` | 网络层 12 阶段流水线，只读 |
 | `tests/test_inference_config.py`、`tests/test_inference_integration.py` | 回退门（43+25） |
 
-## 4. 环境检查（AI 先跑这 3 条，任一失败先修环境再往下）
+## 4. 环境检查与全新构建（AI 从这里开始）
 
-在 `/app/madrona_simple_example` 下执行：
+### 4.0 全新 clone 全流程（`build/` 不存在时执行；已有 `build/` 则跳到 §4.1）
+
+```bash
+# 0. 依赖确认（任一缺失先装好再往下）
+cmake --version   # 期望 >= 3.18
+python3 --version # 期望 3.10（本基线验证环境）
+g++ --version     # C++ 编译器即可
+
+# 1. 拉代码（必须 --recursive，external/madrona 是子模块）
+git clone --recursive https://github.com/tiancai4652/madrona_simple_example.git
+cd madrona_simple_example
+git checkout llm-inferebce-v3-multiworld
+
+# 2. 构建（CPU 后端；容量常量 NPU=32/BUFFER=128 已在 HEAD 里，无需改源码）
+mkdir -p build && cmake -S . -B build && cmake --build build -j$(nproc)
+# 期望：BUILD 成功，0 error（唯一既有 warning 是 sys_types.hpp:788 setFinish 未用参数，无视）
+
+# 3. 安装 Python 绑定
+pip install -e .
+python3 -c "import madrona_simple_example; print('import ok')"
+# 期望：import ok
+```
+
+### 4.1 存量环境检查（AI 先跑这 3 条，任一失败先修环境再往下）
+
+在仓库根目录下执行（存量环境是 `/app/madrona_simple_example`，新 clone 则在 clone 出来的目录）：
 
 ```bash
 git branch --show-current
