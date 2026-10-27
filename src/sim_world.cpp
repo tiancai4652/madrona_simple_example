@@ -624,6 +624,19 @@ Time Sim::chooseDT(Context &ctx) const
         dt = std::min(dt, system_gap);
     }
 
+    // 025: 瞬时排空的 delayed 队列不得触发到达巨跳. 消费在 chooseDT
+    // 上游、重建在下游, 瞬时全空会被误判为空闲而一帧跳到远期到达,
+    // 在飞 generation 的完成检测被推迟到跳后帧 (t2 精确值污染).
+    // 上一帧尾还有 delayed 活动 (滞后窗口 >0) 则本帧 dt cap 到
+    // 0.001ms (handoff 前例) 跨过瞬时窗口; 窗口仅 8 帧, 且触发要求
+    // dt>100ms 的到达驱动巨跳 —— 单波/solo 无到达事件、022 到达间隔
+    // 仅 5ms, 老 run 在构造上 bit-identical.
+    if (dt > 100.0 && system_gap < timerInactiveSentinel() &&
+        system_gap <= dt + 1e-9 &&
+        runtime.delayedActiveWindow > 0) {
+        dt = 0.001;
+    }
+
     // Inference pipeline handoffs (recorded KV completion -> collect at the
     // next frame's start, enqueued WaitingDecode -> admission at the next
     // frame's pre-step) are frame-quantized: their absolute times are the

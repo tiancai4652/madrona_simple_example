@@ -594,6 +594,13 @@ struct SimRuntimeState {
     // arrival) stretches the handoff by the whole dt. Cleared at the start
     // of every frame.
     int32_t inferenceHandoffPending = 0;
+    // 025: delayed-event 活动滞后窗口 (帧数). 消费在 chooseDT 上游、
+    // 重建在下游, 瞬时全空会被误判为空闲而跳到远期到达 (t2 精确值污染).
+    // 帧尾 updateSystemStatus 维护: 本帧有 delayed 活动则置 8, 否则递减.
+    // chooseDT 仅在窗口 >0 且 dt 为到达驱动的百毫秒级巨跳时 cap 到
+    // 0.001ms (handoff 前例), 跨过瞬时窗口即释放; 单波/022 (5ms) 够不
+    // 着触发条件, bit-identical.
+    int32_t delayedActiveWindow = 0;
     double cachedNextDelayedGap = 0.0;
     double cachedNextBacklogGap = 0.0;
     double cachedNextPfcPauseGap = 0.0;

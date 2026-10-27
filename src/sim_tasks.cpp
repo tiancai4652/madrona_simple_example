@@ -298,6 +298,17 @@ MADRONA_NO_INLINE void updateSystemStatusStepSystem(Engine &ctx,
             finished_npus == ctx.data().numNpus;
     }
     const SystemEventQueue &events = ctx.singleton<SystemEventQueue>();
+    // 025: delayed-event 活动滞后窗口维护 (见 SimRuntimeState 注释).
+    // 本函数在帧尾 postBuffer 之后运行, 此时 numDelayedEvents 已是
+    // 本帧消费+重建后的稳态值.
+    {
+        SimRuntimeState &rstate = ctx.singleton<SimRuntimeState>();
+        if (rstate.numDelayedEvents > 0) {
+            rstate.delayedActiveWindow = 8;
+        } else if (rstate.delayedActiveWindow > 0) {
+            rstate.delayedActiveWindow -= 1;
+        }
+    }
     uint64_t next_event = 0;
     uint64_t now_ns = net_sys_interface::msToNs(ctx.data().now);
     for (uint32_t i = 0; i < events.count; i++) {
