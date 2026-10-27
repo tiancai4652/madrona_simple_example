@@ -19,6 +19,15 @@ class NodeType(Enum):
     COMM_SEND_NODE = 2
     COMM_RECV_NODE=3
     COMM_COLL_NODE=4
+    OUTCAST_NODE = 5
+    INCAST_NODE = 6
+
+# 019 扇出保真: 单行编码 = [N×51 主表][扇出 side 区].
+# side 区按文件中 OUTCAST/INCAST 出现顺序排列, 每条目
+# [fanout_count(1)][peers(127)][paras(127)]; OUTCAST 的 peers=dst,
+# INCAST 的 peers=src. C++ 侧 parseChakraFanouts 按同样顺序解码.
+# 1024-fanout 行宽 = 610x51 + 244x255 = 93330 (<= 131072 行宽).
+MAX_FANOUT_PEERS = 128
     
 class AttributeKey(Enum):
     comm_para = 1
@@ -257,13 +266,46 @@ def node_to_int_array(node: Node) -> List[int]:
 # Execute test
 # test_conversion()
 
+def fanout_side_ints(node: Node) -> List[int]:
+    """019: 单个 OUTCAST/INCAST 节点的 side 区编码."""
+    if node.type == "OUTCAST_NODE":
+        peers = node.dst_list or []
+    elif node.type == "INCAST_NODE":
+        peers = node.src_list or []
+    else:
+        raise ValueError(f"not a fanout node: {node.type}")
+    paras = node.para_list or []
+    if len(peers) != len(paras):
+        raise ValueError(
+            f"fanout peers/paras length mismatch: {len(peers)} != {len(paras)}")
+    if not 0 < len(peers) <= MAX_FANOUT_PEERS:
+        raise ValueError(f"fanout count out of range: {len(peers)}")
+    if node.fanout is not None and int(node.fanout) != len(peers):
+        raise ValueError(
+            f"fanout field {node.fanout} != list length {len(peers)}")
+    side = [len(peers)]
+    side.extend(int(p) for p in peers)
+    side.extend(int(p) for p in paras)
+    return side
+
+
 def nodes_to_int_array(json_file_path):
     # json_file_path = '/home/zhangran/madrona2/2/madrona_simple_example/scripts/input/npu.0.json'
     nodes = Parse(json_file_path)
     result=[]
+    fanout_nodes=[]
     if nodes:
         for node in nodes:
             result.extend(node_to_int_array(node))
+            if node.type in ("OUTCAST_NODE", "INCAST_NODE"):
+                fanout_nodes.append(node)
+        if fanout_nodes:
+            # 019: 51 个 0 哨兵块分隔主表与 side 区. C++ parseChakraNodes
+            # 碰到全零块即停 (nodeCount 不含哨兵), parseChakraFanouts 跳过
+            # 哨兵后解码 side. 无扇出节点的旧文件无哨兵, 行为不变.
+            result.extend([0] * 51)
+            for node in fanout_nodes:
+                result.extend(fanout_side_ints(node))
     return result
  
  

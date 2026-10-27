@@ -8,7 +8,7 @@ namespace madsimple {
 
 constexpr int32_t MAX_INFERENCE_REQUESTS = 1024;
 constexpr int32_t MAX_INFERENCE_WORKERS = 16;
-constexpr int32_t MAX_INFERENCE_WORKER_RANKS = 16;
+constexpr int32_t MAX_INFERENCE_WORKER_RANKS = 128;
 constexpr int32_t MAX_INFERENCE_QUEUE = MAX_INFERENCE_REQUESTS;
 constexpr int32_t MAX_INFERENCE_BATCH = 128;
 constexpr int32_t INFERENCE_CONFIG_LENGTH = 256;
@@ -138,7 +138,7 @@ struct InferenceRequestRecord {
     int32_t d_worker = -1;
     int32_t kv_shards = 0;
     int32_t kv_done = 0;
-    uint32_t kv_done_mask = 0;
+    uint64_t kv_done_mask[2] = {0, 0};
     InferenceRequestState state = InferenceRequestState::Empty;
 };
 
@@ -253,8 +253,8 @@ struct InferenceResetRoster {
 };
 
 constexpr uint32_t INFERENCE_KV_FLOW_BIT = 0x80000000u;
-constexpr uint32_t INFERENCE_KV_SHARD_BITS = 4u;
-constexpr uint32_t INFERENCE_KV_SHARD_MASK = 0xFu;
+constexpr uint32_t INFERENCE_KV_SHARD_BITS = 8u;
+constexpr uint32_t INFERENCE_KV_SHARD_MASK = 0xFFu;
 
 inline uint32_t makeInferenceKvFlowID(uint32_t request_slot, uint32_t shard)
 {

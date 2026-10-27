@@ -17,6 +17,14 @@ namespace madsimple::llm_system
     MADRONA_NO_INLINE void parseChakraNodes(const ChakraNodesData &chakraNodesData, int row, ChakraNode parsedNodes[],
                           int &outNodeCount, int intArrayLength = CHAKRA_NODES_DATA_LENGTH, int maxNodes = MAX_CHAKRA_NODES_PER_NPU);
 
+    // 019 扇出保真: 解码行尾 side 区 [(count)(peers)(paras)] x N.
+    // base = nodeCount * INTS_PER_NODE (主表区, 与 conversion.py 对应).
+    // 只填充 entries (清零由调用方按 E12 规则做); 越界即停 (离线已校验).
+    MADRONA_NO_INLINE void parseChakraFanouts(const ChakraNodesData &chakraNodesData, int row,
+                          const ChakraNode parsedNodes[], int nodeCount,
+                          ChakraFanouts &fanouts,
+                          int intArrayLength = CHAKRA_NODES_DATA_LENGTH);
+
     int filterNoDependencyNodes(const ChakraNodes &chakraNodes, ChakraNode filteredNodes[],bool &is_none_node,
                                 int maxNodes = CURRENT_EXEC_NODES_MAX);
 

@@ -67,7 +67,11 @@ double Sim::drainBufferChunks(PriorityBuffer &pb, double drain_bytes)
         if (front.chunk_bytes <= remaining + 1e-15) {
             remaining -= front.chunk_bytes;
             total += front.chunk_bytes;
-            front = BufferChunk {};
+            // GPU stack relief: the old `front = BufferChunk {}` temporary
+            // (65KB on the thread stack) becomes an in-place clear. The slot
+            // is popped on the next two lines, so only the observed scalars
+            // matter.
+            zeroStruct(front);
             pb.head = (pb.head + 1) % MAX_BUFFER_CHUNKS;
             pb.num_chunks -= 1;
         } else {
@@ -85,7 +89,7 @@ double Sim::drainBufferChunks(PriorityBuffer &pb, double drain_bytes)
     return total;
 }
 
-void Sim::alignChunksWithBufCnt(PriorityBuffer &pb)
+void Sim::alignChunksWithBufCnt(PriorityBuffer &pb, BufferChunk &gc_slot)
 {
     if (pb.num_chunks <= 0 || pb.buf_cnt < 1e-15) {
         return;
@@ -106,7 +110,10 @@ void Sim::alignChunksWithBufCnt(PriorityBuffer &pb)
         }
         if (pb.num_chunks > 0 && pb.num_chunks < MAX_BUFFER_CHUNKS) {
             int32_t back_idx = (pb.tail - 1 + MAX_BUFFER_CHUNKS) % MAX_BUFFER_CHUNKS;
-            BufferChunk gc {};
+            // GPU stack relief: build in the per-port slot (zeroed like the
+            // old thread-local `gc {}`), then store. Same bytes out.
+            BufferChunk &gc = gc_slot;
+            zeroStruct(gc);
             gc.chunk_bytes = diff;
             gc.num_weights = pb.buf_chunks[back_idx].num_weights;
             for (int32_t i = 0; i < gc.num_weights; i++) {
@@ -223,10 +230,15 @@ void Sim::advanceOnePortBuffer(
 
     materializeBufCnt(port_buf, now);
 
+    // GPU stack relief (2026-10-23): scratch lives in the per-port
+    // component. The counter resets reproduce the old fresh-local `{}`.
+    PortFrameScratch &fs = ctx.get<PortFrameScratch>(
+        portEntities[port_id]);
+
     // Phase D: collect this port's tags via PortTagList instead of
     // scanning the global tagIndex. The stack buffer is sized to
     // MAX_TAGS_PER_PORT so we no longer need MAX_TAG_INDEX worth.
-    Entity tags[MAX_TAGS_PER_PORT] {};
+    Entity *tags = fs.adv_tags;
     int32_t num_tags = 0;
     for (int32_t i = 0; i < tag_list.count; i++) {
         Entity te = tag_list.tags[i];
@@ -247,10 +259,15 @@ void Sim::advanceOnePortBuffer(
         int32_t pri_begin = multi_pri ? 0 : 0;
         int32_t pri_end = multi_pri ? PFC_MAX_PRIORITY : 1;
 
-        Entity pri_tags[PFC_MAX_PRIORITY][MAX_TAGS_PER_PORT] {};
-        int32_t pri_counts[PFC_MAX_PRIORITY] {};
-        double pri_in[PFC_MAX_PRIORITY] {};
-        double pri_out[PFC_MAX_PRIORITY] {};
+        Entity (*pri_tags)[MAX_TAGS_PER_PORT] = fs.adv_pri_tags;
+        int32_t *pri_counts = fs.adv_pri_counts;
+        double *pri_in = fs.adv_pri_in;
+        double *pri_out = fs.adv_pri_out;
+        for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+            pri_counts[pri] = 0;
+            pri_in[pri] = 0.0;
+            pri_out[pri] = 0.0;
+        }
         for (int32_t i = 0; i < num_tags; i++) {
             FlowTagState &tag = ctx.get<FlowTagState>(tags[i]);
             int32_t p = multi_pri ? std::clamp(tag.priority, 0, PFC_MAX_PRIORITY - 1) : 0;
@@ -274,7 +291,8 @@ void Sim::advanceOnePortBuffer(
                           (int)MAX_CHUNK_WEIGHTS, (int)pri_counts[pri],
                           (int)port_id);
                 }
-                BufferChunk comp {};
+                BufferChunk &comp = fs.build_chunk;
+                zeroStruct(comp);
                 comp.chunk_bytes = pb.buf_cnt;
                 int32_t wcnt = 0;
                 for (int32_t i = 0; i < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; i++) {
@@ -295,8 +313,8 @@ void Sim::advanceOnePortBuffer(
             }
 
             if (pb.buf_cnt > BUFFER_EPSILON && pb.num_chunks == 0) {
-                BufferChunk comp {};
-                comp.chunk_bytes = pb.buf_cnt;
+                BufferChunk &comp = fs.build_chunk;
+                zeroStruct(comp);
                 int32_t wcnt = 0;
                 int32_t wi = 0;
                 for (; wi < pri_counts[pri] && wcnt < MAX_CHUNK_WEIGHTS; wi++) {
@@ -335,14 +353,18 @@ void Sim::advanceOnePortBuffer(
                 }
             }
 
-            alignChunksWithBufCnt(pb);
+            alignChunksWithBufCnt(pb, fs.gc_chunk);
             bool has_existing_buffer = (pb.buf_cnt > 1e-15 && pb.num_chunks > 0);
 
             if (has_existing_buffer) {
                 double buf_before = pb.buf_cnt;
                 double add_amount = in_total * dt;
                 if (add_amount > BUFFER_EPSILON && in_total > 1e-18) {
-                    BufferChunk chunk {};
+                    // GPU stack relief: per-port build slot (zeroed like the
+                    // old thread-local `chunk {}`). Sequential with the
+                    // other build sites above; `comp` is dead here.
+                    BufferChunk &chunk = fs.build_chunk;
+                    zeroStruct(chunk);
                     chunk.chunk_bytes = add_amount;
                     int32_t wcnt = 0;
                     int32_t wi = 0;
@@ -401,7 +423,8 @@ void Sim::advanceOnePortBuffer(
                     BufferChunk &front = pb.buf_chunks[pb.head];
                     if (front.chunk_bytes < BUFFER_EPSILON) {
                         pb.buf_cnt = std::max(0.0, pb.buf_cnt - front.chunk_bytes);
-                        front = BufferChunk {};
+                        // GPU stack relief: in-place clear (slot popped next).
+                        zeroStruct(front);
                         pb.head = (pb.head + 1) % MAX_BUFFER_CHUNKS;
                         pb.num_chunks -= 1;
                     }
@@ -450,7 +473,11 @@ void Sim::advanceOnePortBuffer(
                 double delta = (in_total - out_total) * dt;
                 if (delta > BUFFER_EPSILON) {
                     pb.buf_cnt += delta;
-                    BufferChunk chunk {};
+                    // GPU stack relief: per-port build slot (zeroed like the
+                    // old thread-local `chunk {}`). Sequential with the
+                    // other build sites above.
+                    BufferChunk &chunk = fs.build_chunk;
+                    zeroStruct(chunk);
                     chunk.chunk_bytes = delta;
                     int32_t wcnt = 0;
                     if (in_total > 1e-18) {

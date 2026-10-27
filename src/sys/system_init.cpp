@@ -49,6 +49,9 @@ namespace madsimple::llm_system
         registry.registerComponent<OneNPUFinishedFlag>();
         registry.registerComponent<ChakraNodesForNoDP>();
         registry.registerComponent<ChakraReadyState>();
+        // 019 扇出保真: side 区清单 + INCAST 等齐进度.
+        registry.registerComponent<ChakraFanouts>();
+        registry.registerComponent<IncastWaitList>();
         registry.registerComponent<NpuFlowPairState>();
         // registry.registerArchetype<NpuNode>();
         REGISTER_ARCHETYPE_WITH_NAME(registry, NpuNode);
@@ -92,7 +95,7 @@ namespace madsimple::llm_system
         ctx.data().sys_chakra_entities_created = false;
         // next process time entity
         Entity nextProcessTimeE = ctx.makeEntity<NextProcessTimeE>();
-        for (size_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; i++)
+        for (size_t i = 0; i < NEXT_PROCESS_TIMES_CAP; i++)
         {
             ctx.get<NextProcessTimes>(nextProcessTimeE).times_abs[i] = 0;
         }
@@ -176,7 +179,33 @@ namespace madsimple::llm_system
             parseChakraNodes(chakra_nodes_data, i, ctx.get<ChakraNodes>(npuNode).nodes, nodeCount);
             // B1: build the incremental ready set once at parse time.
             buildChakraReadyState(ctx.get<ChakraNodes>(npuNode),
-                                  ctx.get<ChakraReadyState>(npuNode));
+                                   ctx.get<ChakraReadyState>(npuNode));
+            // 019 扇出保真: 解码行尾 side 区.
+            // E12: makeEntity 不跑构造, 先 zeroStruct (memset, 非展开),
+            // 再填充; 不用逐条目聚合赋值 (1KB/条目 x 256 会炸 NVRTC).
+            {
+                auto &c = ctx.get<ChakraFanouts>(npuNode);
+                zeroStruct(c);
+                parseChakraFanouts(chakra_nodes_data, i,
+                    ctx.get<ChakraNodes>(npuNode).nodes, nodeCount, c);
+                // 强不变式: side 条目数必须等于主表扇出节点数 (防错位解析).
+                {
+                    int fanout_nodes = 0;
+                    for (int32_t ni = 0; ni < nodeCount; ni++) {
+                        ChakraNodeType t = ctx.get<ChakraNodes>(npuNode).nodes[ni].type;
+                        if (t == ChakraNodeType::OUTCAST_NODE ||
+                            t == ChakraNodeType::INCAST_NODE) {
+                            fanout_nodes += 1;
+                        }
+                    }
+                    if (fanout_nodes != static_cast<int>(c.num_entries)) {
+                        ctx.singleton<SystemStatus>().failed = 1;
+                        ctx.singleton<SystemStatus>().error_code = 1;
+                        return;
+                    }
+                }
+            }
+            ctx.get<IncastWaitList>(npuNode) = IncastWaitList {};
             {
                 auto &c = ctx.get<ChakraTemplateNodes>(npuNode);
                 zeroStruct(c);

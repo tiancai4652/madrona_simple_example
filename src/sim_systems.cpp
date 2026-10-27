@@ -403,16 +403,28 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
     if (runtime.completed != 0) {
         if (end_time > runtime.completion_record.end_time) {
             runtime.completion_record.end_time = end_time;
+            // 021-M2: keep the pre-written export mirror in sync (the
+            // per-step rescan used to pick this up automatically).
+            if (runtime.export_slot >= 0) {
+                FlowCompletionBuf &export_buf =
+                    ctx.singleton<FlowCompletionBuf>();
+                export_buf.records[runtime.export_slot].end_time = end_time;
+            }
         }
         return;
     }
 
+    // 018-layer0-GPUfit5: export-cap/sim-semantics decouple. MAX_FLOW_COMPLETIONS
+    // bounds ONLY the Python-visible export mirror counter (FlowCompletionBuf
+    // export already clamps in sim_tasks.cpp/mgr paths). Simulation bookkeeping
+    // below (completion_record, NPU finished mailbox, markSendDone pairing,
+    // active-list removal, pool recycle) must run for EVERY completion:
+    // gating it on the export cap starved INCAST/KV downstream once full1024
+    // layer0 passed 677888 completions (clean 1us idle spin, D-side frozen).
     if (counters.numFlowCompletions < MAX_FLOW_COMPLETIONS) {
         counters.numFlowCompletions += 1;
-    } else {
-        retireFlowMeta(ctx, *this, flow_id, flow_entity);
-        return;
     }
+    // (no early return: retired entity below still needs full bookkeeping)
 
     runtime.completion_record = FlowCompletionRecord {
         .flow_id = flow_id,
@@ -423,6 +435,24 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
         .end_time = end_time,
         .priority = flow.priority,
     };
+
+    // 021-M2: write the export mirror NOW (completion-time order) instead of
+    // re-scanning all FlowMeta slots every step in updateSimStatsStepSystem.
+    // Static flows only (owner_npu_id < 0); dynamic flows export via
+    // DynamicFlowCompletionLog as before. buf order changes from
+    // entity-index order to completion-time order; no in-repo readers depend
+    // on the order (flowCompletion() has no py/test/scripts callers).
+    // Serial completion paths only (see FlowRuntimeState::export_slot).
+    if (runtime.owner_npu_id < 0) {
+        int32_t slot = counters.exportCursor;
+        if (slot >= 0 && slot < MAX_FLOW_COMPLETIONS) {
+            FlowCompletionBuf &export_buf =
+                ctx.singleton<FlowCompletionBuf>();
+            export_buf.records[slot] = runtime.completion_record;
+            runtime.export_slot = slot;
+            counters.exportCursor = slot + 1;
+        }
+    }
 
     // NPU-owned dynamic flow: mirror the completion into that NPU's own
     // bounded finished-flow mailbox, remove it from the NPU's active list,
@@ -542,7 +572,12 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
 
         if (pool.free_count == 0) {
             inbox.overflow_count += 1;
-            FATAL("capacity exceeded: NPU flow pool exhausted (free_count==0) while creating a dynamic flow -- raise the NPU flow pool capacity");
+            // 018-layer0-GPUfit11 诊断: 打印耗尽现场 (NPU/active/inbox/全局defs/首个inbox条目),
+            // 区分真并发 vs 泄漏 vs 元数据踩踏. 跑通后可删 (保留无害, 只在FATAL时触发).
+            FATAL("capacity exceeded: NPU flow pool exhausted (free_count==0) while creating a dynamic flow [npu=%u active=%u inbox=%u defs=%d first_flow=%u first_para=%llu] -- raise the NPU flow pool capacity",
+                  (unsigned)npu_id, (unsigned)active.count, (unsigned)inbox.count,
+                  (int)counters.numFlowDefs, (unsigned)inbox.entries[0].flow_id,
+                  (unsigned long long)inbox.entries[0].comm_para);
         }
         if (active.count >= MAX_FLOWS_PER_NPU) {
             inbox.overflow_count += 1;
@@ -570,6 +605,7 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
             .completed = 0,
             .route_active = 0,
             .owner_npu_id = (int32_t)npu_id,
+            .export_slot = -1, // 021-M2 (dynamic flows export via dyn_log)
             .completion_record = FlowCompletionRecord {},
         };
         // flow_order = -1: this entity is NPU-owned, not part of the
@@ -673,6 +709,7 @@ MADRONA_NO_INLINE void Sim::refreshTagCounters(Context &ctx)
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
     int32_t active_tags = 0;
     int32_t source_tags = 0;
+    PortMaxLevels mx = {};
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];
@@ -682,10 +719,52 @@ MADRONA_NO_INLINE void Sim::refreshTagCounters(Context &ctx)
 
         active_tags += ctx.get<PortTagList>(port_e).count;
         source_tags += ctx.get<PortSourceTagList>(port_e).count;
+        // 018-layer0-GPUdiag: high-waters for FATAL-guarded caps.
+        int32_t c = ctx.get<PortTagList>(port_e).count;
+        if (c > mx.maxTags) mx.maxTags = c;
+        c = ctx.get<PortOutbox>(port_e).num_events;
+        if (c > mx.maxOutbox) mx.maxOutbox = c;
+        c = ctx.get<PortDelayedQueue>(port_e).count;
+        if (c > mx.maxDelayed) mx.maxDelayed = c;
+        c = ctx.get<IngressTagList>(port_e).count;
+        if (c > mx.maxIngress) mx.maxIngress = c;
+        c = ctx.get<PortCleanup>(port_e).num;
+        if (c > mx.maxCleanup) mx.maxCleanup = c;
+        const PortBuffer &pb = ctx.get<PortBuffer>(port_e);
+        for (int32_t p = 0; p < PFC_MAX_PRIORITY; p++) {
+            const PriorityBuffer &q = pb.prior_bufs[p];
+            if (q.num_chunks > mx.maxChunks) mx.maxChunks = q.num_chunks;
+            for (int32_t k = 0; k < q.num_chunks; k++) {
+                int32_t w = q.buf_chunks[k].num_weights;
+                if (w > mx.maxWeights) mx.maxWeights = w;
+            }
+        }
     }
 
     runtime.numActiveTags = active_tags;
     runtime.numSourceTags = source_tags;
+    runtime.portMax = mx;
+    // 023-dtdiag3: 钉死端口体检。
+    runtime.dtGaps.dport_head_bytes = 0.0;
+    runtime.dtGaps.dport_num_chunks = 0;
+    runtime.dtGaps.dport_dirty_alloc = 0;
+    runtime.dtGaps.dport_dirty_clear = 0;
+    if (runtime.cachedDrainPortID >= 0 &&
+        runtime.cachedDrainPortID < numPorts) {
+        Entity port_e = portEntities[runtime.cachedDrainPortID];
+        if (port_e != Entity::none()) {
+            const PortBuffer &pb = ctx.get<PortBuffer>(port_e);
+            const PriorityBuffer &q = pb.prior_bufs[0];
+            runtime.dtGaps.dport_num_chunks = q.num_chunks;
+            if (q.num_chunks > 0) {
+                runtime.dtGaps.dport_head_bytes =
+                    q.buf_chunks[q.head].chunk_bytes;
+            }
+            const PortTraceLast &trace = ctx.get<PortTraceLast>(port_e);
+            runtime.dtGaps.dport_dirty_alloc = trace.was_dirty_at_alloc;
+            runtime.dtGaps.dport_dirty_clear = trace.was_dirty_at_clear;
+        }
+    }
 }
 
 }

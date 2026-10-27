@@ -362,6 +362,38 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
              nb::arg("world_idx") = 0)
         .def("num_flow_completions", &Manager::numFlowCompletions,
              nb::arg("world_idx") = 0)
+        .def("port_max_levels", [](Manager &mgr, int64_t world_idx) {
+            PortMaxLevels m = mgr.portMaxLevels((int32_t)world_idx);
+            nb::dict result;
+            result["max_tags"] = nb::int_(m.maxTags);
+            result["max_outbox"] = nb::int_(m.maxOutbox);
+            result["max_delayed"] = nb::int_(m.maxDelayed);
+            result["max_ingress"] = nb::int_(m.maxIngress);
+            result["max_chunks"] = nb::int_(m.maxChunks);
+            result["max_weights"] = nb::int_(m.maxWeights);
+            result["max_cleanup"] = nb::int_(m.maxCleanup);
+            return result;
+        }, nb::arg("world_idx") = 0)
+        .def("dt_gap_levels", [](Manager &mgr, int64_t world_idx) {
+            DtGapLevels g = mgr.dtGapLevels((int32_t)world_idx);
+            nb::dict result;
+            result["delayed"] = nb::float_(g.delayed);
+            result["pending"] = nb::float_(g.pending);
+            result["finish"] = nb::float_(g.finish);
+            result["drain"] = nb::float_(g.drain);
+            result["backlog"] = nb::float_(g.backlog);
+            result["pfc_pause"] = nb::float_(g.pfc_pause);
+            result["pfc_resume"] = nb::float_(g.pfc_resume);
+            result["system"] = nb::float_(g.system);
+            result["chosen"] = nb::float_(g.chosen);
+            result["handoff"] = nb::int_(g.handoff);
+            result["drain_port"] = nb::int_(g.drain_port);
+            result["dport_head_bytes"] = nb::float_(g.dport_head_bytes);
+            result["dport_num_chunks"] = nb::int_(g.dport_num_chunks);
+            result["dport_dirty_alloc"] = nb::int_(g.dport_dirty_alloc);
+            result["dport_dirty_clear"] = nb::int_(g.dport_dirty_clear);
+            return result;
+        }, nb::arg("world_idx") = 0)
         .def("last_step_phase_times", [](Manager &mgr, int64_t world_idx) {
             StepPhaseTimes times = mgr.lastStepPhaseTimes((int32_t)world_idx);
             nb::dict result;

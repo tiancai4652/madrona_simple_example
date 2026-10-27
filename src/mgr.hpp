@@ -60,6 +60,8 @@ public:
     MGR_EXPORT int32_t numActiveTags(int32_t world_idx = 0);
     MGR_EXPORT int32_t numSourceTags(int32_t world_idx = 0);
     MGR_EXPORT int32_t numFlowCompletions(int32_t world_idx = 0);
+    MGR_EXPORT PortMaxLevels portMaxLevels(int32_t world_idx = 0); // 018-GPUdiag
+    MGR_EXPORT DtGapLevels dtGapLevels(int32_t world_idx = 0); // 023-dtdiag
     MGR_EXPORT FlowCompletionRecord flowCompletion(int32_t idx,
                                                    int32_t world_idx = 0);
     MGR_EXPORT StepPhaseTimes lastStepPhaseTimes(int32_t world_idx = 0);

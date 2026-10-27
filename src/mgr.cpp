@@ -188,6 +188,8 @@ struct Manager::Impl {
     virtual int32_t numActiveTags(int32_t world_idx) = 0;
     virtual int32_t numSourceTags(int32_t world_idx) = 0;
     virtual int32_t numFlowCompletions(int32_t world_idx) = 0;
+    virtual PortMaxLevels portMaxLevels(int32_t world_idx) = 0; // 018-GPUdiag
+    virtual DtGapLevels dtGapLevels(int32_t world_idx) = 0; // 023-dtdiag
     virtual FlowCompletionRecord flowCompletion(int32_t idx,
                                                 int32_t world_idx) = 0;
     virtual StepPhaseTimes lastStepPhaseTimes(int32_t world_idx) = 0;
@@ -270,6 +272,16 @@ struct Manager::CPUImpl final : Manager::Impl {
     inline virtual int32_t numFlowCompletions(int32_t world_idx) final
     {
         return fetchSimStats(world_idx).numFlowCompletions;
+    }
+
+    inline virtual PortMaxLevels portMaxLevels(int32_t world_idx) final
+    {
+        return fetchSimStats(world_idx).portMax;
+    }
+
+    inline virtual DtGapLevels dtGapLevels(int32_t world_idx) final
+    {
+        return fetchSimStats(world_idx).dtGaps;
     }
 
     inline virtual FlowCompletionRecord flowCompletion(
@@ -392,6 +404,16 @@ struct Manager::GPUImpl final : Manager::Impl {
     inline virtual int32_t numFlowCompletions(int32_t world_idx) final
     {
         return fetchSimStats(world_idx).numFlowCompletions;
+    }
+
+    inline virtual PortMaxLevels portMaxLevels(int32_t world_idx) final
+    {
+        return fetchSimStats(world_idx).portMax;
+    }
+
+    inline virtual DtGapLevels dtGapLevels(int32_t world_idx) final
+    {
+        return fetchSimStats(world_idx).dtGaps;
     }
 
     inline virtual FlowCompletionRecord flowCompletion(
@@ -738,6 +760,16 @@ int32_t Manager::numSourceTags(int32_t world_idx)
 int32_t Manager::numFlowCompletions(int32_t world_idx)
 {
     return impl_->numFlowCompletions(world_idx);
+}
+
+PortMaxLevels Manager::portMaxLevels(int32_t world_idx)
+{
+    return impl_->portMaxLevels(world_idx);
+}
+
+DtGapLevels Manager::dtGapLevels(int32_t world_idx)
+{
+    return impl_->dtGapLevels(world_idx);
 }
 
 FlowCompletionRecord Manager::flowCompletion(int32_t idx, int32_t world_idx)

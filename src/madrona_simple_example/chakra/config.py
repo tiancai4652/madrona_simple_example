@@ -7,8 +7,11 @@ import numpy as np
 from .conversion import folder_to_int_array
 
 
-MAX_NPUS = 32
-CHAKRA_NODES_DATA_LENGTH = 10000
+MAX_NPUS = 1024
+# 018-layer0-GPUfit: layer0 实测行宽 1581, 取 4096 (与 C++ CHAKRA_NODES_DATA_LENGTH
+# 同步, 必须相等否则 tensor 形状错配; 见 src/sys/sys_types.hpp).
+# 行宽>4096 的 workload 在本构建下响亮拒绝 (ValueError).
+CHAKRA_NODES_DATA_LENGTH = 4096
 PROCESS_PARAMS_LENGTH = 1000
 
 

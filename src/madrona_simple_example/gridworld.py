@@ -501,6 +501,14 @@ class GridWorld:
     def num_flow_completions(self, world_idx=0):
         return self.sim.num_flow_completions(self._check_world(world_idx))
 
+    def port_max_levels(self, world_idx=0):
+        return dict(self.sim.port_max_levels(
+            self._check_world(world_idx)))
+
+    def dt_gap_levels(self, world_idx=0):
+        return dict(self.sim.dt_gap_levels(
+            self._check_world(world_idx)))
+
     def last_step_phase_times(self, world_idx=0):
         return dict(self.sim.last_step_phase_times(
             self._check_world(world_idx)))

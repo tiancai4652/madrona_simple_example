@@ -446,6 +446,171 @@ namespace madsimple::llm_system {
 
     }
 
+    // 019 扇出保真: OUTCAST 一次建 count 条流 (抄 processCommSendNodeOne).
+    // 与 SEND 语义逐条全等: flows[k] 逐条 (para,src,dst) 配对, 共享一个
+    // TaskFlows 实体 (exec_index 全 0, 一组下发, 等齐 count 条才 finish).
+    MADRONA_NO_INLINE void processOutcastNodeOne(
+        Engine & ctx, NpuID & id, ChakraNode & node,
+        ProcessingCommTasks & processingCommTasks,
+        const ChakraFanouts & fanouts) {
+                        const ChakraFanoutEntry *entry = nullptr;
+                        for (uint32_t i = 0; i < fanouts.num_entries; ++i) {
+                            if (fanouts.entries[i].node_id == node.id) {
+                                entry = &fanouts.entries[i];
+                                break;
+                            }
+                        }
+                        if (entry == nullptr || entry->count == 0 ||
+                            entry->count > MAX_FLOW_NUM_PER_COMM_NODE) {
+                            SystemStatus &status = ctx.singleton<SystemStatus>();
+                            status.failed = 1;
+                            status.error_code = 2;
+                            return;
+                        }
+                        // to fix chakra bugs (same as SEND).
+                        uint64_t src = id.value;
+
+                        int npu_num = ctx.get < RingParams > (ctx.data().ring_config_entity).npu_num;
+
+                        if (npu_num <= 0 || src >= static_cast<uint64_t>(npu_num)) {
+                            SystemStatus &status = ctx.singleton<SystemStatus>();
+                            status.failed = 1;
+                            status.error_code = 2;
+                            return;
+                        }
+                        for (uint32_t k = 0; k < entry->count; ++k) {
+                            uint64_t dst = entry->peers[k];
+                            if (dst >= static_cast<uint64_t>(npu_num) || src == dst) {
+                                SystemStatus &status = ctx.singleton<SystemStatus>();
+                                status.failed = 1;
+                                status.error_code = 2;
+                                return;
+                            }
+                        }
+
+                        ProcessingCommTask &processingCommTask = processingCommTasks.getNextFreeTask();
+                        processingCommTask.time_start_ns = getCurrentTime(ctx);
+                        processingCommTasks.startTask(processingCommTask, node.id);
+
+                        NpuCommEntityPool &comm_pool =
+                            ctx.get<NpuCommEntityPool>(
+                                ctx.data().npuEntities[id.value]);
+                        Entity process_e = comm_pool.takeComm();
+                        if (process_e == Entity::none()) {
+                            SystemStatus &pool_status =
+                                ctx.singleton<SystemStatus>();
+                            pool_status.failed = 1;
+                            pool_status.error_code = 7;
+                            return;
+                        }
+                        ctx.get < PoolSlotActive > (process_e).active = 1;
+                        TaskFlows &task_flows = ctx.get < TaskFlows > (process_e);
+                        task_flows.is_exec = false;
+                        task_flows.current_index = -1;
+                        for(size_t i=0; i<MAX_FLOW_NUM_PER_COMM_NODE; i++)
+                        {
+                            ctx.get < TaskFlows > (process_e).flows[i].init();
+                        }
+                        ctx.get < NpuID > (process_e).value = id.value;
+                        ctx.get < NodeID > (process_e).value = node.id;
+
+                        uint64_t comm_size = node.comm_size;
+#if SYS_LOG_ENABLED_LIMIT_COMM_SIZE_DURATION
+                        comm_size=comm_size/SYS_LOG_LIMIT_COMM_SIZE;
+#endif
+                        for (uint32_t k = 0; k < entry->count; ++k) {
+                            uint32_t flow_id = processingCommTasks.getFlowId();
+                            task_flows.flows[k].id = flow_id;
+                            task_flows.flows[k].comm_para = entry->paras[k];
+                            task_flows.flows[k].comm_size = comm_size;
+                            task_flows.flows[k].comm_src = src;
+                            task_flows.flows[k].comm_dst = entry->peers[k];
+                            task_flows.flows[k].state = TaskState::START;
+                            task_flows.flows[k].is_send = true;
+                        }
+
+                        ctx.data().npus_chakra_exec_entity[id.value][node.id] = process_e;
+    }
+
+    // 019: INCAST 等齐语义. 不占 ProcessRecvComm_E 实体池 (并发 122 x 127
+    // 会打爆 256 池), 只占一个 ProcessingCommTasks 槽 + IncastWaitList 条目,
+    // 由 sys_checkIncastWaits 逐帧 claimRecvDone, 等齐 total 条才 finish.
+    MADRONA_NO_INLINE void processIncastNodeOne(
+        Engine & ctx, NpuID & id, ChakraNode & node,
+        ProcessingCommTasks & processingCommTasks,
+        const ChakraFanouts & fanouts, IncastWaitList & waits) {
+                        const ChakraFanoutEntry *entry = nullptr;
+                        int32_t fanout_idx = -1;
+                        for (uint32_t i = 0; i < fanouts.num_entries; ++i) {
+                            if (fanouts.entries[i].node_id == node.id) {
+                                entry = &fanouts.entries[i];
+                                fanout_idx = static_cast<int32_t>(i);
+                                break;
+                            }
+                        }
+                        if (entry == nullptr || entry->count == 0 ||
+                            entry->count > MAX_FANOUT_PEERS_PER_NODE) {
+                            SystemStatus &status = ctx.singleton<SystemStatus>();
+                            status.failed = 1;
+                            status.error_code = 3;
+                            return;
+                        }
+                        // to fix chakra bugs (same as RECV).
+                        uint64_t dst = id.value;
+
+                        int npu_num = ctx.get < RingParams > (ctx.data().ring_config_entity).npu_num;
+
+                        if (npu_num <= 0 || dst >= static_cast<uint64_t>(npu_num)) {
+                            SystemStatus &status = ctx.singleton<SystemStatus>();
+                            status.failed = 1;
+                            status.error_code = 3;
+                            return;
+                        }
+                        for (uint32_t k = 0; k < entry->count; ++k) {
+                            uint64_t src = entry->peers[k];
+                            if (src >= static_cast<uint64_t>(npu_num) || src == dst) {
+                                SystemStatus &status = ctx.singleton<SystemStatus>();
+                                status.failed = 1;
+                                status.error_code = 3;
+                                return;
+                            }
+                        }
+
+                        ProcessingCommTask &processingCommTask = processingCommTasks.getNextFreeTask();
+                        processingCommTask.time_start_ns = getCurrentTime(ctx);
+                        processingCommTasks.startTask(processingCommTask, node.id);
+
+                        // SEND 已先完成的分支可立即认领 (与 RECV 即时完成同理).
+                        uint64_t claimed[2] = {0, 0};
+                        uint32_t done = 0;
+                        for (uint32_t k = 0; k < entry->count; ++k) {
+                            if (entry->paras[k] != 0 &&
+                                ctx.data().claimRecvDone(
+                                    ctx, entry->paras[k], entry->peers[k], dst)) {
+                                claimed[k >> 6] |= (1ULL << (k & 63));
+                                done += 1;
+                            }
+                        }
+                        if (done >= entry->count) {
+                            processingCommTasks.setFinish(node.id, getCurrentTime(ctx), id.value);
+                            return;
+                        }
+                        if (waits.count >= MAX_INCAST_WAITS_PER_NPU) {
+                            // 配对等待容量 (pair-state 家族), 报 5.
+                            SystemStatus &status = ctx.singleton<SystemStatus>();
+                            status.failed = 1;
+                            status.error_code = 5;
+                            return;
+                        }
+                        IncastWaitEntry &w = waits.waits[waits.count++];
+                        w.node_id = node.id;
+                        w.total = entry->count;
+                        w.done = done;
+                        w.claimed[0] = claimed[0];
+                        w.claimed[1] = claimed[1];
+                        w.fanout_idx = fanout_idx;
+    }
+
     MADRONA_NO_INLINE void processCommCollNodeOne(
         Engine & ctx, NpuID & id, ChakraNode & node,
         ProcessingCommTasks & processingCommTasks) {
@@ -783,7 +948,9 @@ namespace madsimple::llm_system {
         OneNPUFinishedFlag & oneNPUFinishedFlag,
         ChakraNodesForNoDP & chakraNodesForNoDP,
         ChakraReadyState & chakraReadyState,
-        InferenceNpuExecution &inferenceExecution) {
+        InferenceNpuExecution &inferenceExecution,
+        const ChakraFanouts & fanouts,
+        IncastWaitList & waits) {
 
         #if SYS_LOG
         if (SYS_LOG_TARGET_NODE == id.value) {
@@ -905,6 +1072,14 @@ namespace madsimple::llm_system {
                 }
                 case ChakraNodeType::COMM_COLL_NODE: {
                     processCommCollNodeOne(ctx, id, node, processingCommTasks);
+                    break;
+                }
+                case ChakraNodeType::OUTCAST_NODE: {
+                    processOutcastNodeOne(ctx, id, node, processingCommTasks, fanouts);
+                    break;
+                }
+                case ChakraNodeType::INCAST_NODE: {
+                    processIncastNodeOne(ctx, id, node, processingCommTasks, fanouts, waits);
                     break;
                 }
                 default:

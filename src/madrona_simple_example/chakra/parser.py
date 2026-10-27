@@ -37,6 +37,11 @@ class Node:
     attr: List[Attribute]
     id: Optional[str] = None
     dataDeps: Optional[List[str]] = field(default_factory=list)
+    # 019 扇出保真: OUTCAST/INCAST 节点的 127 对端清单 (JSON 顶层扩展字段)
+    fanout: Optional[int] = None
+    dst_list: Optional[List[str]] = None
+    src_list: Optional[List[str]] = None
+    para_list: Optional[List[int]] = None
 
     def __post_init__(self):
         if isinstance(self.durationMicros, str):
@@ -77,13 +82,27 @@ def parse_node(node_data: dict) -> Node:
     """Parse dictionary to Node object"""
     attributes = [parse_attribute(attr) for attr in node_data.get("attr", [])]
 
+    fanout = node_data.get("fanout")
+    if fanout is not None:
+        try:
+            fanout = int(fanout)
+        except (ValueError, TypeError):
+            fanout = None
+    para_list = node_data.get("para_list")
+    if para_list is not None:
+        para_list = [int(v) for v in para_list]
+
     return Node(
         id=node_data.get("id"),
         name=node_data.get("name"),
         type=node_data.get("type"),
         dataDeps=node_data.get("dataDeps"),
         durationMicros=node_data.get("durationMicros"), # Pass to __post_init__ for processing
-        attr=attributes
+        attr=attributes,
+        fanout=fanout,
+        dst_list=node_data.get("dst_list"),
+        src_list=node_data.get("src_list"),
+        para_list=para_list,
     )
 
 def parse_json_data(json_string: str) -> List[Node]:

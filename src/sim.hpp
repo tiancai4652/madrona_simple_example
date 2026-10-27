@@ -35,9 +35,13 @@ constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
 constexpr int32_t MAX_TOPO_NODES = 10688;
 constexpr int32_t MAX_TOPO_LINKS = 41088;
-constexpr int32_t MAX_TOPO_PORTS = 41088;
+constexpr int32_t MAX_TOPO_PORTS = 4096; // 018-layer0-GPUfit3: 41088->4096。唯一大线程局部
+// upstream_ports[MAX_TOPO_PORTS] (sim_systems_pfc.cpp:346) 164KB/线程，是megakernel
+// STACK 170KB的96%、device-local预留~30GB的主因。1024-topo实需3072端口，4096留33%余量。
+// 全局数组(portEntities/portToNode/peerPort)同步缩小。超限由createPort响亮FATAL。
 constexpr int32_t MAX_NODE_NEIGHBORS = 328;
-constexpr int32_t MAX_FLOWS = 677888;
+constexpr int32_t MAX_FLOWS = 4194304;
+// 019: inst128 峰值并发路由约 2M, 取 4M (full1024 需 16M, 待 inst128 先验证可行再扩).
 constexpr int32_t MAX_PATH_NODES = 6;
 constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
 constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
@@ -45,7 +49,7 @@ constexpr int32_t MAX_DELAYED_EVENTS = 16777216; // N1-CP3 exp build (see DECISI
 constexpr int32_t MAX_EVENTS_PER_STEP = 328704;
 constexpr int32_t MAX_TAG_INDEX = 2580480;
 constexpr int32_t MAX_SOURCE_TAGS = 645120;
-constexpr int32_t MAX_FLOW_META_LOOKUP = 1048576;
+constexpr int32_t MAX_FLOW_META_LOOKUP = 4194304; // 019: 与 MAX_FLOWS 同步 (hash 表负载).
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {
@@ -88,6 +92,13 @@ struct FlowRuntimeState {
     int32_t completed = 0;
     int32_t route_active = 0;
     int32_t owner_npu_id = -1;
+    // 021-M2: export slot in FlowCompletionBuf.records[] assigned at first
+    // completion (completion-time order). -1 = beyond export cap (not
+    // exported; sim bookkeeping unaffected). Written only from serial
+    // completion paths (flushFlowCompletion + deferred destroy singletons);
+    // if recordFlowCompletion is ever called from a ParallelFor, claim the
+    // slot with an atomic on FlowCounters::exportCursor instead.
+    int32_t export_slot = -1;
     FlowCompletionRecord completion_record {};
 };
 
@@ -599,7 +610,8 @@ struct Sim : public madrona::WorldBase {
     MADRONA_NO_INLINE void materializeRemaining(FlowTagState &tag, Time at_time);
     MADRONA_NO_INLINE void materializeBufCnt(PortBuffer &port_buf,
                                              Time at_time);
-    MADRONA_NO_INLINE void alignChunksWithBufCnt(PriorityBuffer &pb);
+    MADRONA_NO_INLINE void alignChunksWithBufCnt(PriorityBuffer &pb,
+                                                 BufferChunk &gc_slot);
     MADRONA_NO_INLINE double drainBufferChunks(PriorityBuffer &pb,
                                                double drain_bytes);
     MADRONA_NO_INLINE Time computePropagationTimeAt(

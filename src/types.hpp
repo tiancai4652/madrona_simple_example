@@ -132,13 +132,22 @@ using NodeId = int32_t;
 // Keep these together so scale changes such as d64 -> d256 can be adjusted in
 // one place. Topology / flow-global limits live in sim.hpp; these constants
 // cover exported buffers and per-port local queues/components declared below.
-constexpr int32_t MAX_FLOW_COMPLETIONS = 677888;
+constexpr int32_t MAX_FLOW_COMPLETIONS = 1048576; // 018-layer0-GPUfit16: 4M->1M（省144MB；export超量截断，sim已解耦不受影响）。
+// full1024 layer0 serving总completion超677888（export满后旧代码early-return跳过markSendDone等仿真记账，致D侧干净死锁）。
+// 记账已与export解耦（sim_systems.cpp），此处只定export镜像容量（单条48B，4M=192MB，可承受）。
+// 若未来总completion超4M，export按sim_tasks钳位截断但仿真不受影响（fail-soft）。
 constexpr int32_t PFC_MAX_PRIORITY = 1;
 
 // Must be >= the maximum number of flows/events per hot port so buffer chunks
 // and per-port queues do not silently drop same-timestamp fan-in.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 512; // [002-validation] 256->512: fix PFC staircase (was truncating hosts 22-31 of each leaf)
-constexpr int32_t MAX_BUFFER_CHUNKS = 128;
+constexpr int32_t MAX_CHUNK_WEIGHTS = 512; // 018-layer0-GPUfit27: 1024->512（给chunks翻倍腾显存；gpu64全程weights pmax<=394，余量30%；若FATAL响亮回退）。
+// burst下首chunk backlog超512（incast 127×KV多层叠加；旧FATAL打印值被并发冲花，
+// 但outbox同款已证“raise即过=真burst”）。BufferChunk 8KB->32KB（+2.3GB），总显存~40GB仍fit。
+// 超限响亮FATAL，绝不静默。
+// 018-layer0-GPUfit: inst128实测chunks零使用（HWM未触发），KV burst未知；128→32
+// 降单端口PortBuffer 8MB→2MB（GPU显存关键路径）。超限由带宽侧FATAL响亮报错，
+// 绝不静默覆盖（见 materializeAllocPortBuffer）。
+constexpr int32_t MAX_BUFFER_CHUNKS = 128; // 021-fit28: 256->128（链化后全程pmax<=26，5x余量；省PortBuffer约3.2GB/2.1MB->1.05MB每站）。超限响亮FATAL。
 constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
@@ -152,21 +161,29 @@ constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 // underestimated capacity in a future workload surfaces as a failed run
 // rather than wrong results. Per-experiment tuning stays compile-time.
 constexpr int32_t MAX_PORT_CLEANUP = 1024;
-constexpr int32_t MAX_PORT_OUTBOX = 2048;
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 1024;
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 8192;
-constexpr int32_t MAX_TAGS_PER_PORT = 1024;
+constexpr int32_t MAX_PORT_OUTBOX = 8192; // 018-layer0-GPUfit20: 4096->8192（16384装不下init OOM；8192大概率够用，不够再FATAL加）。
+// burst（896 NPU同批完成）下热端口单步Arrival/BwUpdate事件超2048（step911三worker同爆）。
+// +590KB/端口（196KB->786KB ×3072=+1.8GB device）。超限响亮FATAL，绝不静默。
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 8192; // 021-fit28: 与 MAX_TAGS_PER_PORT 同步回落 (掩码2的幂，8192合法；省0.77GB)。
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 2048; // 021-fit28: 4096->2048（链化后全程pmax<=252，8x余量；省0.8GB；超限静默丢但error 6熔断响亮）。
+// 018-layer0: layer0 full1024 死于 step387 (sim 348ms)：单端口并发流超 1024（incast 多波次 + KV 128 流叠加），
+// createTagOnPort 报 capacity exceeded MAX_TAGS_PER_PORT=1024 on port 256。1024→4096。
+// 018-layer0-GPUfit9: D-finish burst全局14万active tags（digest step1200），热端口超4096（step1041/2124两爆）。
+// 4096->8192（tag Entity数组7×32KB×3072=+350MB，scratch tags/live +100MB，lookup +200MB，总+~0.7GB）。
+// 超限响亮FATAL，绝不静默。
+constexpr int32_t MAX_TAGS_PER_PORT = 8192; // 021-fit28: 16384->8192（链化后全程pmax<=198，40x余量；5858那次是无链版不适用；省Tag系约2.0GB，FrameScratch点名册同步减半）。超限响亮FATAL。
 // Do not create FlowTag entities inside the single-threaded GPU initWorlds
 // kernel. Tags are allocated lazily by createTagOnPort and recycled through
 // PortTagPool after first use.
 constexpr int32_t INITIAL_TAGS_PER_PORT = 0;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 1024;
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 2048;
+constexpr int32_t MAX_TAGS_PER_INGRESS = 8192; // 018-layer0-B: retry1 死于 step388 flushIngressTagLinks IngressTagList overflow (1024)；同族三墙打包升 4096
+// 018-layer0-GPUfit10: D-finish burst再爆 (step2126, 单FATAL干净打印)。4096->8192（+100MB，可忽略；DIRTY_MARKS派生自动跟随）。
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 4096; // 018-layer0-B: 同族第二墙 (incast+KV 叠加 arrival burst)，2048→4096；DELAYED_EVENTS 保持 8192 不动
 constexpr int32_t MAX_PORT_INBOX_BWUPD = 2048;
 constexpr int32_t MAX_PORT_INBOX_PFC = 512;
-constexpr int32_t MAX_PORT_CREATE = 2048;
+constexpr int32_t MAX_PORT_CREATE = 4096; // 018-layer0-B: 同族第三墙 (arrival/bwupdate tag create)，2048→4096；MAX_PORT_INGRESS_LINKS 派生自动跟随
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
-constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS;
+constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS; // 派生宏自动跟随 INGRESS→4096，无需手动改 (已确认)
 constexpr int32_t MAX_PORT_COMPLETE = 1024;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 // Time-skip event queue (SystemEventQueue) capacity. Raised from 1024 so the
@@ -185,8 +202,18 @@ constexpr uint32_t MAX_FAKE_FINISHED_FLOWS = 16;
 // setFlow()/materialize/schedule/checkFlowFinish work purely on its own
 // entity's components with zero cross-NPU locking. See
 // report/2-merge-plan/实施/阶段A2-per-NPU流并行化方案.md for the full design.
-constexpr uint32_t MAX_NPUS = 256;
-constexpr uint32_t MAX_FLOWS_PER_NPU = 512;
+constexpr uint32_t MAX_NPUS = 1024;
+// 018-layer0-GPUfit: layer0 chakra-only 每 NPU 峰值 254 流
+// (2 OUTCAST x 127 同拍 burst; inbox/active/finished/draft 同界).
+// 018-layer0-GPUfit6: 2048->8192。解耦修完D侧推进后，真峰值并发>2048
+// （61层×128shard KV波次叠加 + fanout 254; step910 pool耗尽实测）。
+// 8192覆盖~8000上界（4x余量）；16384原值device装不下（16M FlowMeta+14GB池）。
+// 内存代价约+7GB（FlowMeta 2M->8M + 各per-NPU表×4），GPU峰值~35GB仍fit。
+// 溢出响亮报 error_code 4 / FATAL（createFlows），绝不静默。
+// 本宏同时界定 NpuFlowInbox/Active/Finished/KvCollect/Schedule/CreateDraft +
+// NpuFlowPool 预分配 FlowMeta 实体数. 溢出响亮报 error_code 4 / FATAL.
+// 注意: 019 全扇出 (15494 瞬时) 在本构建下会响亮溢出, 需回退重编.
+constexpr uint32_t MAX_FLOWS_PER_NPU = 2048; // 018-layer0-GPUfit25: 8192->2048（分流后每NPU KV~128+data254，2048=4x余量；省~5GB。若FATAL则回调4096）。
 
 // Because NPU-owned FlowMeta entities are recycled through NpuFlowPool, the
 // per-entity completion_record does not survive slot reuse. This bounded
@@ -333,7 +360,11 @@ struct NpuFlowPairSlot {
     int32_t state = 0; // 0 = reusable, 2 = SEND completed
 };
 
-constexpr uint32_t MAX_NPU_FLOW_PAIR_STATES = MAX_FLOWS_PER_NPU;
+// 018-layer0-GPUfit: layer0 每 NPU 2 OUTCAST x 127 + 2 INCAST x 127 = 最坏堆积
+// 约 508 个 (para,src,dst) 槽位 (SEND 先 mark, INCAST claim 后复用; KV 不走 pair).
+// 取 1024 留 2x 余量 (1024x32B = 32KB/NPU, 原 512KB/NPU). 溢出响亮报 error_code 5.
+// 注意: 019 全扇出 (15494) 在本构建下会响亮溢出, 需回退重编 (见 018 收敛清单).
+constexpr uint32_t MAX_NPU_FLOW_PAIR_STATES = 1024; // 018-layer0-GPUfit12: 16384->1024 (需508, 2x余量; 省480MB对冲pool上涨)。溢出响亮error 5。
 
 struct NpuFlowPairState {
     uint32_t count = 0;
@@ -358,7 +389,12 @@ struct NpuFlowPairState {
 // (recv immediate-finish, coll re-issue) goes straight back to the pool:
 // it runs serially inside that NPU's own process*ChakraNodes instance.
 // Pool exhaustion fails loudly with error_code 7.
-constexpr uint32_t MAX_COMM_ENTITIES_PER_NPU = 256;
+// 018-layer0-GPUfit4: layer0 每 NPU 并发 comm/recv 实体峰值各<=4
+// (2 OUTCAST + 2 INCAST; ProcessComm_E/Recv 分池; KV 不占池, 已核查 kv_transfer/inference_runtime 无 takeComm).
+// 取 32 留 8x 余量 (原 256, 8x 内存削减; ProcessComm_E 38KB/行, 主因 NpuID 37KB).
+// 实体 262144->32768: NpuID 列 9.9GB->1.2GB + TaskFlows 列 1.9GB->0.24GB + 排序暂存 8GB->1GB.
+// 耗尽响亮报 error_code 7 (llm_system.cpp 三处 take + retire 路径), 绝不静默.
+constexpr uint32_t MAX_COMM_ENTITIES_PER_NPU = 8; // 018-layer0-GPUfit16: 16->8（layer0并发<=4，仍2x余量；省0.5GB）。耗尽响亮error 7。
 
 struct NpuCommEntityPool {
     madrona::Entity comm_free[MAX_COMM_ENTITIES_PER_NPU] {};
@@ -459,6 +495,41 @@ struct DynamicFlowCompletionLog {
 // updateSimStatsStepSystem. mgr.cpp's GPUImpl reads it via the exported
 // column pointer + cudaMemcpy so Python-visible getters work on GPU
 // without needing a public Sim pointer out of MWCudaExecutor.
+// 023-dtdiag: chooseDT 每步的 gap 明细, 定位 1us 钉死的赢家。
+// Serial 单例里写, SimStats 镜像到 Python, digest 打印最小项。
+struct DtGapLevels {
+    double delayed = 0.0;
+    double pending = 0.0;
+    double finish = 0.0;
+    double drain = 0.0;
+    double backlog = 0.0;
+    double pfc_pause = 0.0;
+    double pfc_resume = 0.0;
+    double system = 0.0;
+    double chosen = 0.0;
+    int32_t handoff = 0;
+    int32_t drain_port = -1; // 023-dtdiag2: cachedDrainPortID 快照
+    // 023-dtdiag3: 钉死端口体检 (refreshTagCounters 顺带取, serial)。
+    double dport_head_bytes = 0.0;
+    int32_t dport_num_chunks = 0;
+    int32_t dport_dirty_alloc = 0;
+    int32_t dport_dirty_clear = 0;
+};
+// 018-layer0-GPUdiag: per-step per-port HIGH-WATER marks for every
+// FATAL-guarded fixed cap. Which FATAL fired is invisible on GPU
+// (madrona::fatal varargs garble -> surfaces as cuda_exec illegal memory
+// access, cf. gpu62_gdb inside fatal+944). refreshTagCounters already
+// loops all ports serially each step, so max tracking is nearly free.
+// Read via portMaxLevels(); compared against the MAX_* cap in digest.
+struct PortMaxLevels {
+    int32_t maxTags = 0;     // PortTagList.count (cap MAX_TAGS_PER_PORT=8192)
+    int32_t maxOutbox = 0;   // PortOutbox.num_events (cap MAX_PORT_OUTBOX)
+    int32_t maxDelayed = 0;  // PortDelayedQueue.count (cap MAX_PORT_DELAYED_EVENTS=2048)
+    int32_t maxIngress = 0;  // IngressTagList.count (cap MAX_TAGS_PER_INGRESS)
+    int32_t maxChunks = 0;   // PriorityBuffer.num_chunks (cap MAX_BUFFER_CHUNKS=128)
+    int32_t maxWeights = 0;  // BufferChunk.num_weights (cap MAX_CHUNK_WEIGHTS)
+    int32_t maxCleanup = 0;  // PortCleanup.num (cap MAX_PORT_CLEANUP)
+};
 struct SimStats {
     double simulationTime = 0.0;
     int32_t numFlowDefs = 0;
@@ -467,6 +538,8 @@ struct SimStats {
     int32_t numActiveTags = 0;
     int32_t numSourceTags = 0;
     int32_t numFlowCompletions = 0;
+    PortMaxLevels portMax = {};
+    DtGapLevels dtGaps = {}; // 023-dtdiag
     // [step-trace] driver.tick at the time this mirror was written. If
     // host sees this stuck at 0 across many steps, the task graph never
     // ran scheduleStepSystem (driver.tick++) AND/OR never ran
@@ -485,6 +558,10 @@ struct FlowCounters {
     int32_t pendingFlowCursor = 0;
     int32_t numFlowRoutes = 0;
     int32_t numFlowCompletions = 0;
+    // 021-M2: monotonic export-slot cursor for FlowCompletionBuf (static
+    // flows only; dynamic flows use DynamicFlowCompletionLog). Saturates at
+    // MAX_FLOW_COMPLETIONS; sim bookkeeping never gated on it (fit5 rule).
+    int32_t exportCursor = 0;
 };
 
 // Step-level mutable scheduler/cache state and entity counters that were
@@ -495,6 +572,8 @@ struct SimRuntimeState {
     int32_t numDelayedEvents = 0;
     int32_t numActiveTags = 0;
     int32_t numSourceTags = 0;
+    PortMaxLevels portMax = {}; // 018-layer0-GPUdiag: per-step high-waters
+    DtGapLevels dtGaps = {}; // 023-dtdiag
     // Cumulative since sim start (NOT reset per frame): delayed-event drops
     // are a silent-correctness hazard (the affected flow never materializes
     // and the sim later quiesces as if finished), so the counters must
@@ -988,6 +1067,46 @@ struct PortIngressUnlinkList {
     PortIngressUnlinkReq reqs[MAX_PORT_INGRESS_UNLINKS] {};
 };
 
+// GPU stack relief (019/018-layer0, 2026-10-23): per-port scratch moved
+// off the per-thread stack into a per-port component. Background: capacity
+// bumps (MAX_TAGS_PER_PORT 1024->4096, MAX_CHUNK_WEIGHTS 512->4096)
+// enlarged thread-local scratch arrays in the alloc/buffer path; the NVRTC
+// megakernel per-thread local grew 164824B (003) -> 393768B and
+// cuGraphInstantiate's stack reservation (local x 129024 threads = 50.8GB)
+// exceeded the 46GB card even for 2-rank micro. Component storage costs
+// ~310KB/port of device-global (not per-thread) memory and leaves the CPU
+// logic statement-for-statement identical. All array reads are either
+// bounded by counts that are reset at each phase entry (replacing the old
+// fresh-local zero-init semantics -- see the resets in allocOnePort /
+// allocOnePortQoS* / advanceOnePortBuffer) or write-before-read scratch
+// (build_chunk/gc_chunk/head_ids, zeroed at each build site like before).
+struct PortAllocScratch {
+    madrona::Entity tags[MAX_TAGS_PER_PORT] {};
+    madrona::Entity live_tags[MAX_TAGS_PER_PORT] {};
+    int32_t num_tags = 0;
+    int32_t num_live = 0;
+    double live_sum_in = 0.0;
+};
+
+struct PortQosBuckets {
+    madrona::Entity tags[PFC_MAX_PRIORITY][MAX_TAGS_PER_PORT] {};
+    int32_t counts[PFC_MAX_PRIORITY] {};
+    double in_sum[PFC_MAX_PRIORITY] {};
+};
+
+struct PortFrameScratch {
+    PortAllocScratch alloc {};
+    PortQosBuckets qos {};
+    madrona::Entity adv_tags[MAX_TAGS_PER_PORT] {};
+    madrona::Entity adv_pri_tags[PFC_MAX_PRIORITY][MAX_TAGS_PER_PORT] {};
+    int32_t adv_pri_counts[PFC_MAX_PRIORITY] {};
+    double adv_pri_in[PFC_MAX_PRIORITY] {};
+    double adv_pri_out[PFC_MAX_PRIORITY] {};
+    BufferChunk build_chunk {};
+    BufferChunk gc_chunk {};
+    int32_t head_ids[MAX_CHUNK_WEIGHTS] {};
+};
+
 struct Port : public madrona::Archetype<
     PortState,
     PortBuffer,
@@ -1012,7 +1131,8 @@ struct Port : public madrona::Archetype<
     PortDrainHint,
     PortTimers,
     PortTraceLast,
-    IngressTagList
+    IngressTagList,
+    PortFrameScratch
 > {};
 
 struct FlowTag : public madrona::Archetype<

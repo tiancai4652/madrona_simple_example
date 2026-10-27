@@ -990,6 +990,8 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     stats.numActiveTags = runtime.numActiveTags;
     stats.numSourceTags = runtime.numSourceTags;
     stats.numFlowCompletions = flow_counters.numFlowCompletions;
+    stats.portMax = runtime.portMax; // 018-layer0-GPUdiag
+    stats.dtGaps = runtime.dtGaps; // 023-dtdiag
     stats.lastTick = driver.tick;
 
     finalizeHostStepPhase(ctx);
@@ -997,20 +999,13 @@ MADRONA_NO_INLINE void postBufferStepSystem(Engine &ctx, SimDriver &driver)
     int32_t n = flow_counters.numFlowCompletions;
     if (n < 0) n = 0;
     if (n > MAX_FLOW_COMPLETIONS) n = MAX_FLOW_COMPLETIONS;
-    int32_t out_idx = 0;
-    for (int32_t i = 0; i < sim.numFlowMetaEntities && out_idx < n; i++) {
-        Entity flow_entity = sim.flowMetaEntities[i];
-        if (flow_entity == Entity::none()) {
-            continue;
-        }
-        const FlowRuntimeState &flow_runtime =
-            ctx.get<FlowRuntimeState>(flow_entity);
-        if (flow_runtime.completed == 0) {
-            continue;
-        }
-        FlowCompletionRecord record = flow_runtime.completion_record;
-        buf.records[out_idx++] = record;
-    }
+    // 021-M2: static-flow records are pre-written at completion time
+    // (recordFlowCompletion, completion-time order); the O(all slots) rescan
+    // every step is deleted. out_idx resumes after the static block so the
+    // dynamic log appends exactly where it used to.
+    int32_t out_idx = flow_counters.exportCursor;
+    if (out_idx < 0) out_idx = 0;
+    if (out_idx > MAX_FLOW_COMPLETIONS) out_idx = MAX_FLOW_COMPLETIONS;
     // NPU-owned (dynamically injected) flows live in recycled per-NPU pool
     // slots, so their records come from the durable log instead of from a
     // flowMetaEntities[] rescan.
@@ -1072,6 +1067,17 @@ MADRONA_NO_INLINE void sys_checkRecvFlowProbeStepSystem(
     llm_system::sys_checkRecvFlow(ctx, npu, node, recv_flag);
 }
 
+MADRONA_NO_INLINE void sys_checkIncastWaitsProbeStepSystem(
+    Engine &ctx,
+    NpuID &npu,
+    ProcessingCommTasks &comm_tasks,
+    const ChakraFanouts &fanouts,
+    IncastWaitList &waits)
+{
+    SIM_PROBE_RECORD("sys_checkIncastWaits");
+    llm_system::sys_checkIncastWaits(ctx, npu, comm_tasks, fanouts, waits);
+}
+
 MADRONA_NO_INLINE void sys_removeChakraNodesProbeStepSystem(
     Engine &ctx,
     NpuID &npu,
@@ -1096,12 +1102,15 @@ MADRONA_NO_INLINE void sys_processChakraNodesProbeStepSystem(
     OneNPUFinishedFlag &oneNPUFinishedFlag,
     ChakraNodesForNoDP &chakraNodesForNoDP,
     ChakraReadyState &chakraReadyState,
-    InferenceNpuExecution &inferenceExecution)
+    InferenceNpuExecution &inferenceExecution,
+    const ChakraFanouts &fanouts,
+    IncastWaitList &waits)
 {
     SIM_PROBE_RECORD("sys_processChakraNodes");
     llm_system::sys_processChakraNodes(ctx, npu, chakraNodes, hardwareResource,
         processingCompTask, processingCommTasks, oneNPUFinishedFlag,
-        chakraNodesForNoDP, chakraReadyState, inferenceExecution);
+        chakraNodesForNoDP, chakraReadyState, inferenceExecution,
+        fanouts, waits);
 }
 
 }  // inline namespace systems
@@ -1144,13 +1153,19 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     auto n0checkrecv = builder.addToGraph<ParallelForNode<Engine,
         sys_checkRecvFlowProbeStepSystem,
         NpuID, NodeID, RecvNodeFlag, PoolSlotActive>>({n0checkflow});
+    // 019 扇出保真: INCAST 等齐轮询 (per-NPU, 跑在 checkrecv 之后、
+    // remove 之前, 完成即 setFinish 同帧随 remove 清理).
+    auto n0checkincast = builder.addToGraph<ParallelForNode<Engine,
+        sys_checkIncastWaitsProbeStepSystem,
+        NpuID, ProcessingCommTasks, ChakraFanouts, IncastWaitList>>(
+            {n0checkrecv});
     // A1: per-NPU KV draft pass + serial commit, replacing the legacy
     // collectInferenceKvCompletions singleton at the same graph position.
     // The commit replays tickets in npu-major order, so the D-worker queue
     // enqueue order (F6/F7) is unchanged.
     auto n0kvdraft = builder.addToGraph<ParallelForNode<Engine,
         collectInferenceKvDraftStepSystem,
-        NpuID, NpuFlowFinishedList, NpuKvCollectDraft>>({n0checkrecv});
+        NpuID, NpuFlowFinishedList, NpuKvCollectDraft>>({n0checkincast});
     auto n0collectkv = builder.addToGraph<ParallelForNode<Engine,
         commitInferenceKvCollectStepSystem, SimDriver>>({n0kvdraft});
     auto n0clearfinished = builder.addToGraph<ParallelForNode<Engine,
@@ -1164,7 +1179,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
         sys_processChakraNodesProbeStepSystem,
         NpuID, ChakraNodes, HardwareResource, ProcessingCompTask,
         ProcessingCommTasks, OneNPUFinishedFlag, ChakraNodesForNoDP,
-        ChakraReadyState, InferenceNpuExecution>>({n0remove});
+        ChakraReadyState, InferenceNpuExecution, ChakraFanouts,
+        IncastWaitList>>({n0remove});
     auto n0inferencepost = builder.addToGraph<ParallelForNode<Engine,
         inferencePostStepSystem, SimDriver>>({n0process});
     // A9: per-request stats mirror, replacing the in-system

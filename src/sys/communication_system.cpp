@@ -234,7 +234,11 @@ namespace madsimple::llm_system
             else
             {
                 // SysFlow flows_finish[MAX_FLOW_NUM_PER_COMM_NODE];
-                uint32_t flow_finish_count = checkFlowFinish(ctx, npu_id.value, npu_id.flows_finish);
+                // 019: 显式按缓冲大小限界 (npu_id.flows_finish 只有 128 槽;
+                // 默认 512 会在同帧同 NPU 完成超 128 时踩内存. 限界后超量
+                // 变可检测的未完成 hang, 不变静默 corruption).
+                uint32_t flow_finish_count = checkFlowFinish(ctx, npu_id.value,
+                    npu_id.flows_finish, MAX_FLOW_NUM_PER_COMM_NODE);
 
                 if (flow_finish_count > 0)
                 {
@@ -318,9 +322,11 @@ namespace madsimple::llm_system
             {
                 // comm_para == 0: fall back to the single-step mailbox
                 // (src,dst) matching for workloads without flow_id.
+                // 019: 同上, 按缓冲大小显式限界.
                 uint32_t flow_finish_count = checkFlowFinish(
                     ctx, recvNodeFlag.comm_src,
-                    npu_id.recv_node_flows_finish);
+                    npu_id.recv_node_flows_finish,
+                    MAX_FLOW_NUM_PER_COMM_NODE);
                 for (size_t i = 0; i < flow_finish_count; i++)
                 {
                     if (npu_id.recv_node_flows_finish[i].comm_src == recvNodeFlag.comm_src &&
@@ -344,6 +350,50 @@ namespace madsimple::llm_system
                 // C1: retire via the owner NPU's draft (see above).
                 retirePooledCommEntity(ctx, npu_id.value,
                     ctx.data().npus_chakra_exec_entity[npu_id.value][node_id.value], 1);
+            }
+        }
+    }
+
+    void sys_checkIncastWaits(Engine &ctx, NpuID &npu_id,
+        ProcessingCommTasks &comm_tasks, const ChakraFanouts &fanouts,
+        IncastWaitList &waits)
+    {
+        const uint64_t dst = npu_id.value;
+        for (uint32_t w = 0; w < waits.count;)
+        {
+            IncastWaitEntry &we = waits.waits[w];
+            if (we.fanout_idx < 0 ||
+                static_cast<uint32_t>(we.fanout_idx) >= fanouts.num_entries)
+            {
+                // 坏条目: 响亮失败 (error_code 3 = comm dst 家族).
+                SystemStatus &status = ctx.singleton<SystemStatus>();
+                status.failed = 1;
+                status.error_code = 3;
+                return;
+            }
+            const ChakraFanoutEntry &e = fanouts.entries[we.fanout_idx];
+            for (uint32_t k = 0; k < e.count; ++k)
+            {
+                if (we.claimed[k >> 6] & (1ULL << (k & 63)))
+                {
+                    continue;
+                }
+                if (e.paras[k] != 0 &&
+                    ctx.data().claimRecvDone(
+                        ctx, e.paras[k], e.peers[k], dst) != 0)
+                {
+                    we.claimed[k >> 6] |= (1ULL << (k & 63));
+                    we.done += 1;
+                }
+            }
+            if (we.done >= e.count)
+            {
+                comm_tasks.setFinish(we.node_id, getCurrentTime(ctx), npu_id.value);
+                waits.waits[w] = waits.waits[--waits.count];
+            }
+            else
+            {
+                ++w;
             }
         }
     }

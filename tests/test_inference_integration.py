@@ -21,8 +21,8 @@ def inference_kv_flows(world):
         flow_id = record["flow_id"]
         if not flow_id & INFERENCE_KV_FLOW_BIT:
             continue
-        slot = (flow_id & ~INFERENCE_KV_FLOW_BIT) >> 4
-        shard = flow_id & 0xF
+        slot = (flow_id & ~INFERENCE_KV_FLOW_BIT) >> 8
+        shard = flow_id & 0xFF
         flows.append((slot, shard, record["src_node"],
                       record["dst_node"], record["size_bytes"]))
     return flows
@@ -396,9 +396,10 @@ class InferenceIntegrationTests(unittest.TestCase):
         self.assertEqual(set(inference_kv_flows(world)), expected)
 
     def test_mla_point_to_point_wide_p_narrow_d(self):
-        # MLA (kv_mode=1) point-to-point replication (form B): the P
-        # group's first rank (p.rank_start) streams one FULL latent copy
-        # to every rank of the routed D worker — shards = d_width. Each
+        # MLA (kv_mode=1) single-cast (022 Form-C): one full latent per
+        # request (shards == 1), emitted by the P rank that computed it
+        # (p.rank_start + slot % p.rank_count) straight to its assigned D
+        # rank (d.rank_start + slot % d.rank_count). Each
         # flow size = layers × prompt_len × kv_latent_dim ×
         # bytes_per_elem = 2 × 3 × 6 × 2 = 72 (no splitting). No
         # divisibility requirement applies — kv_heads=6 against p_width=4
@@ -431,13 +432,13 @@ class InferenceIntegrationTests(unittest.TestCase):
             requests, inference_config=inference_config, npu_count=6)
         rows = self._run_to_completion(world)
         self.assertEqual({row["state"] for row in rows}, {7})
-        self.assertEqual(rows[0]["kv_shards"], 2)
-        self.assertEqual(rows[0]["kv_shards_done"], 2)
+        self.assertEqual(rows[0]["kv_shards"], 1)
+        self.assertEqual(rows[0]["kv_shards_done"], 1)
         self.assertEqual(rows[0]["kv_bytes"], 72)
         flows = inference_kv_flows(world)
-        self.assertEqual(set(flows),
-                          {(0, 0, 0, 4, 72.0), (0, 1, 0, 5, 72.0)})
-        # kv_done fires only after the last of the d_width streams lands.
+        # slot 0: src = 0 + 0 % 4, dst = 4 + 0 % 2.
+        self.assertEqual(set(flows), {(0, 0, 0, 4, 72.0)})
+        # kv_done fires when the single stream lands.
         latest_flow_end_ns = max(
             record["end_time_ms"] * 1e6
             for record in world.flow_completions()
@@ -445,11 +446,11 @@ class InferenceIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(rows[0]["kv_done_ns"] + 1,
                                 latest_flow_end_ns)
 
-    def test_mla_point_to_point_every_d_rank_gets_full_latent(self):
-        # MLA streams one full-latent flow per D rank (d_width=4 here):
-        # p_width=2/d_width=4 produces 4 flows, all sourced from
-        # p.rank_start=0 and targeting d.rank_start..+3, each carrying the
-        # complete 72B latent (never split across the D ranks).
+    def test_mla_single_cast_one_flow_per_request(self):
+        # MLA single-casts one full-latent flow per request (022 Form-C,
+        # shards == 1): p_width=2/d_width=4 produces a single flow from
+        # p.rank_start + slot % 2 to d.rank_start + slot % 4, carrying the
+        # complete 72B latent (never split).
         inference_config = InferenceConfig(
             enabled=True,
             prefill_workers=((0, 1),),
@@ -478,12 +479,11 @@ class InferenceIntegrationTests(unittest.TestCase):
             requests, inference_config=inference_config, npu_count=6)
         rows = self._run_to_completion(world)
         self.assertEqual({row["state"] for row in rows}, {7})
-        self.assertEqual(rows[0]["kv_shards"], 4)
-        self.assertEqual(rows[0]["kv_shards_done"], 4)
+        self.assertEqual(rows[0]["kv_shards"], 1)
+        self.assertEqual(rows[0]["kv_shards_done"], 1)
         self.assertEqual(rows[0]["kv_bytes"], 72)
-        self.assertEqual(set(inference_kv_flows(world)),
-                          {(0, shard, 0, 2 + shard, 72.0)
-                           for shard in range(4)})
+        # slot 0: src = 0 + 0 % 2, dst = 2 + 0 % 4.
+        self.assertEqual(set(inference_kv_flows(world)), {(0, 0, 0, 2, 72.0)})
         latest_flow_end_ns = max(
             record["end_time_ms"] * 1e6
             for record in world.flow_completions()
@@ -491,10 +491,11 @@ class InferenceIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(rows[0]["kv_done_ns"] + 1,
                                 latest_flow_end_ns)
 
-    def test_mla_multiple_requests_each_stream_to_every_d_rank(self):
-        # Two routed requests under MLA: each request streams its own
-        # d_width full-latent flows (per-request shard s -> d.rank_start+s,
-        # slot-scoped flow ids; all flows originate at p.rank_start=0).
+    def test_mla_multiple_requests_each_single_cast(self):
+        # Two routed requests under MLA: each request single-casts its own
+        # full-latent flow (slot-scoped flow ids; 022 Form-C: from
+        # p.rank_start + slot % p.rank_count to
+        # d.rank_start + slot % d.rank_count).
         inference_config = InferenceConfig(
             enabled=True,
             prefill_workers=((0, 1, 2, 3),),
@@ -523,11 +524,10 @@ class InferenceIntegrationTests(unittest.TestCase):
             requests, inference_config=inference_config, npu_count=6)
         rows = self._run_to_completion(world)
         self.assertEqual({row["state"] for row in rows}, {7})
-        self.assertEqual({row["kv_shards"] for row in rows}, {2})
+        self.assertEqual({row["kv_shards"] for row in rows}, {1})
         self.assertEqual(
             set(inference_kv_flows(world)),
-            {(slot, shard, 0, 4 + shard, 72.0)
-             for slot in (0, 1) for shard in (0, 1)})
+            {(0, 0, 0, 4, 72.0), (1, 0, 1, 5, 72.0)})
 
     def test_prefill_starts_on_max_wait_timeout_without_full_batch(self):
         # p_max_batch=4 but only 2 requests: prefill must NOT launch at

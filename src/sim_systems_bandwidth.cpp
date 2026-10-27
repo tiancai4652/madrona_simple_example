@@ -1,5 +1,6 @@
 #include "sim.hpp"
 #include "sim_debug.hpp"
+#include "sim_probe.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,19 +22,12 @@ inline bool isClose(double a, double b,
     return diff <= abs_eps || diff <= max_val * rel_eps;
 }
 
-struct PriorityTagBuckets {
-    Entity tags[PFC_MAX_PRIORITY][MAX_TAGS_PER_PORT] {};
-    int32_t counts[PFC_MAX_PRIORITY] {};
-    double in_sum[PFC_MAX_PRIORITY] {};
-};
-
-struct AllocTagScratch {
-    Entity tags[MAX_TAGS_PER_PORT] {};
-    Entity live_tags[MAX_TAGS_PER_PORT] {};
-    int32_t num_tags = 0;
-    int32_t num_live = 0;
-    double live_sum_in = 0.0;
-};
+// GPU stack relief (2026-10-23): scratch lives in the per-port
+// PortFrameScratch component (types.hpp), not on the thread stack. The
+// aliases keep the function bodies below untouched (identical layout);
+// callers pass the component slot instead of declaring locals.
+using AllocTagScratch = PortAllocScratch;
+using PriorityTagBuckets = PortQosBuckets;
 
 MADRONA_NO_INLINE void resetAllocPhaseScratch(
     PortCachedHints &hints,
@@ -67,13 +61,17 @@ MADRONA_NO_INLINE void materializeAllocPortBuffer(
     Sim &sim,
     Context &ctx,
     PortBuffer &port_buf,
-    const PortTagList &tag_list)
+    const PortTagList &tag_list,
+    PortFrameScratch &fs)
 {
     sim.materializeBufCnt(port_buf, sim.now);
     for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
         PriorityBuffer &pb = port_buf.prior_bufs[pri];
         if (pb.buf_cnt > 1.0 && pb.num_chunks <= 0) {
-            BufferChunk comp {};
+            // GPU stack relief: build in the per-port slot (zeroed like the
+            // old thread-local `comp {}`), then store. Same bytes out.
+            BufferChunk &comp = fs.build_chunk;
+            zeroStruct(comp);
             comp.chunk_bytes = pb.buf_cnt;
             int32_t weight_count = 0;
             for (int32_t i = 0; i < tag_list.count; i++) {
@@ -95,13 +93,20 @@ MADRONA_NO_INLINE void materializeAllocPortBuffer(
                 weight_count += 1;
             }
             comp.num_weights = weight_count;
+            SIM_PROBE_HWM("buf_weights", weight_count);
+            SIM_PROBE_HWM("tag_list", tag_list.count);
             if (weight_count > 0) {
                 for (int32_t i = 0; i < weight_count; i++) {
                     comp.weights[i].weight = 1.0 / (double)weight_count;
                 }
+                if (pb.num_chunks >= MAX_BUFFER_CHUNKS) {
+                    FATAL("capacity exceeded: MAX_BUFFER_CHUNKS=%d (num_chunks=%d, port ring full; would silently overwrite -- raise MAX_BUFFER_CHUNKS)",
+                          (int)MAX_BUFFER_CHUNKS, (int)pb.num_chunks);
+                }
                 pb.buf_chunks[pb.tail] = comp;
                 pb.tail = (pb.tail + 1) % MAX_BUFFER_CHUNKS;
                 pb.num_chunks += 1;
+                SIM_PROBE_HWM("buf_chunks", pb.num_chunks);
             }
         }
         if (pb.buf_cnt < 1e-15 && pb.num_chunks > 0) {
@@ -114,7 +119,7 @@ MADRONA_NO_INLINE void materializeAllocPortBuffer(
                 pb.buf_cnt = chunk_sum;
             }
         }
-        sim.alignChunksWithBufCnt(pb);
+        sim.alignChunksWithBufCnt(pb, fs.gc_chunk);
     }
 }
 
@@ -345,7 +350,8 @@ MADRONA_NO_INLINE void finalizeQoSAlloc(
     Entity *live_tags,
     int32_t num_live,
     PortCachedHints &hints,
-    double &out_total)
+    double &out_total,
+    BufferChunk &gc_slot)
 {
     double pri_out_sum[PFC_MAX_PRIORITY] {};
     for (int32_t i = 0; i < num_live; i++) {
@@ -366,7 +372,7 @@ MADRONA_NO_INLINE void finalizeQoSAlloc(
     for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
         port_buf.prior_bufs[pri].net_buffer_rate -= pri_out_sum[pri];
         PriorityBuffer &pb = port_buf.prior_bufs[pri];
-        sim.alignChunksWithBufCnt(pb);
+        sim.alignChunksWithBufCnt(pb, gc_slot);
         if (!sim.enableBuffer || pb.buf_cnt <= 1e-15 || pb.num_chunks <= 0) {
             continue;
         }
@@ -405,7 +411,16 @@ MADRONA_NO_INLINE void allocOnePortQoSSP(
     PortCachedHints &hints,
     double &out_total)
 {
-    PriorityTagBuckets buckets {};
+    // GPU stack relief: per-port component slot replaces the thread-local
+    // `buckets {}`. Counts/sums are reset here to reproduce the fresh-local
+    // semantics the old declaration provided.
+    PortFrameScratch &fs = ctx.get<PortFrameScratch>(
+        sim.portEntities[port_id]);
+    PriorityTagBuckets &buckets = fs.qos;
+    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+        buckets.counts[pri] = 0;
+        buckets.in_sum[pri] = 0.0;
+    }
     collectPriorityTagBuckets(ctx, live_tags, num_live, buckets);
 
     double remaining_bw = port_bw;
@@ -480,7 +495,8 @@ MADRONA_NO_INLINE void allocOnePortQoSSP(
         }
     }
 
-    finalizeQoSAlloc(sim, ctx, port_buf, live_tags, num_live, hints, out_total);
+    finalizeQoSAlloc(sim, ctx, port_buf, live_tags, num_live, hints,
+        out_total, fs.gc_chunk);
 }
 
 MADRONA_NO_INLINE void allocOnePortQoSWRR(
@@ -495,7 +511,16 @@ MADRONA_NO_INLINE void allocOnePortQoSWRR(
     PortCachedHints &hints,
     double &out_total)
 {
-    PriorityTagBuckets buckets {};
+    // GPU stack relief: per-port component slot replaces the thread-local
+    // `buckets {}`. Counts/sums are reset here to reproduce the fresh-local
+    // semantics the old declaration provided.
+    PortFrameScratch &fs = ctx.get<PortFrameScratch>(
+        sim.portEntities[port_id]);
+    PriorityTagBuckets &buckets = fs.qos;
+    for (int32_t pri = 0; pri < PFC_MAX_PRIORITY; pri++) {
+        buckets.counts[pri] = 0;
+        buckets.in_sum[pri] = 0.0;
+    }
     collectPriorityTagBuckets(ctx, live_tags, num_live, buckets);
 
     bool active[PFC_MAX_PRIORITY] {};
@@ -598,7 +623,8 @@ MADRONA_NO_INLINE void allocOnePortQoSWRR(
         }
     }
 
-    finalizeQoSAlloc(sim, ctx, port_buf, live_tags, num_live, hints, out_total);
+    finalizeQoSAlloc(sim, ctx, port_buf, live_tags, num_live, hints,
+        out_total, fs.gc_chunk);
 }
 
 MADRONA_NO_INLINE void allocOnePortDestOnly(
@@ -675,7 +701,10 @@ MADRONA_NO_INLINE bool allocOnePortDefault(
             break;
         }
         pb.buf_cnt = std::max(0.0, pb.buf_cnt - head.chunk_bytes);
-        pb.buf_chunks[pb.head] = BufferChunk {};
+        // GPU stack relief: the old `= BufferChunk {}` temporary (65KB on
+        // the thread stack) becomes an in-place clear. The slot is popped
+        // on the next two lines, so only the two observed scalars matter.
+        zeroStruct(pb.buf_chunks[pb.head]);
         pb.head = (pb.head + 1) % MAX_BUFFER_CHUNKS;
         pb.num_chunks -= 1;
     }
@@ -697,7 +726,10 @@ MADRONA_NO_INLINE bool allocOnePortDefault(
                     MAX_BUFFER_CHUNKS].chunk_bytes;
             }
             int32_t n_head = 0;
-            int32_t head_ids[MAX_CHUNK_WEIGHTS];
+            // GPU stack relief: per-port component slot (write-before-read,
+            // no reset needed).
+            int32_t *head_ids = ctx.get<PortFrameScratch>(
+                sim.portEntities[port_id]).head_ids;
             if (pb.num_chunks > 0) {
                 const BufferChunk &hc = pb.buf_chunks[pb.head];
                 n_head = hc.num_weights;
@@ -754,7 +786,13 @@ MADRONA_NO_INLINE bool allocOnePortDefault(
     }
     if (sim.enableBuffer && has_buffer) {
         BufferChunk &front = pb.buf_chunks[pb.head];
-        if (port_bw > 1e-6 && front.chunk_bytes > 1e-15) {
+        // 023-dtdiag 根因修复: hint 必须按实际排空速率 (out_total) 排,
+        // 不能按链路速率排. out_total≈0 时排空根本不会发生, 此时按
+        // port_bw 算出的 td (ns 量级) 是谎言 wake-up, dt 被永久钉死
+        // (gpu70: drain=0.0000ms 连赢, sim 冻结 7500 步; 018 的 1us 钉死同构).
+        // 与 materializeAllocPortBuffer 的 out_pri<=1e-6 门一致.
+        if (port_bw > 1e-6 && out_total > 1e-6 &&
+            front.chunk_bytes > 1e-15) {
             Time td = front.chunk_bytes / port_bw;
             if (td > 1e-15) {
                 if (!hints.has_drain_hint || td < hints.drain_hint_t) {
@@ -800,9 +838,17 @@ void Sim::allocOnePort(
     PortBuffer *port_buf = &port_buf_ref;
     PortPfcState *pfc_state = enablePfc ? &pfc_state_ref : nullptr;
 
-    materializeAllocPortBuffer(*this, ctx, *port_buf, tag_list);
+    // GPU stack relief (2026-10-23): scratch lives in the per-port
+    // component. The counter resets reproduce the old fresh-local
+    // `AllocTagScratch scratch {}` zero-init semantics.
+    PortFrameScratch &fs = ctx.get<PortFrameScratch>(
+        portEntities[port_id]);
+    materializeAllocPortBuffer(*this, ctx, *port_buf, tag_list, fs);
 
-    AllocTagScratch scratch {};
+    AllocTagScratch &scratch = fs.alloc;
+    scratch.num_tags = 0;
+    scratch.num_live = 0;
+    scratch.live_sum_in = 0.0;
     collectAllocTagScratch(*this, ctx, tag_list, cleanup, scratch);
     if (scratch.num_tags == 0) {
         return;

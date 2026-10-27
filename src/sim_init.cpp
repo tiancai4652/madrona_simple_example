@@ -25,6 +25,7 @@ void Sim::loadFlow(Engine &ctx)
         .pendingFlowCursor = 0,
         .numFlowRoutes = 0,
         .numFlowCompletions = 0,
+        .exportCursor = 0, // 021-M2
     };
 
     ctx.singleton<SimRuntimeState>() = SimRuntimeState {
@@ -57,6 +58,7 @@ void Sim::loadFlow(Engine &ctx)
             .completed = 0,
             .route_active = 0,
             .owner_npu_id = -1,
+            .export_slot = -1, // 021-M2
             .completion_record = FlowCompletionRecord {},
         };
         ctx.get<FlowScheduleState>(flow_entity) = FlowScheduleState {

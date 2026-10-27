@@ -97,34 +97,35 @@ bool beginInferenceKvTransfer(Engine &ctx, InferenceRuntime &runtime,
         }
         request.kv_bytes = latent_bytes;
 
-        // Point-to-point replication over the scaleout network (form B):
-        // every D rank needs the full latent locally, so the P pool's
-        // first rank streams one complete latent copy to each D rank of
-        // the routed D worker (d_width flows, shard s -> d.rank_start+s).
-        // The P0 egress and scaleout links carry d_width competing
-        // streams, which the network layer models natively. kv_done
-        // fires once all d_width shards arrive, reusing the existing
-        // shard-completion bitmap (d_width <= MAX_INFERENCE_WORKER_RANKS
-        // = 16 < 32, so the mask is safe).
-        const int32_t shards = static_cast<int32_t>(d.rank_count);
-        if (shards <= 0 || shards > MAX_INFERENCE_WORKER_RANKS ||
-            shards >= 32) {
+        // 022-KV单播 Form-C (DP128语义, 用户已拍板): 每请求只发 1 份全量
+        // latent, 由算出它的 P rank 直达其 assigned D rank (slot 取余打散,
+        // 无单点)。Form-B 每请求 128 份全复制 (16K 流/batch) 在 DP 下 127 份
+        // 无人需要 (仿真不建模扔, 白占带宽+堆 D-burst); DP 每个 rank 只算
+        // 自己的请求, 谁算谁发, 天然一对一。KV 总流量降 128 倍。
+        // 安全依据沿 Form-B: 投递只认(slot,shard), KV_BIT 命名空间隔离,
+        // mask 按位记账 (现只需 bit0)。与 Form-B 轨迹不再可比 (属已授权语义变更)。
+        const int32_t shards = 1;
+        if (p.rank_count <= 0 || d.rank_count <= 0) {
             failInference(ctx, InferenceError::InvalidConfig);
             return false;
         }
         request.kv_shards = shards;
         request.kv_done = 0;
-        request.kv_done_mask = 0;
+        request.kv_done_mask[0] = 0;
+        request.kv_done_mask[1] = 0;
         request.state = InferenceRequestState::KvTransferring;
         runtime.inflight_kv += shards;
-        for (int32_t shard = 0; shard < shards; shard++) {
+        {
+            const int64_t src_rank =
+                (int64_t)p.rank_start + (slot % p.rank_count);
+            const int64_t dst_rank =
+                (int64_t)d.rank_start + (slot % d.rank_count);
             net_sys_interface::setFlow(ctx,
-                static_cast<uint32_t>(p.rank_start),
-                static_cast<uint64_t>(p.rank_start),
-                static_cast<uint64_t>(d.rank_start + shard),
+                static_cast<uint32_t>(src_rank),
+                static_cast<uint64_t>(src_rank),
+                static_cast<uint64_t>(dst_rank),
                 latent_bytes > 0 ? static_cast<uint64_t>(latent_bytes) : 1,
-                makeInferenceKvFlowID(static_cast<uint32_t>(slot),
-                                    static_cast<uint32_t>(shard)),
+                makeInferenceKvFlowID(static_cast<uint32_t>(slot), 0),
                 0);
         }
         return true;
@@ -178,7 +179,8 @@ bool beginInferenceKvTransfer(Engine &ctx, InferenceRuntime &runtime,
 
     request.kv_shards = shards;
     request.kv_done = 0;
-    request.kv_done_mask = 0;
+    request.kv_done_mask[0] = 0;
+    request.kv_done_mask[1] = 0;
     request.state = InferenceRequestState::KvTransferring;
     runtime.inflight_kv += shards;
 
@@ -239,7 +241,7 @@ void collectInferenceKvDrafts(Engine &ctx, uint32_t npu_id,
         const uint32_t slot = inferenceKvRequestSlot(flow_id);
         const uint32_t shard = inferenceKvShard(flow_id);
         if (slot >= static_cast<uint32_t>(runtime.num_requests) ||
-            shard >= 32) {
+            shard >= MAX_INFERENCE_WORKER_RANKS) {
             continue;
         }
         if (draft.count >= MAX_FLOWS_PER_NPU) {
@@ -284,12 +286,13 @@ void commitInferenceKvCollect(Engine &ctx)
             const uint32_t slot = ticket.slot;
             const uint32_t shard = ticket.shard;
             InferenceRequestRecord &request = runtime.requests[slot];
-            const uint32_t bit = 1u << shard;
+            const uint32_t word = shard >> 6;
+            const uint64_t bit = 1ULL << (shard & 63);
             if (request.state != InferenceRequestState::KvTransferring ||
-                (request.kv_done_mask & bit) != 0) {
+                (request.kv_done_mask[word] & bit) != 0) {
                 continue;
             }
-            request.kv_done_mask |= bit;
+            request.kv_done_mask[word] |= bit;
             request.kv_done++;
             const int64_t completion_ns =
                 static_cast<int64_t>(ticket.end_time_ns);

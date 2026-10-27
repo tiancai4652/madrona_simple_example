@@ -50,7 +50,7 @@ namespace madsimple::llm_system
     void skipTime_add_time(Engine &ctx, uint64_t t_relative_ns)
     {
         uint64_t event_time_ns = getCurrentTime(ctx) + t_relative_ns;
-        for (size_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; i++)
+        for (size_t i = 0; i < NEXT_PROCESS_TIMES_CAP; i++)
         {
             if (ctx.get<NextProcessTimes>(ctx.data().next_process_time_entity).times_abs[i] == 0)
             {
@@ -82,7 +82,7 @@ namespace madsimple::llm_system
     uint64_t skipTime_sort_time_rMin(Engine &ctx)
     {
         uint64_t min_time = 0;
-        for (size_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; ++i)
+        for (size_t i = 0; i < NEXT_PROCESS_TIMES_CAP; ++i)
         {
             uint64_t candidate = ctx.get<NextProcessTimes>(
                 ctx.data().next_process_time_entity).times_abs[i];
@@ -108,7 +108,7 @@ namespace madsimple::llm_system
         }
         uint64_t *slots = ctx.get<NextProcessTimes>(
             ctx.data().next_process_time_entity).times_abs;
-        for (size_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; ++i)
+        for (size_t i = 0; i < NEXT_PROCESS_TIMES_CAP; ++i)
         {
             if (slots[i] != x_ns) {
                 continue;

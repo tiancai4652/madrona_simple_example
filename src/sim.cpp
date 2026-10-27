@@ -63,6 +63,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<PortTimers>();
     registry.registerComponent<PortTraceLast>();
     registry.registerComponent<IngressTagList>();
+    // GPU stack relief (2026-10-23): per-port frame scratch component.
+    registry.registerComponent<PortFrameScratch>();
 
     registry.registerSingleton<SimStats>();
     registry.registerSingleton<FlowCounters>();
@@ -102,7 +104,13 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerComponent<InferenceConfigData>();
     registry.registerComponent<InferenceRequestData>();
     registry.registerComponent<WorkloadParamsTableData>();
-    registry.registerArchetype<SysInputArch>();
+    // 019: SysInputArch 每世界恰 1 实体 (sys_input). 显式声明 max=1 走
+    // fixed 表路径: exportColumn 直接返回表存储, 不走"1e9 行 x 行字节"
+    // 虚拟预留分支. 该分支是 32 位乘法 (1'000'000'000 * num_bytes_per_row
+    // 先回绕再转 64 位): 512MB 行宽时恰回绕为 0 -> mmap(0) abort (第 8 墙).
+    // fixed 路径同时省掉 export 拷贝, CPU/GPU 通用.
+    registry.registerArchetype<SysInputArch>(
+        ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
     llm_system::registerTypes(registry);
     registry.registerArchetype<Port>();
     registry.registerArchetype<FlowMeta>();
@@ -206,7 +214,7 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
     // never needed this; we still write here so both backends observe
     // identical initial state.
     SimStats &init_stats = ctx.singleton<SimStats>();
-    const FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
+    FlowCounters &flow_counters = ctx.singleton<FlowCounters>();
     const SimRuntimeState &runtime_state = ctx.singleton<SimRuntimeState>();
     init_stats.simulationTime = now;
     init_stats.numFlowDefs = flow_counters.numFlowDefs;
@@ -227,13 +235,18 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
             if (flow_entity == Entity::none()) {
                 continue;
             }
-            const FlowRuntimeState &runtime =
+            FlowRuntimeState &runtime =
                 ctx.get<FlowRuntimeState>(flow_entity);
             if (runtime.completed == 0) {
                 continue;
             }
-            init_buf.records[out_idx++] = runtime.completion_record;
+            init_buf.records[out_idx] = runtime.completion_record;
+            // 021-M2: same completion-time slot assignment as
+            // recordFlowCompletion so later updates land in place.
+            runtime.export_slot = out_idx;
+            out_idx += 1;
         }
+        flow_counters.exportCursor = out_idx;
     }
 
     StepPhaseTimes &init_phase_times = ctx.singleton<StepPhaseTimes>();

@@ -246,21 +246,19 @@ void Sim::snapshotDirtyPorts(Context &ctx)
 void Sim::reducePortCachedHints(Context &ctx)
 {
     SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
-    bool reset_drain = false;
-    if (runtime.cachedDrainPortID >= 0 &&
-        runtime.cachedDrainPortID < numPorts) {
-        Entity cached_port_e = portEntities[runtime.cachedDrainPortID];
-        if (cached_port_e != Entity::none()) {
-            if (ctx.get<PortTraceLast>(
-                    cached_port_e).was_dirty_at_alloc != 0) {
-                reset_drain = true;
-            }
-        }
-    }
-    if (reset_drain) {
-        runtime.cachedNextDrainTime = std::numeric_limits<Time>::max();
-        runtime.cachedDrainPortID = -1;
-    }
+    // 023-drainlatch 根因修复 (仅 drain; finish 保持原样):
+    // finish 是倒计时语义 (finishProgressState 每步递减, 到点重算),
+    // 无条件复位会杀死倒计时 (micro 20000 步不完赛实锤)。drain 每步
+    // 由 hint 重算、无倒计时、无消费者清理, 故只对 drain 无条件复位。
+    // 旧逻辑只在 cached 端口本步 dirty 时复位; 一旦 sim 被微小 dt 钉住,
+    // cached 端口永远收不到新事件 → 永不 dirty → 旧 tiny 值永不清零,
+    // 且 min-latch 只能调小不能调大 → dt 永久钉死
+    // (gpu69/70/71/83 四次独立复现; dtdiag3 体检实锤:
+    // 钉死端口 0 chunk + 双 clean, 即值为 stale 而非 live)。
+    // hint 每步对 dirty 端口重算、clean 端口在 alloc 入口清零,
+    // 故无条件重算即精确值, 不是近似。
+    runtime.cachedNextDrainTime = std::numeric_limits<Time>::max();
+    runtime.cachedDrainPortID = -1;
 
     for (int32_t port_id = 0; port_id < numPorts; port_id++) {
         Entity port_e = portEntities[port_id];

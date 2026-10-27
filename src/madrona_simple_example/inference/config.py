@@ -7,7 +7,7 @@ import numpy as np
 
 INFERENCE_CONFIG_LENGTH = 256
 MAX_INFERENCE_WORKERS = 16
-MAX_INFERENCE_WORKER_RANKS = 16
+MAX_INFERENCE_WORKER_RANKS = 128
 MAX_INFERENCE_BATCH = 128
 
 IC_ENABLED = 0
@@ -107,11 +107,10 @@ class InferenceConfig:
     # KV cache layout mode: 0 = GQA (per-head-block sharding across P/D
     # ranks, kv_partition_factor describes the shard layout) — the default
     # with unchanged legacy behavior; 1 = MLA (Multi-head Latent
-    # Attention, e.g. DeepSeek-V2/V3/R1): every P rank holds the same
-    # compressed latent, so prefill streams one full latent from P0 to
-    # each D rank of the routed worker (shards == d_width, point-to-point
-    # over the scaleout network). No divisibility requirements apply in
-    # MLA mode.
+    # Attention, e.g. DeepSeek-V2/V3/R1): DP128 语义下 022-KV单播 Form-C,
+    # 每请求只发 1 份全量 latent (shards == 1), 由算出它的 P rank 直达其
+    # assigned D rank (slot 取余打散, 无单点)。No divisibility requirements
+    # apply in MLA mode.
     kv_mode: int = 0
     # Merged MLA latent width per layer/token = kv_lora_rank +
     # qk_rope_head_dim (DeepSeek-V3: 512 + 64 = 576). Must be 0 in GQA
@@ -186,8 +185,8 @@ class InferenceConfig:
             if self.kv_partition_factor > 1:
                 raise ValueError(
                     "kv_partition_factor must be 0 or 1 in kv_mode=1 "
-                    "(mla); MLA streams one full latent to every D rank "
-                    "(shards == d_width) over the scaleout network")
+                    "(mla); MLA single-casts one full latent per request "
+                    "(shards == 1, 022 Form-C) over the scaleout network")
             return p_start, p_widths, d_start, d_widths
         kv_heads = self.num_kv_heads
         for name, widths in (("prefill", p_widths), ("decode", d_widths)):

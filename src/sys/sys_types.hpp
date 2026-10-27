@@ -16,14 +16,24 @@
 // Each ChakraNode occupies 51 ints with new 3-int attribute format
 #define INTS_PER_NODE 51
 
-#define NPU_NUM 32
+#define NPU_NUM 1024
 
 
 // #define MAX_CHAKRA_NODES_PER_NPU 9 * 9999
-#define MAX_CHAKRA_NODES_PER_NPU 193
+// 018-layer0-GPUfit: layer0 每 rank 10 节点 (6 COMP + 2 OUTCAST + 2 INCAST,
+// 见 gen_workload_1024_fanout_layer0.py)，取 32 留 3.2x 余量.
+// 派生维度 (npus_chakra_exec_entity/ChakraNodes/Template/ReadyState 等) 随宏自动跟随.
+// 注意: 本构建仅适配 layer0 (及行宽<=4096/节点<=32 的小负载); 019 全扇出
+// (610节点) / 002 训练 (193节点) 需回退本宏并重编 (见 018 收敛清单).
+#define MAX_CHAKRA_NODES_PER_NPU 1024
 #define MAX_CONCURRENT_CHAKRA_NODES_PER_NPU 3
 #define MAX_CHAKRA_NODP_NODES 5
-#define CHAKRA_NODES_DATA_LENGTH 10000 // aligned with tensor export size in mgr.cpp
+// 018-layer0-GPUfit: layer0 实测行宽 1581 (=10x51 主表 +51 哨兵 +4x255 side区),
+// 取 4096 (2.59x 余量, 2的幂; 经查无掩码依赖, 保持 2的幂对齐习惯).
+// 单表 1024x4096x4B = 16MB (原 512MB). 与 python chakra/config.py 同步.
+// 注意: 行宽>4096 的 workload (019 全扇出 93330 / 002 训练 9843) 在本构建下
+// load_chakra_workload 会响亮拒绝 (ValueError), 需回退重编 (见 018 收敛清单).
+#define CHAKRA_NODES_DATA_LENGTH 4096 // aligned with tensor export size in mgr.cpp
 // Define invalid dependency value
 #define INVALID_DEPENDENCY 2147483646
 #define NODE_NAME_LENGTH 20
@@ -51,16 +61,29 @@ enum class AttributeDataType : uint32_t
 // Check skip time every x frames
 #define CHECK_SKIPTIME_INTERVAL_PER_FRAME 100
 
-// Maximum number of flows per NPU
+// 018-layer0-GPUfit: layer0 每 NPU 并发 comm 槽位实测峰值<=4
+// (2 OUTCAST + 2 INCAST; inference 仅 reset 不占 slot, 见 inference_scheduler.cpp),
+// 取 16 留 4x 余量. NpuID.result/node_task_count 同宏自动跟随.
+// 超限回退到线性扫描 (语义不变), 溢出由 getNextFreeTask 复用兜底.
 #define MAX_COMM_TASK_PER_NPU 512
 
 // Maximum communication volume per comm node
-#define MAX_FLOW_NUM_PER_COMM_NODE 100
+#define MAX_FLOW_NUM_PER_COMM_NODE 128
 
 // Flow ID range interval per node
-#define FLOW_ID_MAX_LENGTH 10000
+#define FLOW_ID_MAX_LENGTH 65536
 
 // #define MAX_FLOW_NUM_ALL_COMM_NODE 9999
+
+// 019 扇出保真: 全局单例时间槽位, 与节点数解耦 (见 NextProcessTimes).
+#define NEXT_PROCESS_TIMES_CAP 4096
+
+// 019 扇出保真: 单节点最大对端数 (127 实测, 取 128).
+#define MAX_FANOUT_PEERS_PER_NODE 128
+// 019: 单 NPU 扇出节点数上限 (实测 244, 取 256).
+#define MAX_FANOUT_NODES_PER_NPU 256
+// 019: 单 NPU 并发 INCAST 等齐上限 (实测 122 全就绪, 取 256).
+#define MAX_INCAST_WAITS_PER_NPU 256
 
 namespace madsimple
 {
@@ -224,7 +247,10 @@ namespace madsimple
         COMP_NODE = 1,
         COMM_SEND_NODE = 2,
         COMM_RECV_NODE = 3,
-        COMM_COLL_NODE = 4
+        COMM_COLL_NODE = 4,
+        // 019 扇出保真: 1 节点扇出 127 流 (outcast) / 等齐 127 流 (incast).
+        OUTCAST_NODE = 5,
+        INCAST_NODE = 6
     };
 
     enum CollectiveCommType : uint64_t
@@ -651,7 +677,9 @@ namespace madsimple
 
     struct NextProcessTimes
     {
-        uint64_t times_abs[MAX_CHAKRA_NODES_PER_NPU];
+        // 019: 全局单例, 1024 NPU 共享. 稳态每 NPU 约 1 个在途 comp 事件;
+        // 与 MAX_CHAKRA_NODES_PER_NPU 解耦, 取 4096 (约 4x 余量) 防静默丢事件.
+        uint64_t times_abs[NEXT_PROCESS_TIMES_CAP];
     };
 
     struct NextProcessTimeE : public madrona::Archetype<NextProcessTimes>
@@ -868,6 +896,50 @@ namespace madsimple
         }
     };
 
+
+    struct RecvNodeFlag
+    {
+        uint64_t comm_src;
+        uint64_t comm_dst;
+        uint64_t flow_id;
+    };
+
+    // 019 扇出保真: 主表后 side 区解码出的 (peers, paras) 清单.
+    // COMP 节点不占此空间 (与 ChakraNode 分离, 避免撑大逐节点结构);
+    // rank/para 均 < 2^32, 用 uint32_t (单 NPU 约 256x1KB = 256KB).
+    struct ChakraFanoutEntry
+    {
+        uint32_t node_id = 0;
+        uint32_t count = 0;
+        uint32_t peers[MAX_FANOUT_PEERS_PER_NODE] {};
+        uint32_t paras[MAX_FANOUT_PEERS_PER_NODE] {};
+    };
+
+    struct ChakraFanouts
+    {
+        uint32_t num_entries = 0;
+        ChakraFanoutEntry entries[MAX_FANOUT_NODES_PER_NPU] {};
+    };
+
+    // 019: INCAST 等齐进度 (逐帧轮询 claimRecvDone, 127 位用 2x u64 记录).
+    // 不占 ProcessRecvComm_E 实体池 (122 并发 INCAST x 127 实体会打爆
+    // 256 池), 只占一个 ProcessingCommTasks 槽位 + 本表一条目.
+    struct IncastWaitEntry
+    {
+        uint32_t node_id = 0;
+        uint32_t total = 0;
+        uint32_t done = 0;
+        uint64_t claimed[2] {};
+        int32_t fanout_idx = -1;
+    };
+
+    struct IncastWaitList
+    {
+        uint32_t count = 0;
+        uint32_t overflow_count = 0;
+        IncastWaitEntry waits[MAX_INCAST_WAITS_PER_NPU] {};
+    };
+
     struct NpuNode : public madrona::Archetype<
                          NpuID,
                          ChakraNodes,
@@ -879,6 +951,8 @@ namespace madsimple
                          OneNPUFinishedFlag,
                          ChakraNodesForNoDP,
                          ChakraReadyState,
+                         ChakraFanouts,
+                         IncastWaitList,
                          NpuFlowInbox,
                          NpuFlowPool,
                          NpuFlowActiveList,
@@ -917,13 +991,6 @@ namespace madsimple
     // Entity archetype to store ring configuration parameters
     struct RingConfigEntity : public madrona::Archetype<RingParams>
     {
-    };
-
-    struct RecvNodeFlag
-    {
-        uint64_t comm_src;
-        uint64_t comm_dst;
-        uint64_t flow_id;
     };
 
 

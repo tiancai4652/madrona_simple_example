@@ -96,6 +96,21 @@ MADRONA_NO_INLINE void initPortScratch(
             c.events[i] = DelayedEvent {};
         }
     }
+    {
+        // GPU stack relief (2026-10-23): per-port frame scratch. Counts are
+        // reset at each phase entry; Entity arrays are none-initialized so
+        // any out-of-count read would fail loudly instead of aliasing id 0.
+        auto &c = ctx.get<PortFrameScratch>(port_entity);
+        zeroStruct(c);
+#pragma unroll 1
+        for (int32_t i = 0; i < MAX_TAGS_PER_PORT; i++) {
+            c.alloc.tags[i] = Entity::none();
+            c.alloc.live_tags[i] = Entity::none();
+            c.qos.tags[0][i] = Entity::none();
+            c.adv_tags[i] = Entity::none();
+            c.adv_pri_tags[0][i] = Entity::none();
+        }
+    }
 }
 
 MADRONA_NO_INLINE void initPortQueues(
@@ -226,6 +241,10 @@ int32_t Sim::createPort(Engine &ctx, NodeId node_id, int32_t port_idx, Bw port_b
     Entity port_entity = ctx.makeEntity<Port>();
 
     int32_t port_id = nextPortID++;
+    if (port_id >= MAX_TOPO_PORTS) {
+        FATAL("capacity exceeded: MAX_TOPO_PORTS=%d (need port %d) -- raise MAX_TOPO_PORTS",
+              (int)MAX_TOPO_PORTS, (int)port_id);
+    }
     portEntities[port_id] = port_entity;
     portToNode[port_id] = node_id;
     numPorts = nextPortID;

@@ -187,6 +187,69 @@ namespace madsimple::llm_system
         outNodeCount = validNodes;
     }
 
+    // 019 扇出保真: 行尾 side 区解码 (编码见 chakra/conversion.py).
+    // 布局: [nodeCount x 51 主表][51 零哨兵][side 条目...][零填充].
+    // 无扇出节点的旧文件没有哨兵/side, 本函数直接返回空表.
+    void parseChakraFanouts(const ChakraNodesData &chakraNodesData, int row,
+                            const ChakraNode parsedNodes[], int nodeCount,
+                            ChakraFanouts &fanouts, int intArrayLength)
+    {
+        int base = nodeCount * INTS_PER_NODE;
+        if (base + INTS_PER_NODE > intArrayLength)
+        {
+            return;
+        }
+        // 哨兵块必须全零 (否则是无 side 的旧文件, 主表解析器已消费到零填充).
+        for (int j = 0; j < INTS_PER_NODE; ++j)
+        {
+            if (chakraNodesData.data[row][base + j] != 0)
+            {
+                return;
+            }
+        }
+        base += INTS_PER_NODE;
+        for (int n = 0; n < nodeCount; ++n)
+        {
+            const ChakraNode &node = parsedNodes[n];
+            if (node.type != ChakraNodeType::OUTCAST_NODE &&
+                node.type != ChakraNodeType::INCAST_NODE)
+            {
+                continue;
+            }
+            if (fanouts.num_entries >= MAX_FANOUT_NODES_PER_NPU)
+            {
+                break;
+            }
+            if (base >= intArrayLength)
+            {
+                break;
+            }
+            int count = static_cast<int>(chakraNodesData.data[row][base]);
+            base += 1;
+            if (count <= 0 || count > MAX_FANOUT_PEERS_PER_NODE)
+            {
+                break;
+            }
+            if (base + 2 * count > intArrayLength)
+            {
+                break;
+            }
+            ChakraFanoutEntry &e = fanouts.entries[fanouts.num_entries++];
+            e.node_id = node.id;
+            e.count = static_cast<uint32_t>(count);
+            for (int k = 0; k < count; ++k)
+            {
+                e.peers[k] = chakraNodesData.data[row][base + k];
+            }
+            base += count;
+            for (int k = 0; k < count; ++k)
+            {
+                e.paras[k] = chakraNodesData.data[row][base + k];
+            }
+            base += count;
+        }
+    }
+
     int filterNoDependencyNodes(const ChakraNodes &chakraNodes, ChakraNode filteredNodes[],bool &is_none_node,int maxNodes)
     {
         int count = 0; // No-dependency node count

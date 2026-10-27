@@ -535,7 +535,7 @@ Time Sim::chooseDT(Context &ctx) const
     double pfc_pause_gap = std::numeric_limits<double>::max();
     double pfc_resume_gap = std::numeric_limits<double>::max();
     double system_gap = std::numeric_limits<double>::max();
-    const SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
+    SimRuntimeState &runtime = ctx.singleton<SimRuntimeState>();
 
     if (runtime.numDelayedEvents > 0 &&
         runtime.cachedNextDelayedGap > 1e-15 &&
@@ -652,6 +652,18 @@ Time Sim::chooseDT(Context &ctx) const
             pfc_resume_gap,
             dt);
     }
+    // 023-dtdiag: export the gap slate every step (GPU-safe mirror path).
+    runtime.dtGaps.delayed = delayed_gap;
+    runtime.dtGaps.pending = pending_gap;
+    runtime.dtGaps.finish = finish_gap;
+    runtime.dtGaps.drain = drain_gap;
+    runtime.dtGaps.backlog = backlog_gap;
+    runtime.dtGaps.pfc_pause = pfc_pause_gap;
+    runtime.dtGaps.pfc_resume = pfc_resume_gap;
+    runtime.dtGaps.system = system_gap;
+    runtime.dtGaps.chosen = dt;
+    runtime.dtGaps.handoff = runtime.inferenceHandoffPending;
+    runtime.dtGaps.drain_port = runtime.cachedDrainPortID;
     return dt;
 }
 
