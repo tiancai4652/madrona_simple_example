@@ -8,9 +8,10 @@ from .conversion import folder_to_int_array
 
 
 MAX_NPUS = 1024
-# 018-layer0-GPUfit: layer0 实测行宽 1581, 取 4096 (与 C++ CHAKRA_NODES_DATA_LENGTH
+# 036-需求x (layer0): 实测行宽 1581, 取 4096 (与 C++ CHAKRA_NODES_DATA_LENGTH
 # 同步, 必须相等否则 tensor 形状错配; 见 src/sys/sys_types.hpp).
-# 行宽>4096 的 workload 在本构建下响亮拒绝 (ValueError).
+# 036 只读共享: 4P+4D 复用同一份 128rank 模板, 输入表仅需 256 唯一行 (P 0..127 + D 128..255).
+CHAKRA_DATA_ROWS = 256
 CHAKRA_NODES_DATA_LENGTH = 4096
 PROCESS_PARAMS_LENGTH = 1000
 
@@ -80,8 +81,19 @@ def load_chakra_workload(workload, npu_count):
             f"workload has {len(rows)} NPU rows, expected {npu_count}")
 
     encoded = np.zeros(
-        (MAX_NPUS, CHAKRA_NODES_DATA_LENGTH), dtype=np.int32)
+        (CHAKRA_DATA_ROWS, CHAKRA_NODES_DATA_LENGTH), dtype=np.int32)
+    # 036 只读共享: npu_count > 256 (如 1024 卡 4P+4D) 时, 仅装填 P1 (0..127)
+    # 与 D1 (512..639 -> 槽 128..255) 两份 128-rank 模板; C++ 侧按实例偏移还原.
     for npu_id, row in enumerate(rows):
+        if npu_count > CHAKRA_DATA_ROWS:
+            if npu_id < 128:
+                slot = npu_id
+            elif 512 <= npu_id < 640:
+                slot = 128 + (npu_id - 512)
+            else:
+                continue
+        else:
+            slot = npu_id
         row_array = np.asarray(row, dtype=np.int64).reshape(-1)
         if row_array.size > CHAKRA_NODES_DATA_LENGTH:
             raise ValueError(
@@ -90,7 +102,7 @@ def load_chakra_workload(workload, npu_count):
         if np.any(row_array < np.iinfo(np.int32).min) or \
                 np.any(row_array > np.iinfo(np.uint32).max):
             raise ValueError(f"NPU {npu_id} contains an out-of-range value")
-        encoded[npu_id, :row_array.size] = row_array.astype(
+        encoded[slot, :row_array.size] = row_array.astype(
             np.uint32, copy=False).view(np.int32)
     return encoded
 

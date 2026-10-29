@@ -210,16 +210,28 @@ MADRONA_NO_INLINE bool initializeInference(
         runtime.d_workers[i].rank_count = d_spans[i].rank_count;
     }
 
-    // Preserve the parsed workload exactly once, then park inference ranks.
-    for (int32_t i = 0; i < ctx.data().numNpus; i++) {
+    // Preserve the parsed workload in the 256-slot shared template singleton,
+    // then park inference ranks.
+    SharedChakraTemplates &shared_templ = ctx.singleton<SharedChakraTemplates>();
+    const int32_t npu_total = ctx.data().numNpus;
+    for (int32_t i = 0; i < npu_total; i++) {
         const madrona::Entity entity = ctx.data().npuEntities[i];
         if (entity == madrona::Entity::none()) {
             continue;
         }
         ChakraNodes &active = ctx.get<ChakraNodes>(entity);
-        ChakraTemplateNodes &templ = ctx.get<ChakraTemplateNodes>(entity);
+        int32_t t_slot = -1;
+        if (npu_total <= CHAKRA_DATA_ROWS) {
+            t_slot = i;
+        } else if (i < 128) {
+            t_slot = i;
+        } else if (i >= 512 && i < 640) {
+            t_slot = 128 + (i - 512);
+        }
         for (int32_t n = 0; n < MAX_CHAKRA_NODES_PER_NPU; n++) {
-            templ.nodes[n] = active.nodes[n];
+            if (t_slot >= 0) {
+                shared_templ.nodes[t_slot][n] = active.nodes[n];
+            }
             active.nodes[n].type = ChakraNodeType::None;
         }
         // B1: parked ranks have no live nodes; the ready set is rebuilt by

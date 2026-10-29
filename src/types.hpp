@@ -132,7 +132,7 @@ using NodeId = int32_t;
 // Keep these together so scale changes such as d64 -> d256 can be adjusted in
 // one place. Topology / flow-global limits live in sim.hpp; these constants
 // cover exported buffers and per-port local queues/components declared below.
-constexpr int32_t MAX_FLOW_COMPLETIONS = 1048576; // 018-layer0-GPUfit16: 4M->1M（省144MB；export超量截断，sim已解耦不受影响）。
+constexpr int32_t MAX_FLOW_COMPLETIONS = 262144; // 036: 1M->256K（省36MB/世界；export超量截断，sim已解耦不受影响）。
 // full1024 layer0 serving总completion超677888（export满后旧代码early-return跳过markSendDone等仿真记账，致D侧干净死锁）。
 // 记账已与export解耦（sim_systems.cpp），此处只定export镜像容量（单条48B，4M=192MB，可承受）。
 // 若未来总completion超4M，export按sim_tasks钳位截断但仿真不受影响（fail-soft）。
@@ -140,14 +140,14 @@ constexpr int32_t PFC_MAX_PRIORITY = 1;
 
 // Must be >= the maximum number of flows/events per hot port so buffer chunks
 // and per-port queues do not silently drop same-timestamp fan-in.
-constexpr int32_t MAX_CHUNK_WEIGHTS = 512; // 018-layer0-GPUfit27: 1024->512（给chunks翻倍腾显存；gpu64全程weights pmax<=394，余量30%；若FATAL响亮回退）。
+constexpr int32_t MAX_CHUNK_WEIGHTS = 256; // 036: 512->256（020/022/036链化+Form-C全程pmax<=194，余量32%；省PortBuffer一半）。
 // burst下首chunk backlog超512（incast 127×KV多层叠加；旧FATAL打印值被并发冲花，
 // 但outbox同款已证“raise即过=真burst”）。BufferChunk 8KB->32KB（+2.3GB），总显存~40GB仍fit。
 // 超限响亮FATAL，绝不静默。
 // 018-layer0-GPUfit: inst128实测chunks零使用（HWM未触发），KV burst未知；128→32
 // 降单端口PortBuffer 8MB→2MB（GPU显存关键路径）。超限由带宽侧FATAL响亮报错，
 // 绝不静默覆盖（见 materializeAllocPortBuffer）。
-constexpr int32_t MAX_BUFFER_CHUNKS = 128; // 021-fit28: 256->128（链化后全程pmax<=26，5x余量；省PortBuffer约3.2GB/2.1MB->1.05MB每站）。超限响亮FATAL。
+constexpr int32_t MAX_BUFFER_CHUNKS = 32; // 036: 128->32（链化+Form-C全程pmax<=7，4.5x余量；单端口PortBuffer 1.05MB->131KB，省2.7MB/站）。超限响亮FATAL。
 constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 
 // Per-port cleanup / completion / event queues. These are local fixed-size
@@ -160,31 +160,31 @@ constexpr int32_t MAX_PAUSED_UPSTREAMS = 64;
 // pushDelayedEvent now FAILS loudly on overflow (error_code=6), so an
 // underestimated capacity in a future workload surfaces as a failed run
 // rather than wrong results. Per-experiment tuning stays compile-time.
-constexpr int32_t MAX_PORT_CLEANUP = 1024;
-constexpr int32_t MAX_PORT_OUTBOX = 8192; // 018-layer0-GPUfit20: 4096->8192（16384装不下init OOM；8192大概率够用，不够再FATAL加）。
+constexpr int32_t MAX_PORT_CLEANUP = 512;
+constexpr int32_t MAX_PORT_OUTBOX = 2048; // 036: 8192->2048（链化+Form-C单步单站最多~256事件，8x余量；786KB->196KB/端口）。超限响亮FATAL。
 // burst（896 NPU同批完成）下热端口单步Arrival/BwUpdate事件超2048（step911三worker同爆）。
 // +590KB/端口（196KB->786KB ×3072=+1.8GB device）。超限响亮FATAL，绝不静默。
-constexpr int32_t MAX_PORT_TAG_LOOKUP = 8192; // 021-fit28: 与 MAX_TAGS_PER_PORT 同步回落 (掩码2的幂，8192合法；省0.77GB)。
-constexpr int32_t MAX_PORT_DELAYED_EVENTS = 2048; // 021-fit28: 4096->2048（链化后全程pmax<=252，8x余量；省0.8GB；超限静默丢但error 6熔断响亮）。
+constexpr int32_t MAX_PORT_TAG_LOOKUP = 2048; // 036: 8192->2048（pmax<=194，10x负载余量，2的幂掩码合法；128KB->32KB/端口）。
+constexpr int32_t MAX_PORT_DELAYED_EVENTS = 512; // 036: 2048->512（链化+Form-C全程pmax<=192，2.6x余量；196KB->49KB/端口；超限error 6响亮）。
 // 018-layer0: layer0 full1024 死于 step387 (sim 348ms)：单端口并发流超 1024（incast 多波次 + KV 128 流叠加），
 // createTagOnPort 报 capacity exceeded MAX_TAGS_PER_PORT=1024 on port 256。1024→4096。
 // 018-layer0-GPUfit9: D-finish burst全局14万active tags（digest step1200），热端口超4096（step1041/2124两爆）。
 // 4096->8192（tag Entity数组7×32KB×3072=+350MB，scratch tags/live +100MB，lookup +200MB，总+~0.7GB）。
 // 超限响亮FATAL，绝不静默。
-constexpr int32_t MAX_TAGS_PER_PORT = 8192; // 021-fit28: 16384->8192（链化后全程pmax<=198，40x余量；5858那次是无链版不适用；省Tag系约2.0GB，FrameScratch点名册同步减半）。超限响亮FATAL。
+constexpr int32_t MAX_TAGS_PER_PORT = 1024; // 036: 8192->1024（链化+Form-C全程pmax<=194，5.2x余量；Tag系与FrameScratch点名册缩8倍）。超限响亮FATAL。
 // Do not create FlowTag entities inside the single-threaded GPU initWorlds
 // kernel. Tags are allocated lazily by createTagOnPort and recycled through
 // PortTagPool after first use.
 constexpr int32_t INITIAL_TAGS_PER_PORT = 0;
-constexpr int32_t MAX_TAGS_PER_INGRESS = 8192; // 018-layer0-B: retry1 死于 step388 flushIngressTagLinks IngressTagList overflow (1024)；同族三墙打包升 4096
+constexpr int32_t MAX_TAGS_PER_INGRESS = 1024; // 036: 8192->1024（全程pmax<=194，5.2x余量；DIRTY_MARKS自动跟随）。
 // 018-layer0-GPUfit10: D-finish burst再爆 (step2126, 单FATAL干净打印)。4096->8192（+100MB，可忽略；DIRTY_MARKS派生自动跟随）。
-constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 4096; // 018-layer0-B: 同族第二墙 (incast+KV 叠加 arrival burst)，2048→4096；DELAYED_EVENTS 保持 8192 不动
-constexpr int32_t MAX_PORT_INBOX_BWUPD = 2048;
-constexpr int32_t MAX_PORT_INBOX_PFC = 512;
-constexpr int32_t MAX_PORT_CREATE = 4096; // 018-layer0-B: 同族第三墙 (arrival/bwupdate tag create)，2048→4096；MAX_PORT_INGRESS_LINKS 派生自动跟随
+constexpr int32_t MAX_PORT_INBOX_ARRIVAL = 1024; // 036: 4096->1024（单步单站<=194，5x余量）。
+constexpr int32_t MAX_PORT_INBOX_BWUPD = 1024;
+constexpr int32_t MAX_PORT_INBOX_PFC = 256;
+constexpr int32_t MAX_PORT_CREATE = 1024; // 036: 4096->1024（MAX_PORT_INGRESS_LINKS派生自动跟随）。
 constexpr int32_t MAX_PORT_INGRESS_LINKS = MAX_PORT_CREATE;
-constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS; // 派生宏自动跟随 INGRESS→4096，无需手动改 (已确认)
-constexpr int32_t MAX_PORT_COMPLETE = 1024;
+constexpr int32_t MAX_PORT_DIRTY_MARKS = MAX_TAGS_PER_INGRESS; // 派生宏自动跟随 INGRESS，无需手动改
+constexpr int32_t MAX_PORT_COMPLETE = 512;
 constexpr int32_t MAX_PORT_INGRESS_UNLINKS = MAX_PORT_CLEANUP;
 // Time-skip event queue (SystemEventQueue) capacity. Raised from 1024 so the
 // sys-layer COMP/COMM scheduling events can't silently fill the queue and be
@@ -213,7 +213,7 @@ constexpr uint32_t MAX_NPUS = 1024;
 // 本宏同时界定 NpuFlowInbox/Active/Finished/KvCollect/Schedule/CreateDraft +
 // NpuFlowPool 预分配 FlowMeta 实体数. 溢出响亮报 error_code 4 / FATAL.
 // 注意: 019 全扇出 (15494 瞬时) 在本构建下会响亮溢出, 需回退重编.
-constexpr uint32_t MAX_FLOWS_PER_NPU = 2048; // 018-layer0-GPUfit25: 8192->2048（分流后每NPU KV~128+data254，2048=4x余量；省~5GB。若FATAL则回调4096）。
+constexpr uint32_t MAX_FLOWS_PER_NPU = 512; // 036: 2048->512（链化+Form-C每NPU同拍1 OUTCAST=127流 + <=4 KV流，512留3.9x余量；FlowMeta池2M->512K，省75%）。
 
 // Because NPU-owned FlowMeta entities are recycled through NpuFlowPool, the
 // per-entity completion_record does not survive slot reuse. This bounded
@@ -394,7 +394,7 @@ struct NpuFlowPairState {
 // 取 32 留 8x 余量 (原 256, 8x 内存削减; ProcessComm_E 38KB/行, 主因 NpuID 37KB).
 // 实体 262144->32768: NpuID 列 9.9GB->1.2GB + TaskFlows 列 1.9GB->0.24GB + 排序暂存 8GB->1GB.
 // 耗尽响亮报 error_code 7 (llm_system.cpp 三处 take + retire 路径), 绝不静默.
-constexpr uint32_t MAX_COMM_ENTITIES_PER_NPU = 8; // 018-layer0-GPUfit16: 16->8（layer0并发<=4，仍2x余量；省0.5GB）。耗尽响亮error 7。
+constexpr uint32_t MAX_COMM_ENTITIES_PER_NPU = 4; // 036: 8->4（stream补链后每NPU并发OUTCAST=1，4x余量；省一半ProcessComm_E实体与排序暂存）。耗尽响亮error 7。
 
 struct NpuCommEntityPool {
     madrona::Entity comm_free[MAX_COMM_ENTITIES_PER_NPU] {};

@@ -155,7 +155,6 @@ MADRONA_NO_INLINE void inferenceResetLocalStepSystem(
     Engine &ctx,
     NpuID &npu,
     ChakraNodes &chakraNodes,
-    ChakraTemplateNodes &templ,
     HardwareResource &hardwareResource,
     ProcessingCompTask &processingCompTask,
     ProcessingCommTasks &processingCommTasks,
@@ -165,7 +164,7 @@ MADRONA_NO_INLINE void inferenceResetLocalStepSystem(
     InferenceNpuExecution &inferenceExecution)
 {
     SIM_PROBE_RECORD("inferenceResetLocal");
-    inferenceResetLocal(ctx, npu.value, chakraNodes, templ, hardwareResource,
+    inferenceResetLocal(ctx, npu.value, chakraNodes, hardwareResource,
         processingCompTask, processingCommTasks, oneNPUFinishedFlag,
         chakraNodesForNoDP, chakraReadyState, inferenceExecution);
 }
@@ -1154,7 +1153,7 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr,
     // resetNpuForReplay calls inside the scheduling decision.
     auto n0reset = builder.addToGraph<ParallelForNode<Engine,
         inferenceResetLocalStepSystem,
-        NpuID, ChakraNodes, ChakraTemplateNodes, HardwareResource,
+        NpuID, ChakraNodes, HardwareResource,
         ProcessingCompTask, ProcessingCommTasks, OneNPUFinishedFlag,
         ChakraNodesForNoDP, ChakraReadyState, InferenceNpuExecution>>(
             {n0statspre});

@@ -20,19 +20,17 @@
 
 
 // #define MAX_CHAKRA_NODES_PER_NPU 9 * 9999
-// 018-layer0-GPUfit: layer0 每 rank 10 节点 (6 COMP + 2 OUTCAST + 2 INCAST,
-// 见 gen_workload_1024_fanout_layer0.py)，取 32 留 3.2x 余量.
-// 派生维度 (npus_chakra_exec_entity/ChakraNodes/Template/ReadyState 等) 随宏自动跟随.
-// 注意: 本构建仅适配 layer0 (及行宽<=4096/节点<=32 的小负载); 019 全扇出
-// (610节点) / 002 训练 (193节点) 需回退本宏并重编 (见 018 收敛清单).
+// 036-需求x (layer0): 每 rank 10 节点 (6 COMP + 2 OUTCAST + 2 INCAST),
+// 取 32 留 3.2x 余量. 派生维度 (npus_chakra_exec_entity/ChakraNodes/
+// SharedChakraTemplates/ReadyState 等) 随宏自动跟随.
 #define MAX_CHAKRA_NODES_PER_NPU 1024
 #define MAX_CONCURRENT_CHAKRA_NODES_PER_NPU 3
 #define MAX_CHAKRA_NODP_NODES 5
-// 018-layer0-GPUfit: layer0 实测行宽 1581 (=10x51 主表 +51 哨兵 +4x255 side区),
-// 取 4096 (2.59x 余量, 2的幂; 经查无掩码依赖, 保持 2的幂对齐习惯).
-// 单表 1024x4096x4B = 16MB (原 512MB). 与 python chakra/config.py 同步.
-// 注意: 行宽>4096 的 workload (019 全扇出 93330 / 002 训练 9843) 在本构建下
-// load_chakra_workload 会响亮拒绝 (ValueError), 需回退重编 (见 018 收敛清单).
+// 036-需求x (layer0): 实测行宽 1581 ints (=10x51 主表 +51 零哨兵 +4x255 side 区),
+// 取 4096 (2 的幂, 16KB/rank).
+// 036 只读共享: 4P+4D 共享 256 唯一行 (P 0..127 + D 128..255), 单表仅 4MB.
+// 与 python chakra/config.py 同步.
+#define CHAKRA_DATA_ROWS 256
 #define CHAKRA_NODES_DATA_LENGTH 4096 // aligned with tensor export size in mgr.cpp
 // Define invalid dependency value
 #define INVALID_DEPENDENCY 2147483646
@@ -80,10 +78,10 @@ enum class AttributeDataType : uint32_t
 
 // 019 扇出保真: 单节点最大对端数 (127 实测, 取 128).
 #define MAX_FANOUT_PEERS_PER_NODE 128
-// 019: 单 NPU 扇出节点数上限 (实测 244, 取 256).
-#define MAX_FANOUT_NODES_PER_NPU 256
-// 019: 单 NPU 并发 INCAST 等齐上限 (实测 122 全就绪, 取 256).
-#define MAX_INCAST_WAITS_PER_NPU 256
+// 036 (layer0): 单 NPU 扇出节点数上限 (实测 4 = 2 OUTCAST + 2 INCAST, 取 16).
+#define MAX_FANOUT_NODES_PER_NPU 16
+// 036 (layer0): 单 NPU 并发 INCAST 等齐上限 (实测 2, 取 16).
+#define MAX_INCAST_WAITS_PER_NPU 16
 
 namespace madsimple
 {
@@ -586,7 +584,7 @@ namespace madsimple
 
     struct ChakraNodesData
     {
-        uint32_t data[NPU_NUM][CHAKRA_NODES_DATA_LENGTH];
+        uint32_t data[CHAKRA_DATA_ROWS][CHAKRA_NODES_DATA_LENGTH];
     };
 
     // Compatibility layout consumed by the migrated system layer. Python
@@ -631,9 +629,11 @@ namespace madsimple
         ChakraNode nodes[MAX_CHAKRA_NODES_PER_NPU];
     };
 
-    struct ChakraTemplateNodes
+    // 036 只读共享: 4P+4D 实例复用 256 份只读模板 (128 P + 128 D),
+    // 单例存放, 省去每 NPU 独立 ChakraTemplateNodes 组件 (约 115MB/世界).
+    struct SharedChakraTemplates
     {
-        ChakraNode nodes[MAX_CHAKRA_NODES_PER_NPU];
+        ChakraNode nodes[CHAKRA_DATA_ROWS][MAX_CHAKRA_NODES_PER_NPU];
     };
 
     struct ChakraNodesForNoDP
@@ -943,7 +943,6 @@ namespace madsimple
     struct NpuNode : public madrona::Archetype<
                          NpuID,
                          ChakraNodes,
-                         ChakraTemplateNodes,
                          InferenceNpuExecution,
                          HardwareResource,
                          ProcessingCompTask,

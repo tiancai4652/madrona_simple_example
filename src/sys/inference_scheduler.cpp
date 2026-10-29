@@ -60,7 +60,7 @@ void startInferenceWork(Engine &ctx, InferenceWorker &worker,
 // only when this NPU appears in this frame's roster. The flow-id base is
 // taken from this NPU's own id, exactly like the legacy entity lookup.
 void inferenceResetLocal(Engine &ctx, uint32_t npu_id,
-                         ChakraNodes &active, ChakraTemplateNodes &templ,
+                         ChakraNodes &active,
                          HardwareResource &hardwareResource,
                          ProcessingCompTask &processingCompTask,
                          ProcessingCommTasks &comm,
@@ -87,8 +87,42 @@ void inferenceResetLocal(Engine &ctx, uint32_t npu_id,
             continue;
         }
 
+        const SharedChakraTemplates &shared_templ =
+            ctx.singleton<SharedChakraTemplates>();
+        const int32_t npu_total = ctx.data().numNpus;
+        int32_t t_slot = static_cast<int32_t>(npu_id);
+        uint32_t rank_off = 0;
+        uint32_t flow_off = 0;
+        if (npu_total > CHAKRA_DATA_ROWS) {
+            int32_t inst = static_cast<int32_t>(npu_id / 128);
+            int32_t local_r = static_cast<int32_t>(npu_id % 128);
+            if (npu_id < 512) {
+                t_slot = local_r;
+                rank_off = static_cast<uint32_t>(inst * 128);
+                flow_off = static_cast<uint32_t>(inst * 100000000u);
+            } else {
+                t_slot = 128 + local_r;
+                rank_off = static_cast<uint32_t>((inst - 4) * 128);
+                flow_off = static_cast<uint32_t>((inst - 4) * 100000000u);
+            }
+        }
         for (int32_t n = 0; n < MAX_CHAKRA_NODES_PER_NPU; n++) {
-            active.nodes[n] = templ.nodes[n];
+            ChakraNode nd = shared_templ.nodes[t_slot][n];
+            if ((rank_off != 0 || flow_off != 0) &&
+                nd.type != ChakraNodeType::None) {
+                if (nd.comm_src != 0 || nd.type == ChakraNodeType::OUTCAST_NODE ||
+                    nd.type == ChakraNodeType::COMM_SEND_NODE) {
+                    nd.comm_src += rank_off;
+                }
+                if (nd.comm_dst != 0 || nd.type == ChakraNodeType::INCAST_NODE ||
+                    nd.type == ChakraNodeType::COMM_RECV_NODE) {
+                    nd.comm_dst += rank_off;
+                }
+                if (nd.comm_para != 0) {
+                    nd.comm_para += flow_off;
+                }
+            }
+            active.nodes[n] = nd;
         }
         // B1: the restored template changes the node graph, so rebuild the
         // incremental ready set for this generation (once per NPU start).

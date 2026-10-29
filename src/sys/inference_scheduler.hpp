@@ -22,7 +22,7 @@ MADRONA_NO_INLINE void scheduleInferenceDecode(
 // legacy decision path did.
 MADRONA_NO_INLINE void inferenceResetLocal(
     Engine &ctx, uint32_t npu_id, ChakraNodes &chakraNodes,
-    ChakraTemplateNodes &templ, HardwareResource &hardwareResource,
+    HardwareResource &hardwareResource,
     ProcessingCompTask &processingCompTask,
     ProcessingCommTasks &processingCommTasks,
     OneNPUFinishedFlag &oneNPUFinishedFlag, ChakraNodesForNoDP &noDP,

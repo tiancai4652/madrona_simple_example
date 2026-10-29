@@ -681,7 +681,7 @@ Tensor Manager::chakraNodesDataTensor() const
 {
     return impl_->exportTensor(ExportID::ChakraNodesData,
         TensorElementType::Int32,
-        {impl_->cfg.numWorlds, NPU_NUM, CHAKRA_NODES_DATA_LENGTH});
+        {impl_->cfg.numWorlds, CHAKRA_DATA_ROWS, CHAKRA_NODES_DATA_LENGTH});
 }
 
 Tensor Manager::processParamsTensor() const

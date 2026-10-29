@@ -41,7 +41,7 @@ namespace madsimple::llm_system
     {
         registry.registerComponent<NpuID>();
         registry.registerComponent<ChakraNodes>();
-        registry.registerComponent<ChakraTemplateNodes>();
+        registry.registerSingleton<SharedChakraTemplates>();
         registry.registerComponent<InferenceNpuExecution>();
         registry.registerComponent<HardwareResource>();
         registry.registerComponent<ProcessingCompTask>();
@@ -129,6 +129,7 @@ namespace madsimple::llm_system
         Entity e = ctx.makeEntity<CheckNpuFinishE>();
         ctx.get<CheckNpuFinishFlag>(e) = CheckNpuFinishFlag();
         ctx.data().check_npu_finish_entity = e;
+        zeroStruct(ctx.singleton<SharedChakraTemplates>());
 
         for (size_t i = 0; i < NPU_NUM; i++)
         {
@@ -176,7 +177,43 @@ namespace madsimple::llm_system
             ctx.get<NpuID>(npuNode).test_dim = false;
             ctx.get<NpuID>(npuNode).test_collective_comm_ring = false;
             int nodeCount = 0;
-            parseChakraNodes(chakra_nodes_data, i, ctx.get<ChakraNodes>(npuNode).nodes, nodeCount);
+            // 036 只读共享: npu_nums > CHAKRA_DATA_ROWS 时 (如 1024 卡 4P+4D),
+            // P(0..511) 复用槽 0..127, D(512..1023) 复用槽 128..255, 并按实例号 inst
+            // 加上 rank_off = inst*128 与 flow_off = inst*100M, 结果与独立 1024 行完全一致.
+            int src_row = static_cast<int>(i);
+            uint32_t rank_off = 0;
+            uint32_t flow_off = 0;
+            if (npu_nums > CHAKRA_DATA_ROWS) {
+                int inst = static_cast<int>(i / 128);
+                int local_r = static_cast<int>(i % 128);
+                if (i < 512) {
+                    src_row = local_r;
+                    rank_off = static_cast<uint32_t>(inst * 128);
+                    flow_off = static_cast<uint32_t>(inst * 100000000u);
+                } else {
+                    src_row = 128 + local_r;
+                    rank_off = static_cast<uint32_t>((inst - 4) * 128);
+                    flow_off = static_cast<uint32_t>((inst - 4) * 100000000u);
+                }
+            }
+            parseChakraNodes(chakra_nodes_data, src_row, ctx.get<ChakraNodes>(npuNode).nodes, nodeCount);
+            if (rank_off != 0 || flow_off != 0) {
+                auto &cn = ctx.get<ChakraNodes>(npuNode);
+                for (int32_t ni = 0; ni < nodeCount; ni++) {
+                    ChakraNode &nd = cn.nodes[ni];
+                    if (nd.comm_src != 0 || nd.type == ChakraNodeType::OUTCAST_NODE ||
+                        nd.type == ChakraNodeType::COMM_SEND_NODE) {
+                        nd.comm_src += rank_off;
+                    }
+                    if (nd.comm_dst != 0 || nd.type == ChakraNodeType::INCAST_NODE ||
+                        nd.type == ChakraNodeType::COMM_RECV_NODE) {
+                        nd.comm_dst += rank_off;
+                    }
+                    if (nd.comm_para != 0) {
+                        nd.comm_para += flow_off;
+                    }
+                }
+            }
             // B1: build the incremental ready set once at parse time.
             buildChakraReadyState(ctx.get<ChakraNodes>(npuNode),
                                    ctx.get<ChakraReadyState>(npuNode));
@@ -186,8 +223,17 @@ namespace madsimple::llm_system
             {
                 auto &c = ctx.get<ChakraFanouts>(npuNode);
                 zeroStruct(c);
-                parseChakraFanouts(chakra_nodes_data, i,
+                parseChakraFanouts(chakra_nodes_data, src_row,
                     ctx.get<ChakraNodes>(npuNode).nodes, nodeCount, c);
+                if (rank_off != 0 || flow_off != 0) {
+                    for (uint32_t ei = 0; ei < c.num_entries; ei++) {
+                        ChakraFanoutEntry &fe = c.entries[ei];
+                        for (uint32_t k = 0; k < fe.count; k++) {
+                            fe.peers[k] += rank_off;
+                            fe.paras[k] += flow_off;
+                        }
+                    }
+                }
                 // 强不变式: side 条目数必须等于主表扇出节点数 (防错位解析).
                 {
                     int fanout_nodes = 0;
@@ -206,14 +252,6 @@ namespace madsimple::llm_system
                 }
             }
             ctx.get<IncastWaitList>(npuNode) = IncastWaitList {};
-            {
-                auto &c = ctx.get<ChakraTemplateNodes>(npuNode);
-                zeroStruct(c);
-#pragma unroll 1
-                for (int32_t i = 0; i < MAX_CHAKRA_NODES_PER_NPU; i++) {
-                    c.nodes[i] = ChakraNode {};
-                }
-            }
             ctx.get<InferenceNpuExecution>(npuNode) = InferenceNpuExecution {};
             
             // Save nodeCount immediately
