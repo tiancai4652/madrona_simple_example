@@ -620,8 +620,55 @@ Time Sim::chooseDT(Context &ctx) const
             }
         }
     }
+    // 048: 到达驱动跳表修复 (047 定案: COMM 创建帧无流空窗 + checkFlow
+    // 滞后一帧, chooseDT 取 system_gap 一帧跳到 t2, 首批 P 完成被推迟
+    // t2 + 41ms). 到达事件已移出 SystemEventQueue (见 initializeInference),
+    // system_gap 现只含 COMP/唤醒事件; 到达改从 runtime.next_arrival 直读:
+    //  - 在飞 (任一 P/D worker 忙/有在飞/有未搬完 KV) + 真空窗 (流/定时器
+    //    gap 全空, dt 仍为 INF/哨兵) → 不跳, 走已有回落 dt=0.001
+    //    (与 wave1 过渡帧行为一致);
+    //  - 其余情况 (有 pending 工作, 或真空闲) → 到达照常参与取 min,
+    //    到点精确停 (不 overshoot), 空闲巨跳保留.
+    // 非推理 run / wave1 (无未来到达): 与旧行为逐位一致.
+    bool inference_inflight = false;
+    bool arrival_pending = false;
+    Time arrival_gap = timerInactiveSentinel();
+    {
+        const InferenceRuntime &irt = ctx.singleton<InferenceRuntime>();
+        if (irt.initialized != 0) {
+            for (int32_t w = 0; w < MAX_INFERENCE_WORKERS; w++) {
+                const InferenceWorker &pw = irt.p_workers[w];
+                const InferenceWorker &dw = irt.d_workers[w];
+                if (pw.busy != 0 || pw.active_count != 0 ||
+                    pw.pending_kv_tokens != 0 ||
+                    dw.busy != 0 || dw.active_count != 0 ||
+                    dw.pending_kv_tokens != 0) {
+                    inference_inflight = true;
+                    break;
+                }
+            }
+            if (!inference_inflight && irt.inflight_kv != 0) {
+                inference_inflight = true;
+            }
+            if (irt.next_arrival < irt.num_requests) {
+                uint64_t arr_ns = static_cast<uint64_t>(
+                    irt.requests[irt.next_arrival].arrival_ns);
+                if (arr_ns > now_ns) {
+                    arrival_pending = true;
+                    arrival_gap = (Time)(arr_ns - now_ns) / 1000000.0;
+                }
+            }
+        }
+    }
     if (system_gap < timerInactiveSentinel()) {
         dt = std::min(dt, system_gap);
+    }
+    if (arrival_pending) {
+        bool nothing_pending =
+            (dt > 1e12 || dt == timerInactiveSentinel());
+        if (!(inference_inflight && nothing_pending)) {
+            dt = std::min(dt, arrival_gap);
+        }
     }
 
     // 025: 瞬时排空的 delayed 队列不得触发到达巨跳. 消费在 chooseDT
@@ -631,8 +678,14 @@ Time Sim::chooseDT(Context &ctx) const
     // 0.001ms (handoff 前例) 跨过瞬时窗口; 窗口仅 8 帧, 且触发要求
     // dt>100ms 的到达驱动巨跳 —— 单波/solo 无到达事件、022 到达间隔
     // 仅 5ms, 老 run 在构造上 bit-identical.
-    if (dt > 100.0 && system_gap < timerInactiveSentinel() &&
-        system_gap <= dt + 1e-9 &&
+    // 025 + 048: arrival_gap 已移出 system_gap (见上), 守卫触发条件同步
+    // 把到达加回来 (含义不变: dt 由远期到达驱动 + 延迟窗口活动).
+    bool arrival_driven_jump =
+        arrival_pending && arrival_gap <= dt + 1e-9;
+    bool system_driven_jump =
+        system_gap < timerInactiveSentinel() &&
+        system_gap <= dt + 1e-9;
+    if (dt > 100.0 && (arrival_driven_jump || system_driven_jump) &&
         runtime.delayedActiveWindow > 0) {
         dt = 0.001;
     }

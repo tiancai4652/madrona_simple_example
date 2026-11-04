@@ -198,8 +198,11 @@ MADRONA_NO_INLINE bool initializeInference(
             }
         }
         previous_arrival = request.arrival_ns;
-        net_sys_interface::addEvent(ctx,
-            static_cast<uint64_t>(request.arrival_ns));
+        // 048: 到达不再进 SystemEventQueue (原先的 addEvent 是到达驱动跳表
+        // 的 jump 目标: COMM 创建帧无流空窗时 chooseDT 取 t2 一帧跳过).
+        // 到达改由 chooseDT 直接读 runtime.next_arrival (闹钟角色保留,
+        // 空闲照跳; 在飞+空窗时不再当步长). 到达消费本就按下标
+        // (next_arrival/arrival_ns <= now), 不依赖队列.
     }
     for (int32_t i = 0; i < np; i++) {
         runtime.p_workers[i].rank_start = p_spans[i].rank_start;
