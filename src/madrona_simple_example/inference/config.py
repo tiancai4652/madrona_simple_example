@@ -34,6 +34,7 @@ IC_WORKLOAD_PARAMS_TABLE_COUNT = 22
 IC_D_MAX_WAIT_NS = 23
 IC_KV_MODE = 24
 IC_KV_LATENT_DIM = 25
+IC_KV_ZERO_BYTES = 26
 IC_P_WORKERS_BASE = 32
 IC_D_WORKERS_BASE = 160
 
@@ -64,6 +65,7 @@ INFERENCE_CONFIG_WORDS = (
     "d_max_wait_ns",
     "kv_mode",
     "kv_latent_dim",
+    "kv_zero_bytes",
 )
 
 
@@ -119,6 +121,10 @@ class InferenceConfig:
     # mode; must be positive in MLA mode (kv_bytes = layers × prompt_len
     # × kv_latent_dim × bytes_per_elem).
     kv_latent_dim: int = 0
+    # KV-zero experiment switch: 0 = normal KV transfer, 1 = skip the
+    # network transfer entirely (kv_bytes = 0, no flow). P-finish hands
+    # directly to WaitingDecode/Finished.
+    kv_zero_bytes: int = 0
 
     def __post_init__(self):
         object.__setattr__(
@@ -162,6 +168,8 @@ class InferenceConfig:
                 raise ValueError(f"{name} must be positive")
         if self.kv_mode not in (0, 1):
             raise ValueError("kv_mode must be 0 (gqa) or 1 (mla)")
+        if self.kv_zero_bytes not in (0, 1):
+            raise ValueError("kv_zero_bytes must be 0 or 1")
         if self.kv_latent_dim < 0:
             raise ValueError("kv_latent_dim must be non-negative")
         # Mode-specific semantics are mutually exclusive to prevent mixed
@@ -258,6 +266,7 @@ class InferenceConfig:
             self.d_max_wait_ns,
             self.kv_mode,
             self.kv_latent_dim,
+            self.kv_zero_bytes,
         )
         packed = np.zeros(INFERENCE_CONFIG_LENGTH, dtype=np.int64)
         packed[:len(values)] = values

@@ -55,6 +55,10 @@ enum InferenceConfigIndex : int32_t {
     // Merged MLA latent width per layer/token (kv_lora_rank +
     // qk_rope_head_dim, e.g. DeepSeek-V3 = 576). Must be 0 in GQA mode.
     IC_KV_LATENT_DIM = 25,
+    // KV-zero experiment switch: 0 = normal KV transfer, 1 = skip the
+    // network transfer entirely (kv_bytes = 0, no setFlow). P-finish hands
+    // directly to WaitingDecode/Finished.
+    IC_KV_ZERO_BYTES = 26,
 };
 
 // Per-worker rank layout lists. Each worker occupies two int64 slots

@@ -59,10 +59,37 @@ bool beginInferenceKvTransfer(Engine &ctx, InferenceRuntime &runtime,
         return false;
     }
     request.d_worker = d_worker;
-    runtime.d_workers[d_worker].pending_kv_tokens += request.prompt_len;
     request.t_d_route_ns =
         static_cast<int64_t>(net_sys_interface::getCurrentTime(ctx));
     request.t_kv_start_ns = request.t_d_route_ns;
+
+    // KV-zero experiment switch (IC_KV_ZERO_BYTES == 1): no network
+    // transfer at all. Hands directly to decode/finish with kv_bytes = 0.
+    if (config.data[IC_KV_ZERO_BYTES] == 1) {
+        request.kv_bytes = 0;
+        request.kv_shards = 0;
+        request.kv_done = 0;
+        request.kv_done_mask[0] = 0;
+        request.kv_done_mask[1] = 0;
+        request.t_kv_done_ns = request.t_kv_start_ns;
+        if (request.output_len == 0) {
+            request.t_d_start_ns = request.t_kv_done_ns;
+            request.t_first_token_ns = request.t_kv_done_ns;
+            request.t_finish_ns = request.t_kv_done_ns;
+            request.state = InferenceRequestState::Finished;
+            runtime.finished_requests++;
+            return true;
+        }
+        request.state = InferenceRequestState::WaitingDecode;
+        ctx.singleton<SimRuntimeState>().inferenceHandoffPending = 1;
+        InferenceWorker &worker = runtime.d_workers[d_worker];
+        if (!enqueueInferenceRequest(worker, slot, request.prompt_len)) {
+            failInference(ctx, InferenceError::QueueOverflow);
+            return false;
+        }
+        return true;
+    }
+    runtime.d_workers[d_worker].pending_kv_tokens += request.prompt_len;
 
     const int64_t layers = config.data[IC_NUM_LAYERS];
     const int64_t kv_heads = config.data[IC_NUM_KV_HEADS];

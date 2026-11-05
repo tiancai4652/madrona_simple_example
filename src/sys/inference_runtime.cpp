@@ -77,6 +77,8 @@ MADRONA_NO_INLINE bool initializeInference(
         config.data[IC_KV_PARTITION_FACTOR] < 0 ||
         (config.data[IC_KV_MODE] != 0 && config.data[IC_KV_MODE] != 1) ||
         config.data[IC_KV_LATENT_DIM] < 0 ||
+        (config.data[IC_KV_ZERO_BYTES] != 0 &&
+         config.data[IC_KV_ZERO_BYTES] != 1) ||
         config.data[IC_WORKLOAD_PARAMS_TABLE_COUNT] < 0 ||
         config.data[IC_WORKLOAD_PARAMS_TABLE_COUNT] >
             MAX_WORKLOAD_PARAMS_TABLE_ENTRIES ||
