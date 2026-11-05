@@ -6,7 +6,7 @@
 
 namespace madsimple {
 
-constexpr int32_t MAX_INFERENCE_REQUESTS = 10240; // 043-1024: 2048->10240（r2-full5在飞1024x2x5=10240，1.0x，037先例）（10世界x128条=1280，1.6x余量）
+constexpr int32_t MAX_INFERENCE_REQUESTS = 2048; // 050-128: 10240->2048（046-128档；本实验128请求，16x）
 constexpr int32_t MAX_INFERENCE_WORKERS = 64;
 constexpr int32_t MAX_INFERENCE_WORKER_RANKS = 128;
 constexpr int32_t MAX_INFERENCE_QUEUE = 1024; // 043-1024: 1024->4096（r2单世界t2时刻1024条同到；int32表可忽略）

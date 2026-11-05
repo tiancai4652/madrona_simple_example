@@ -7,7 +7,7 @@ import numpy as np
 from .conversion import folder_to_int_array
 
 
-MAX_NPUS = 10240 # 043-1024: 128->1024（与C++同步）（与C++同步；本实验单世界128卡）
+MAX_NPUS = 128 # 050-128: 10240->128（046-128档；与C++同步；本实验单世界128卡）
 # 036/037-需求x (layer0): 实测行宽 1581, 取 4096 (与 C++ CHAKRA_NODES_DATA_LENGTH
 # 同步, 必须相等否则 tensor 形状错配; 见 src/sys/sys_types.hpp).
 # 036/037 只读共享: 4P+4D 或 40P+40D 复用同一份 128rank 模板, 输入表仅需 256 唯一行 (P 0..127 + D 128..255).

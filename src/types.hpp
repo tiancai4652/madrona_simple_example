@@ -202,7 +202,7 @@ constexpr uint32_t MAX_FAKE_FINISHED_FLOWS = 16;
 // setFlow()/materialize/schedule/checkFlowFinish work purely on its own
 // entity's components with zero cross-NPU locking. See
 // report/2-merge-plan/实施/阶段A2-per-NPU流并行化方案.md for the full design.
-constexpr uint32_t MAX_NPUS = 10240; // 043-1024: 128->1024（与NPU_NUM同步）（本实验单世界128卡；NPU表缩小80x是10世界可装的关键）
+constexpr uint32_t MAX_NPUS = 128; // 050-128: 10240->128（046-128档；与NPU_NUM同步；单世界128卡）
 // 018-layer0-GPUfit: layer0 chakra-only 每 NPU 峰值 254 流
 // (2 OUTCAST x 127 同拍 burst; inbox/active/finished/draft 同界).
 // 018-layer0-GPUfit6: 2048->8192。解耦修完D侧推进后，真峰值并发>2048

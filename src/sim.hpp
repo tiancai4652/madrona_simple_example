@@ -33,20 +33,19 @@ class Engine;
 constexpr int32_t QOS_NONE = 0;
 constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
-constexpr int32_t MAX_TOPO_NODES = 10688; // 043-1024: 256->1152（036值；h1024实1072节点，1.07x）（本实验148节点；10世界上万卡表会OOM）
-constexpr int32_t MAX_TOPO_LINKS = 41088; // 043-1024: 2048->4096（实测h1024共1536 LINK=3072有向，1.33x；loader按有向计数）（h1024实1536无向链路，1.33x）（本实验192无向链路=384有向端口，2.7x余量）
-constexpr int32_t MAX_TOPO_PORTS = 41088; // 043-1024: 1024->4096（h1024实3072有向端口，1.33x）（Port固定表 1024行 x 65KB，10世界约1.3GB可装）
-constexpr int32_t MAX_NODE_NEIGHBORS = 328; // 040-128x10: 328->64（本实验Leaf最大度数48，1.3x余量）
-constexpr int32_t MAX_FLOWS = 2097152; // 043-1024: 512K->1M（036值；5世界x1024卡x135流=691K上限，1.5x）（10世界x128卡x256池=327K上限，1.6x余量；2的幂）
-// 037: 万卡 10240x127 峰值在途流 ~130万, 2M 留 1.6x 余量.
+constexpr int32_t MAX_TOPO_NODES = 256; // 050-128: 10688->256（046-128档；h128实148节点，1.7x）
+constexpr int32_t MAX_TOPO_LINKS = 1024; // 050-128: 41088->1024（046-128档；h128实192无向链路=384有向，2.7x余量）
+constexpr int32_t MAX_TOPO_PORTS = 1024; // 050-128: 41088->1024（046-128档；h128实384有向端口，2.7x余量）
+constexpr int32_t MAX_NODE_NEIGHBORS = 64; // 046-128档；h128 Leaf最大度数48，1.3x余量
+constexpr int32_t MAX_FLOWS = 524288; // 050-128: 2M->512K（046-128档；本实验32256流，16x；2的幂）
 constexpr int32_t MAX_PATH_NODES = 6;
 constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
 constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
-constexpr int32_t MAX_DELAYED_EVENTS = 16777216; // 043-1024: 2M->8M（规模4x取中值；超限error 6响亮）（128卡规模；16MB/世界可接受）
+constexpr int32_t MAX_DELAYED_EVENTS = 2097152; // 050-128: 16M->2M（046-128档；超限error 6响亮）
 constexpr int32_t MAX_EVENTS_PER_STEP = 328704;
 constexpr int32_t MAX_TAG_INDEX = 2580480;
 constexpr int32_t MAX_SOURCE_TAGS = 645120;
-constexpr int32_t MAX_FLOW_META_LOOKUP = 4194304; // 040-128x10: 4M->1M（=2x MAX_FLOWS，2的幂）
+constexpr int32_t MAX_FLOW_META_LOOKUP = 1048576; // 050-128: 4M->1M（046-128档；=2x MAX_FLOWS，2的幂）
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {

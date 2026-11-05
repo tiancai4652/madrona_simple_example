@@ -16,7 +16,7 @@
 // Each ChakraNode occupies 51 ints with new 3-int attribute format
 #define INTS_PER_NODE 51
 
-#define NPU_NUM 10240 // 043-1024: 128->1024（4P+4D deepseek layer0，5世界）（与MAX_NPUS同步）
+#define NPU_NUM 128 // 050-128: 10240->128（046-128档；单世界128卡P0~63/D64~127）（与MAX_NPUS同步）
 
 
 // #define MAX_CHAKRA_NODES_PER_NPU 9 * 9999
