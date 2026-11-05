@@ -109,7 +109,10 @@ void setFlow(Engine &ctx,
              uint64_t comm_dst,
              uint64_t flow_size,
              uint32_t flow_id,
-             uint64_t comm_para)
+             uint64_t comm_para,
+             int32_t inference_slot,
+             int32_t inference_gen,
+             int32_t chakra_node)
 {
     // Multiple ProcessComm_E entities belonging to the same NPU can execute
     // sys_checkFlow concurrently on GPU. Reserve a distinct inbox slot
@@ -136,6 +139,9 @@ void setFlow(Engine &ctx,
         .flow_size = flow_size,
         .flow_id = flow_id,
         .comm_para = comm_para,
+        .inference_slot = inference_slot,
+        .inference_gen = inference_gen,
+        .chakra_node = chakra_node,
     };
 }
 

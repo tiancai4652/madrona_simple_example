@@ -567,6 +567,9 @@ class GridWorld:
                 'end_time_ms',
                 'fct_ms',
                 'priority',
+                'inference_slot',
+                'inference_gen',
+                'chakra_node',
             ])
             for row in rows:
                 writer.writerow([
@@ -578,4 +581,7 @@ class GridWorld:
                     f"{row['end_time_ms']:.6f}",
                     f"{row['fct_ms']:.6f}",
                     row['priority'],
+                    row.get('inference_slot', -1),
+                    row.get('inference_gen', -1),
+                    row.get('chakra_node', -1),
                 ])

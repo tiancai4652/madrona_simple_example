@@ -17,7 +17,10 @@ void setFlow(Engine &ctx,
              uint64_t comm_dst,
              uint64_t flow_size,
              uint32_t flow_id,
-             uint64_t comm_para);
+             uint64_t comm_para,
+             int32_t inference_slot = -1,
+             int32_t inference_gen = -1,
+             int32_t chakra_node = -1);
 
 uint32_t checkFlowFinish(Engine &ctx,
                          uint32_t npu_id,

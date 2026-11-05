@@ -428,6 +428,9 @@ NB_MODULE(_madrona_simple_example_cpp, m) {
             result["end_time_ms"] = nb::float_(record.end_time);
             result["fct_ms"] = nb::float_(record.fct());
             result["priority"] = nb::int_(record.priority);
+            result["inference_slot"] = nb::int_(record.inference_slot);
+            result["inference_gen"] = nb::int_(record.inference_gen);
+            result["chakra_node"] = nb::int_(record.chakra_node);
             return result;
         }, nb::arg("idx"), nb::arg("world_idx") = 0)
     ;

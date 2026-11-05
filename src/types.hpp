@@ -235,6 +235,14 @@ struct FlowCompletionRecord {
     Time start_time = 0.0;
     Time end_time = 0.0;
     int32_t priority = 0;
+    // 050-kv0exp: attribution for cross-sim comparison (record-only, never
+    // read by sim logic). inference_slot: request slot for KV transfers,
+    // -1 = batch-shared EP flow (join via flow_map). inference_gen: worker
+    // generation at injection (decode token index for D), -1 = unknown.
+    // chakra_node: emitting Chakra node id for EP flows, -1 = n/a.
+    int32_t inference_slot = -1;
+    int32_t inference_gen = -1;
+    int32_t chakra_node = -1;
     int32_t _pad = 0;
 
     inline Time fct() const
@@ -280,6 +288,10 @@ struct NpuFlowInboxEntry {
     uint64_t flow_size = 0;
     uint32_t flow_id = 0;
     uint64_t comm_para = 0;
+    // 050-kv0exp: attribution mirrored into FlowDef at materialization.
+    int32_t inference_slot = -1;
+    int32_t inference_gen = -1;
+    int32_t chakra_node = -1;
 };
 
 // Lock-free per-NPU inbox for setFlow() requests. Drained once per step by

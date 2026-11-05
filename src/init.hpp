@@ -32,6 +32,10 @@ struct FlowDef {
     Time start_time = 0.0;
     int32_t priority = 0;
     uint64_t comm_para = 0;
+    // 050-kv0exp: attribution mirrored from NpuFlowInboxEntry.
+    int32_t inference_slot = -1;
+    int32_t inference_gen = -1;
+    int32_t chakra_node = -1;
 };
 
 // FlowCompletionRecord moved to types.hpp so it can be embedded in the

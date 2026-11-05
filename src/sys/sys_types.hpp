@@ -151,6 +151,10 @@ namespace madsimple
         TaskState state;
         // Send completion or receive completion
         bool is_send;
+        // 050-kv0exp: attribution carried through setFlow into the inbox.
+        int32_t inference_slot = -1;
+        int32_t inference_gen = -1;
+        int32_t chakra_node = -1;
 
         SysFlow()
             : id(INVALID_FLOW_ID), // Initialize to -1
@@ -161,7 +165,10 @@ namespace madsimple
               durationMicros(0),
               exec_index(0),
               state(TaskState::INIT),
-              is_send(true)
+              is_send(true),
+              inference_slot(-1),
+              inference_gen(-1),
+              chakra_node(-1)
         { // Initialize to true
         }
 
@@ -176,6 +183,9 @@ namespace madsimple
             exec_index = 0;
             state = TaskState::INIT;
             is_send = true;
+            inference_slot = -1;
+            inference_gen = -1;
+            chakra_node = -1;
         }
     };
 

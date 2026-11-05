@@ -153,7 +153,10 @@ bool beginInferenceKvTransfer(Engine &ctx, InferenceRuntime &runtime,
                 static_cast<uint64_t>(dst_rank),
                 latent_bytes > 0 ? static_cast<uint64_t>(latent_bytes) : 1,
                 makeInferenceKvFlowID(static_cast<uint32_t>(slot), 0),
-                0);
+                0,
+                slot,
+                static_cast<int32_t>(request.output_done),
+                -1);
         }
         return true;
     }
@@ -236,8 +239,11 @@ bool beginInferenceKvTransfer(Engine &ctx, InferenceRuntime &runtime,
                 d.rank_start + first_head * d.rank_count / kv_heads),
             bytes > 0 ? bytes : 1,
             makeInferenceKvFlowID(static_cast<uint32_t>(slot),
-                                static_cast<uint32_t>(shard)),
-            0);
+                                 static_cast<uint32_t>(shard)),
+            0,
+            slot,
+            static_cast<int32_t>(request.output_done),
+            -1);
     }
     return true;
 }

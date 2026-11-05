@@ -434,6 +434,9 @@ MADRONA_NO_INLINE void Sim::recordFlowCompletion(
         .start_time = flow.start_time,
         .end_time = end_time,
         .priority = flow.priority,
+        .inference_slot = flow.inference_slot,
+        .inference_gen = flow.inference_gen,
+        .chakra_node = flow.chakra_node,
     };
 
     // 021-M2: write the export mirror NOW (completion-time order) instead of
@@ -596,6 +599,9 @@ MADRONA_NO_INLINE void Sim::createFlowsFromNpuRequestsOneNpu(
             .start_time = now,
             .priority = 0,
             .comm_para = req.comm_para,
+            .inference_slot = req.inference_slot,
+            .inference_gen = req.inference_gen,
+            .chakra_node = req.chakra_node,
         };
         ctx.get<FlowDef>(flow_entity) = flow;
         ctx.get<FlowRouteState>(flow_entity) = FlowRouteState {};

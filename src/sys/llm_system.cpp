@@ -140,6 +140,24 @@ namespace madsimple::llm_system {
     // Forward declarations from sub-modules are now included via headers
     // Other system-related implementations
 
+    // 050-kv0exp: attribution for flow logging (record-only). Returns the
+    // executing NPU's current inference generation, or -1 when idle.
+    inline int32_t inferenceGenForNpu(Engine &ctx, uint32_t npu_id)
+    {
+        if (npu_id >= (uint32_t)ctx.data().numNpus) {
+            return -1;
+        }
+        madrona::Entity e = ctx.data().npuEntities[npu_id];
+        if (e == madrona::Entity::none()) {
+            return -1;
+        }
+        const InferenceNpuExecution &exec = ctx.get<InferenceNpuExecution>(e);
+        if (exec.active == 0) {
+            return -1;
+        }
+        return exec.generation;
+    }
+
     // -----------------------------------------------------------------------------------
 
     // Node processing functions moved to chakra_node_processing.cpp
@@ -313,6 +331,9 @@ namespace madsimple::llm_system {
                             ctx.get < TaskFlows > (process_e).flows[0].comm_dst = dst;
                             ctx.get < TaskFlows > (process_e).flows[0].state = TaskState::START;
                             ctx.get < TaskFlows > (process_e).flows[0].is_send = true;
+                            ctx.get < TaskFlows > (process_e).flows[0].chakra_node = node.id;
+                            ctx.get < TaskFlows > (process_e).flows[0].inference_gen =
+                                inferenceGenForNpu(ctx, (uint32_t)id.value);
 
                             ctx.data().npus_chakra_exec_entity[id.value][node.id] = process_e;
 
@@ -518,6 +539,8 @@ namespace madsimple::llm_system {
 #if SYS_LOG_ENABLED_LIMIT_COMM_SIZE_DURATION
                         comm_size=comm_size/SYS_LOG_LIMIT_COMM_SIZE;
 #endif
+                        const int32_t __gen050 =
+                            inferenceGenForNpu(ctx, (uint32_t)id.value);
                         for (uint32_t k = 0; k < entry->count; ++k) {
                             uint32_t flow_id = processingCommTasks.getFlowId();
                             task_flows.flows[k].id = flow_id;
@@ -527,6 +550,8 @@ namespace madsimple::llm_system {
                             task_flows.flows[k].comm_dst = entry->peers[k];
                             task_flows.flows[k].state = TaskState::START;
                             task_flows.flows[k].is_send = true;
+                            task_flows.flows[k].chakra_node = node.id;
+                            task_flows.flows[k].inference_gen = __gen050;
                         }
 
                         ctx.data().npus_chakra_exec_entity[id.value][node.id] = process_e;
@@ -885,6 +910,9 @@ namespace madsimple::llm_system {
                                                     ctx.get < TaskFlows > (process_e).flows[flow_current_count].state = TaskState::START;
                                                     ctx.get < TaskFlows > (process_e).flows[flow_current_count].is_send = true;
                                                     ctx.get < TaskFlows > (process_e).flows[flow_current_count].exec_index = flow_exec_index;
+                                                    ctx.get < TaskFlows > (process_e).flows[flow_current_count].chakra_node = node.id;
+                                                    ctx.get < TaskFlows > (process_e).flows[flow_current_count].inference_gen =
+                                                        inferenceGenForNpu(ctx, (uint32_t)node_id);
 
                                                     #if SYS_LOG
                                                     if (SYS_LOG_TARGET_NODE == id.value) {

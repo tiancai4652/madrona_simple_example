@@ -129,7 +129,7 @@ namespace madsimple::llm_system
         {
             for (size_t i = 0; i < flow_exec_count; i++)
             {
-                setFlow(ctx, npu_id.value, npu_id.flows_exec[i].comm_src, npu_id.flows_exec[i].comm_dst, npu_id.flows_exec[i].comm_size, npu_id.flows_exec[i].id, npu_id.flows_exec[i].comm_para);
+                setFlow(ctx, npu_id.value, npu_id.flows_exec[i].comm_src, npu_id.flows_exec[i].comm_dst, npu_id.flows_exec[i].comm_size, npu_id.flows_exec[i].id, npu_id.flows_exec[i].comm_para, npu_id.flows_exec[i].inference_slot, npu_id.flows_exec[i].inference_gen, npu_id.flows_exec[i].chakra_node);
             }
             npu_id.flows_exec_init();
             return true;
