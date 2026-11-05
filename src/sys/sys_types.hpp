@@ -16,19 +16,18 @@
 // Each ChakraNode occupies 51 ints with new 3-int attribute format
 #define INTS_PER_NODE 51
 
-#define NPU_NUM 1024
+#define NPU_NUM 10240 // 043-1024: 128->1024（4P+4D deepseek layer0，5世界）（与MAX_NPUS同步）
 
 
 // #define MAX_CHAKRA_NODES_PER_NPU 9 * 9999
-// 036-需求x (layer0): 每 rank 10 节点 (6 COMP + 2 OUTCAST + 2 INCAST),
-// 取 32 留 3.2x 余量. 派生维度 (npus_chakra_exec_entity/ChakraNodes/
-// SharedChakraTemplates/ReadyState 等) 随宏自动跟随.
-#define MAX_CHAKRA_NODES_PER_NPU 1024
+// 037-华为10240 (layer0): 每 rank 10 节点 (6 COMP + 2 OUTCAST + 2 INCAST),
+// 取 128 留 12.8x 余量 (且避开 NVRTC nodes=32 小界展开问题). 派生维度自动跟随.
+#define MAX_CHAKRA_NODES_PER_NPU 128
 #define MAX_CONCURRENT_CHAKRA_NODES_PER_NPU 3
 #define MAX_CHAKRA_NODP_NODES 5
 // 036-需求x (layer0): 实测行宽 1581 ints (=10x51 主表 +51 零哨兵 +4x255 side 区),
 // 取 4096 (2 的幂, 16KB/rank).
-// 036 只读共享: 4P+4D 共享 256 唯一行 (P 0..127 + D 128..255), 单表仅 4MB.
+// 036/037 只读共享: 40P+40D 共享 256 唯一行 (P 0..127 + D 128..255), 单表仅 4MB.
 // 与 python chakra/config.py 同步.
 #define CHAKRA_DATA_ROWS 256
 #define CHAKRA_NODES_DATA_LENGTH 4096 // aligned with tensor export size in mgr.cpp
@@ -59,11 +58,9 @@ enum class AttributeDataType : uint32_t
 // Check skip time every x frames
 #define CHECK_SKIPTIME_INTERVAL_PER_FRAME 100
 
-// 018-layer0-GPUfit: layer0 每 NPU 并发 comm 槽位实测峰值<=4
-// (2 OUTCAST + 2 INCAST; inference 仅 reset 不占 slot, 见 inference_scheduler.cpp),
-// 取 16 留 4x 余量. NpuID.result/node_task_count 同宏自动跟随.
-// 超限回退到线性扫描 (语义不变), 溢出由 getNextFreeTask 复用兜底.
-#define MAX_COMM_TASK_PER_NPU 512
+// 037-华为10240: layer0 每 NPU 仅 4 个 comm 节点 (2 OUTCAST + 2 INCAST),
+// 取 32 留 8x 余量, 使 NpuID 从 35KB 缩至 19KB (跨三张表省 2.5GiB).
+#define MAX_COMM_TASK_PER_NPU 32
 
 // Maximum communication volume per comm node
 #define MAX_FLOW_NUM_PER_COMM_NODE 128
@@ -73,14 +70,14 @@ enum class AttributeDataType : uint32_t
 
 // #define MAX_FLOW_NUM_ALL_COMM_NODE 9999
 
-// 019 扇出保真: 全局单例时间槽位, 与节点数解耦 (见 NextProcessTimes).
-#define NEXT_PROCESS_TIMES_CAP 4096
+// 037: 全局单例时间槽位, 10240 NPU 共享, 取 16384.
+#define NEXT_PROCESS_TIMES_CAP 16384
 
 // 019 扇出保真: 单节点最大对端数 (127 实测, 取 128).
 #define MAX_FANOUT_PEERS_PER_NODE 128
-// 036 (layer0): 单 NPU 扇出节点数上限 (实测 4 = 2 OUTCAST + 2 INCAST, 取 16).
+// 040-llama: 单 NPU 扇出节点数上限 16->32（llama24comm节点必需）。
 #define MAX_FANOUT_NODES_PER_NPU 16
-// 036 (layer0): 单 NPU 并发 INCAST 等齐上限 (实测 2, 取 16).
+// 040-llama: 单 NPU 并发 INCAST 等齐上限 16->32（llama12 incasts必需）。
 #define MAX_INCAST_WAITS_PER_NPU 16
 
 namespace madsimple

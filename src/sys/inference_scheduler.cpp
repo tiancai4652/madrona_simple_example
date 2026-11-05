@@ -94,16 +94,20 @@ void inferenceResetLocal(Engine &ctx, uint32_t npu_id,
         uint32_t rank_off = 0;
         uint32_t flow_off = 0;
         if (npu_total > CHAKRA_DATA_ROWS) {
+            const int32_t p_boundary = npu_total / 2;
+            const int32_t p_insts = p_boundary / 128;
+            const uint32_t flow_step =
+                (npu_total > 1024) ? 10000000u : 100000000u;
             int32_t inst = static_cast<int32_t>(npu_id / 128);
             int32_t local_r = static_cast<int32_t>(npu_id % 128);
-            if (npu_id < 512) {
+            if (static_cast<int32_t>(npu_id) < p_boundary) {
                 t_slot = local_r;
                 rank_off = static_cast<uint32_t>(inst * 128);
-                flow_off = static_cast<uint32_t>(inst * 100000000u);
+                flow_off = static_cast<uint32_t>(inst) * flow_step;
             } else {
                 t_slot = 128 + local_r;
-                rank_off = static_cast<uint32_t>((inst - 4) * 128);
-                flow_off = static_cast<uint32_t>((inst - 4) * 100000000u);
+                rank_off = static_cast<uint32_t>((inst - p_insts) * 128);
+                flow_off = static_cast<uint32_t>(inst - p_insts) * flow_step;
             }
         }
         for (int32_t n = 0; n < MAX_CHAKRA_NODES_PER_NPU; n++) {

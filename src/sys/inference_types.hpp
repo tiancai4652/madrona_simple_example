@@ -6,12 +6,12 @@
 
 namespace madsimple {
 
-constexpr int32_t MAX_INFERENCE_REQUESTS = 1024;
-constexpr int32_t MAX_INFERENCE_WORKERS = 16;
+constexpr int32_t MAX_INFERENCE_REQUESTS = 10240; // 043-1024: 2048->10240（r2-full5在飞1024x2x5=10240，1.0x，037先例）（10世界x128条=1280，1.6x余量）
+constexpr int32_t MAX_INFERENCE_WORKERS = 64;
 constexpr int32_t MAX_INFERENCE_WORKER_RANKS = 128;
-constexpr int32_t MAX_INFERENCE_QUEUE = MAX_INFERENCE_REQUESTS;
-constexpr int32_t MAX_INFERENCE_BATCH = 128;
-constexpr int32_t INFERENCE_CONFIG_LENGTH = 256;
+constexpr int32_t MAX_INFERENCE_QUEUE = 1024; // 043-1024: 1024->4096（r2单世界t2时刻1024条同到；int32表可忽略）
+constexpr int32_t MAX_INFERENCE_BATCH = 128; // 043-1024: 128->256（r2 B=256，validate硬门；小表可忽略）
+constexpr int32_t INFERENCE_CONFIG_LENGTH = 320;
 constexpr int32_t INFERENCE_REQUEST_FIELDS = 4;
 constexpr int32_t INFERENCE_STATS_FIELDS = 19;
 constexpr int32_t MAX_WORKLOAD_PARAMS_TABLE_ENTRIES = 1024;
@@ -58,10 +58,10 @@ enum InferenceConfigIndex : int32_t {
 };
 
 // Per-worker rank layout lists. Each worker occupies two int64 slots
-// (rank_start, rank_count); up to MAX_INFERENCE_WORKERS (16) workers fit
-// in the 32-slot window of each pool.
+// (rank_start, rank_count); up to MAX_INFERENCE_WORKERS (64) workers fit
+// in the 128-slot window of each pool.
 constexpr int32_t IC_P_WORKERS_BASE = 32;
-constexpr int32_t IC_D_WORKERS_BASE = 64;
+constexpr int32_t IC_D_WORKERS_BASE = 160;
 constexpr int32_t IC_WORKER_SLOTS = 2 * MAX_INFERENCE_WORKERS;
 
 enum InferenceRequestInputIndex : int32_t {
@@ -244,13 +244,19 @@ struct InferenceResetEntry {
 };
 
 constexpr int32_t INFERENCE_RESET_ROSTER_CAP =
-    MAX_INFERENCE_WORKERS * MAX_INFERENCE_WORKER_RANKS;
+    2 * MAX_INFERENCE_WORKERS * MAX_INFERENCE_WORKER_RANKS;
 
 struct InferenceResetRoster {
     int32_t count = 0;
     int32_t overflow_count = 0;
     InferenceResetEntry entries[INFERENCE_RESET_ROSTER_CAP] {};
 };
+
+inline MADRONA_NO_INLINE void resetInferenceResetRoster(InferenceResetRoster &r)
+{
+    r.count = 0;
+    r.overflow_count = 0;
+}
 
 constexpr uint32_t INFERENCE_KV_FLOW_BIT = 0x80000000u;
 constexpr uint32_t INFERENCE_KV_SHARD_BITS = 8u;

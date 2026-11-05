@@ -217,6 +217,7 @@ MADRONA_NO_INLINE bool initializeInference(
     // then park inference ranks.
     SharedChakraTemplates &shared_templ = ctx.singleton<SharedChakraTemplates>();
     const int32_t npu_total = ctx.data().numNpus;
+    const int32_t d_base = npu_total / 2;
     for (int32_t i = 0; i < npu_total; i++) {
         const madrona::Entity entity = ctx.data().npuEntities[i];
         if (entity == madrona::Entity::none()) {
@@ -228,8 +229,8 @@ MADRONA_NO_INLINE bool initializeInference(
             t_slot = i;
         } else if (i < 128) {
             t_slot = i;
-        } else if (i >= 512 && i < 640) {
-            t_slot = 128 + (i - 512);
+        } else if (i >= d_base && i < d_base + 128) {
+            t_slot = 128 + (i - d_base);
         }
         for (int32_t n = 0; n < MAX_CHAKRA_NODES_PER_NPU; n++) {
             if (t_slot >= 0) {
@@ -301,7 +302,7 @@ void inferencePreUpdate(Engine &ctx)
     // after this pre-step). Cleared only when the decision actually runs,
     // mirroring the legacy "copy happens inside the decision" behavior on
     // disabled/failed frames.
-    ctx.singleton<InferenceResetRoster>() = InferenceResetRoster {};
+    resetInferenceResetRoster(ctx.singleton<InferenceResetRoster>());
 
     const int64_t now =
         static_cast<int64_t>(net_sys_interface::getCurrentTime(ctx));

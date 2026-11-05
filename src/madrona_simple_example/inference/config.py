@@ -4,11 +4,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .io import MAX_INFERENCE_REQUESTS
 
-INFERENCE_CONFIG_LENGTH = 256
-MAX_INFERENCE_WORKERS = 16
+
+INFERENCE_CONFIG_LENGTH = 320
+MAX_INFERENCE_WORKERS = 64
 MAX_INFERENCE_WORKER_RANKS = 128
-MAX_INFERENCE_BATCH = 128
+MAX_INFERENCE_BATCH = 128  # 043-1024: 128->256（r2 B=256，与C++同步）
 
 IC_ENABLED = 0
 IC_NUM_REQUESTS = 1
@@ -33,7 +35,7 @@ IC_D_MAX_WAIT_NS = 23
 IC_KV_MODE = 24
 IC_KV_LATENT_DIM = 25
 IC_P_WORKERS_BASE = 32
-IC_D_WORKERS_BASE = 64
+IC_D_WORKERS_BASE = 160
 
 INFERENCE_CONFIG_WORDS = (
     "enabled",
@@ -221,9 +223,10 @@ class InferenceConfig:
 
     def pack(self, num_requests, npu_count=None,
              workload_params_table_count=0):
-        """Pack schema words 0..95 into an int64[256] C++ config row."""
-        if not 0 <= num_requests <= 1024:
-            raise ValueError("num_requests must be in [0, 1024]")
+        """Pack schema words into an int64[320] C++ config row."""
+        if not 0 <= num_requests <= MAX_INFERENCE_REQUESTS:
+            raise ValueError(
+                f"num_requests must be in [0, {MAX_INFERENCE_REQUESTS}]")
         if not 0 <= workload_params_table_count <= 1024:
             raise ValueError(
                 "workload_params_table_count must be in [0, 1024]")

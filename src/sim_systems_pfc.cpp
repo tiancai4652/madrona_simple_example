@@ -343,7 +343,9 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
     }
 
     double buf_by_pri[PFC_MAX_PRIORITY] {};
-    int32_t upstream_ports[MAX_TOPO_PORTS] {};
+    // 037-华为10240: 与 MAX_TOPO_PORTS (41088) 解耦, 按下游消费上限 MAX_PAUSED_UPSTREAMS
+    // 分配线程局部栈数组, 省去 164KB/线程 x 129024 = 21.2 GiB 的 megakernel 栈预留.
+    int32_t upstream_ports[MAX_PAUSED_UPSTREAMS] {};
     int32_t num_upstream_ports = 0;
 
     // Phase D: iterate this port's PortTagList rather than the global
@@ -390,7 +392,11 @@ MADRONA_NO_INLINE void Sim::pfcDetectOnePortEgress(
                         break;
                     }
                 }
-                if (!dup && num_upstream_ports < MAX_TOPO_PORTS) {
+                if (!dup) {
+                    if (num_upstream_ports >= MAX_PAUSED_UPSTREAMS) {
+                        FATAL("capacity exceeded: MAX_PAUSED_UPSTREAMS=%d on port %d (PFC egress upstream ports) -- raise MAX_PAUSED_UPSTREAMS",
+                              (int)MAX_PAUSED_UPSTREAMS, (int)port_id);
+                    }
                     upstream_ports[num_upstream_ports++] = up;
                 }
             }

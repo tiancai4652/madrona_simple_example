@@ -8,6 +8,7 @@ import numpy as np
 
 from madrona_simple_example.inference import (
     INFERENCE_CONFIG_LENGTH,
+    MAX_INFERENCE_REQUESTS,
     InferenceConfig,
     load_request_trace,
     load_workload_params_table,
@@ -15,9 +16,11 @@ from madrona_simple_example.inference import (
     pack_workload_params_table,
     parse_inference_stats,
 )
-
-IC_P_WORKERS_BASE = 32
-IC_D_WORKERS_BASE = 64
+from madrona_simple_example.inference.config import (
+    IC_D_WORKERS_BASE,
+    IC_P_WORKERS_BASE,
+    MAX_INFERENCE_WORKERS,
+)
 
 
 def make_config(**overrides):
@@ -105,7 +108,7 @@ class InferenceConfigTests(unittest.TestCase):
             {"prefill_workers": ((), (1,))},
             # Too many workers.
             {"decode_workers": tuple(
-                (worker_idx,) for worker_idx in range(17))},
+                (worker_idx,) for worker_idx in range(MAX_INFERENCE_WORKERS + 1))},
             # Rank width above the per-worker cap.
             {"prefill_workers": (tuple(range(17)),)},
             # Overlapping P workers.
@@ -303,7 +306,7 @@ class RequestTraceTests(unittest.TestCase):
             loaded,
             np.array([[1, 10, 3, 0], [2, 20, 4, 2]], dtype=np.int64))
         packed = pack_request_trace(loaded)
-        self.assertEqual(packed.shape, (1024, 4))
+        self.assertEqual(packed.shape, (MAX_INFERENCE_REQUESTS, 4))
         np.testing.assert_array_equal(packed[:2], loaded)
         self.assertTrue(np.all(packed[2:] == 0))
 
@@ -343,11 +346,11 @@ class RequestTraceTests(unittest.TestCase):
                 "request_id": 1, "arrival_time_ns": -1,
                 "prompt_len": 1, "output_len": 1,
             }])
-        with self.assertRaisesRegex(ValueError, "1024"):
+        with self.assertRaisesRegex(ValueError, str(MAX_INFERENCE_REQUESTS)):
             load_request_trace([{
                 "request_id": idx, "arrival_time_ns": idx,
                 "prompt_len": 1, "output_len": 1,
-            } for idx in range(1025)])
+            } for idx in range(MAX_INFERENCE_REQUESTS + 1)])
 
 
 class WorkloadParamsTableTests(unittest.TestCase):

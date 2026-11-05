@@ -131,13 +131,7 @@ namespace madsimple::llm_system
         ctx.data().check_npu_finish_entity = e;
         zeroStruct(ctx.singleton<SharedChakraTemplates>());
 
-        for (size_t i = 0; i < NPU_NUM; i++)
-        {
-            for (size_t j = 0; j < NPU_NUM; j++)
-            {
-                ctx.data().send_recv_map_recvend[i][j] = 0;
-            }
-        }
+        ctx.data().send_recv_map_recvend[0][0] = 0;
 
     }
 
@@ -177,23 +171,29 @@ namespace madsimple::llm_system
             ctx.get<NpuID>(npuNode).test_dim = false;
             ctx.get<NpuID>(npuNode).test_collective_comm_ring = false;
             int nodeCount = 0;
-            // 036 只读共享: npu_nums > CHAKRA_DATA_ROWS 时 (如 1024 卡 4P+4D),
-            // P(0..511) 复用槽 0..127, D(512..1023) 复用槽 128..255, 并按实例号 inst
-            // 加上 rank_off = inst*128 与 flow_off = inst*100M, 结果与独立 1024 行完全一致.
+            // 036/037 只读共享: npu_nums > CHAKRA_DATA_ROWS 时 (如 1024 卡 4P+4D 或 10240 卡 40P+40D),
+            // P(0..npu_nums/2-1) 复用槽 0..127, D(npu_nums/2..npu_nums-1) 复用槽 128..255,
+            // 并按实例号 inst 加上 rank_off = inst*128 与 flow_off = inst*flow_step.
+            // 注意: 10240 卡共 80 实例, flow_step 取 10,000,000 (>4.21M) 防 uint32 溢出;
+            // 1024 卡保持 100,000,000 与 036 bit-identical.
             int src_row = static_cast<int>(i);
             uint32_t rank_off = 0;
             uint32_t flow_off = 0;
             if (npu_nums > CHAKRA_DATA_ROWS) {
+                const size_t p_boundary = npu_nums / 2;
+                const int p_insts = static_cast<int>(p_boundary / 128);
+                const uint32_t flow_step =
+                    (npu_nums > 1024) ? 10000000u : 100000000u;
                 int inst = static_cast<int>(i / 128);
                 int local_r = static_cast<int>(i % 128);
-                if (i < 512) {
+                if (i < p_boundary) {
                     src_row = local_r;
                     rank_off = static_cast<uint32_t>(inst * 128);
-                    flow_off = static_cast<uint32_t>(inst * 100000000u);
+                    flow_off = static_cast<uint32_t>(inst) * flow_step;
                 } else {
                     src_row = 128 + local_r;
-                    rank_off = static_cast<uint32_t>((inst - 4) * 128);
-                    flow_off = static_cast<uint32_t>((inst - 4) * 100000000u);
+                    rank_off = static_cast<uint32_t>((inst - p_insts) * 128);
+                    flow_off = static_cast<uint32_t>(inst - p_insts) * flow_step;
                 }
             }
             parseChakraNodes(chakra_nodes_data, src_row, ctx.get<ChakraNodes>(npuNode).nodes, nodeCount);
@@ -483,8 +483,10 @@ namespace madsimple::llm_system
             
             ctx.data().sys_config_entity = sc;
 
-            for(size_t i=0; i<NPU_NUM; i++)
+#pragma unroll 1
+            for(size_t i=0; i<npu_nums; i++)
             {
+#pragma unroll 1
                 for(size_t j=0; j<MAX_CHAKRA_NODES_PER_NPU; j++)
                 {
                     ctx.data().npus_chakra_exec_entity[i][j] = Entity::none();

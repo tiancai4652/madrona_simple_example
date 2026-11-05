@@ -15,41 +15,38 @@ namespace madsimple {
 
 class Engine;
 
-// constexpr int32_t MAX_TOPO_NODES = 67;
-// constexpr int32_t MAX_TOPO_LINKS = 132;
-// constexpr int32_t MAX_TOPO_PORTS = 132;
-// constexpr int32_t MAX_NODE_NEIGHBORS = 33;
-// constexpr int32_t MAX_FLOWS = 448;
-// constexpr int32_t MAX_PATH_NODES = 16;
-// constexpr int32_t MAX_ECMP_NEXT_HOPS = 8;
-// constexpr int32_t MAX_FLOW_ROUTE_STEPS = 16;
-// constexpr int32_t MAX_DELAYED_EVENTS = 16384;
-// constexpr int32_t MAX_EVENTS_PER_STEP = 16384;
-// constexpr int32_t MAX_TAG_INDEX = 4096;
-// constexpr int32_t MAX_SOURCE_TAGS = 512;
+// constexpr int32_t MAX_TOPO_NODES = 10688;
+// constexpr int32_t MAX_TOPO_LINKS = 41088;
+// constexpr int32_t MAX_TOPO_PORTS = 41088;
+// constexpr int32_t MAX_NODE_NEIGHBORS = 328;
+// constexpr int32_t MAX_FLOWS = 2097152;
+// constexpr int32_t MAX_PATH_NODES = 6;
+// constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
+// constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
+// constexpr int32_t MAX_DELAYED_EVENTS = 16777216;
+// constexpr int32_t MAX_EVENTS_PER_STEP = 328704;
+// constexpr int32_t MAX_TAG_INDEX = 2580480;
+// constexpr int32_t MAX_SOURCE_TAGS = 645120;
 // constexpr int32_t MAX_INGRESS_TAGS = 4096;
 // MAX_FLOW_COMPLETIONS moved to types.hpp so the FlowCompletionBuf export
 // component can size itself without including sim.hpp.
 constexpr int32_t QOS_NONE = 0;
 constexpr int32_t QOS_SP = 1;
 constexpr int32_t QOS_WRR = 2;
-constexpr int32_t MAX_TOPO_NODES = 1152; // 036: 10688->1152（1024卡topo实需1072节点，省Sim world data约100MB/世界）
-constexpr int32_t MAX_TOPO_LINKS = 4096;
-constexpr int32_t MAX_TOPO_PORTS = 4096; // 018-layer0-GPUfit3: 41088->4096。唯一大线程局部
-// upstream_ports[MAX_TOPO_PORTS] (sim_systems_pfc.cpp:346) 164KB/线程，是megakernel
-// STACK 170KB的96%、device-local预留~30GB的主因。1024-topo实需3072端口，4096留33%余量。
-// 全局数组(portEntities/portToNode/peerPort)同步缩小。超限由createPort响亮FATAL。
-constexpr int32_t MAX_NODE_NEIGHBORS = 64; // 036: 328->64（1024卡topo最大邻居数=48，留33%余量）
-constexpr int32_t MAX_FLOWS = 1048576;
-// 036: 4M->1M（MAX_FLOWS_PER_NPU=512×1024=524288，1M留2x余量；省Sim结构体36MB/世界）.
+constexpr int32_t MAX_TOPO_NODES = 10688; // 043-1024: 256->1152（036值；h1024实1072节点，1.07x）（本实验148节点；10世界上万卡表会OOM）
+constexpr int32_t MAX_TOPO_LINKS = 41088; // 043-1024: 2048->4096（实测h1024共1536 LINK=3072有向，1.33x；loader按有向计数）（h1024实1536无向链路，1.33x）（本实验192无向链路=384有向端口，2.7x余量）
+constexpr int32_t MAX_TOPO_PORTS = 41088; // 043-1024: 1024->4096（h1024实3072有向端口，1.33x）（Port固定表 1024行 x 65KB，10世界约1.3GB可装）
+constexpr int32_t MAX_NODE_NEIGHBORS = 328; // 040-128x10: 328->64（本实验Leaf最大度数48，1.3x余量）
+constexpr int32_t MAX_FLOWS = 2097152; // 043-1024: 512K->1M（036值；5世界x1024卡x135流=691K上限，1.5x）（10世界x128卡x256池=327K上限，1.6x余量；2的幂）
+// 037: 万卡 10240x127 峰值在途流 ~130万, 2M 留 1.6x 余量.
 constexpr int32_t MAX_PATH_NODES = 6;
 constexpr int32_t MAX_ECMP_NEXT_HOPS = 36;
 constexpr int32_t MAX_FLOW_ROUTE_STEPS = 6;
-constexpr int32_t MAX_DELAYED_EVENTS = 16777216; // N1-CP3 exp build (see DECISIONS)
+constexpr int32_t MAX_DELAYED_EVENTS = 16777216; // 043-1024: 2M->8M（规模4x取中值；超限error 6响亮）（128卡规模；16MB/世界可接受）
 constexpr int32_t MAX_EVENTS_PER_STEP = 328704;
 constexpr int32_t MAX_TAG_INDEX = 2580480;
 constexpr int32_t MAX_SOURCE_TAGS = 645120;
-constexpr int32_t MAX_FLOW_META_LOOKUP = 1048576; // 036: 与 MAX_FLOWS 同步 (hash 表负载).
+constexpr int32_t MAX_FLOW_META_LOOKUP = 4194304; // 040-128x10: 4M->1M（=2x MAX_FLOWS，2的幂）
 // constexpr int32_t MAX_FLOW_COMPLETIONS = 68608;
 
 struct TopoNeighbor {
@@ -67,6 +64,18 @@ struct TopoNodeState {
     int32_t num_neighbors = 0;
     TopoNeighbor neighbors[MAX_NODE_NEIGHBORS] {};
 };
+
+inline MADRONA_NO_INLINE void resetTopoNodeState(TopoNodeState &n)
+{
+    n.id = -1;
+    n.type = NodeType::Host;
+    n.port_bw = 100.0;
+    n.num_neighbors = 0;
+#pragma unroll 1
+    for (int32_t i = 0; i < MAX_NODE_NEIGHBORS; i++) {
+        n.neighbors[i] = TopoNeighbor {};
+    }
+}
 
 struct TopoLinkState {
     NodeId src = -1;
@@ -693,7 +702,8 @@ struct Sim : public madrona::WorldBase {
     madrona::Entity ring_topo_entity[3];
     madrona::Entity npus_chakra_exec_entity
         [NPU_NUM][MAX_CHAKRA_NODES_PER_NPU];
-    int32_t send_recv_map_recvend[NPU_NUM][NPU_NUM];
+    // 037: DEV_MODE==1 下不使用 send_recv_map_recvend, 缩为 [1][1] 省 400MB/世界.
+    int32_t send_recv_map_recvend[1][1];
     bool sys_chakra_entities_created;
 
     MADRONA_NO_INLINE int32_t claimRecvDone(madrona::Context &ctx,

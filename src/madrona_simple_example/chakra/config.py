@@ -7,10 +7,10 @@ import numpy as np
 from .conversion import folder_to_int_array
 
 
-MAX_NPUS = 1024
-# 036-需求x (layer0): 实测行宽 1581, 取 4096 (与 C++ CHAKRA_NODES_DATA_LENGTH
+MAX_NPUS = 10240 # 043-1024: 128->1024（与C++同步）（与C++同步；本实验单世界128卡）
+# 036/037-需求x (layer0): 实测行宽 1581, 取 4096 (与 C++ CHAKRA_NODES_DATA_LENGTH
 # 同步, 必须相等否则 tensor 形状错配; 见 src/sys/sys_types.hpp).
-# 036 只读共享: 4P+4D 复用同一份 128rank 模板, 输入表仅需 256 唯一行 (P 0..127 + D 128..255).
+# 036/037 只读共享: 4P+4D 或 40P+40D 复用同一份 128rank 模板, 输入表仅需 256 唯一行 (P 0..127 + D 128..255).
 CHAKRA_DATA_ROWS = 256
 CHAKRA_NODES_DATA_LENGTH = 4096
 PROCESS_PARAMS_LENGTH = 1000
@@ -76,20 +76,23 @@ def load_chakra_workload(workload, npu_count):
     else:
         rows = workload
 
-    if len(rows) != npu_count:
+    if len(rows) != npu_count and not (
+            npu_count > CHAKRA_DATA_ROWS and len(rows) == CHAKRA_DATA_ROWS):
         raise ValueError(
             f"workload has {len(rows)} NPU rows, expected {npu_count}")
 
     encoded = np.zeros(
         (CHAKRA_DATA_ROWS, CHAKRA_NODES_DATA_LENGTH), dtype=np.int32)
-    # 036 只读共享: npu_count > 256 (如 1024 卡 4P+4D) 时, 仅装填 P1 (0..127)
-    # 与 D1 (512..639 -> 槽 128..255) 两份 128-rank 模板; C++ 侧按实例偏移还原.
+    # 036/037 只读共享: npu_count > 256 (如 1024 卡 4P+4D 或 10240 卡 40P+40D) 时,
+    # 仅装填 P1 (0..127) 与 D1 (npu_count//2..npu_count//2+127 -> 槽 128..255)
+    # 两份 128-rank 模板 (或直接接收已抽好的 256 行模板); C++ 侧按实例偏移还原.
+    d_base = npu_count // 2
     for npu_id, row in enumerate(rows):
-        if npu_count > CHAKRA_DATA_ROWS:
+        if npu_count > CHAKRA_DATA_ROWS and len(rows) != CHAKRA_DATA_ROWS:
             if npu_id < 128:
                 slot = npu_id
-            elif 512 <= npu_id < 640:
-                slot = 128 + (npu_id - 512)
+            elif d_base <= npu_id < d_base + 128:
+                slot = 128 + (npu_id - d_base)
             else:
                 continue
         else:

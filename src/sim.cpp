@@ -112,7 +112,11 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &)
     registry.registerArchetype<SysInputArch>(
         ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
     llm_system::registerTypes(registry);
-    registry.registerArchetype<Port>();
+    // 037 第四刀: Port 实体在 init 期按拓扑固定创建 (<= MAX_TOPO_PORTS=41088),
+    // 显式指定 max_num_entities_per_world=MAX_TOPO_PORTS 走 fixed 表路径,
+    // 消除 VMM x2 翻倍扩容至 65,241 行的 24,281 行空行浪费 (~7.5 GiB).
+    registry.registerArchetype<Port>(
+        ComponentMetadataSelector<> {}, ArchetypeFlags::None, MAX_TOPO_PORTS);
     registry.registerArchetype<FlowMeta>();
     registry.registerArchetype<FlowTag>();
 
@@ -187,14 +191,14 @@ Sim::Sim(Engine &ctx, const Config &cfg, const WorldInit &init)
 
     Entity sys_input = ctx.makeEntity<SysInputArch>();
     ctx.get<ProcessParams>(sys_input) = ProcessParams {};
-    ctx.get<InferenceConfigData>(sys_input) = InferenceConfigData {};
-    ctx.get<InferenceRequestData>(sys_input) = InferenceRequestData {};
-    ctx.get<WorkloadParamsTableData>(sys_input) = WorkloadParamsTableData {};
+    zeroStruct(ctx.get<InferenceConfigData>(sys_input));
+    zeroStruct(ctx.get<InferenceRequestData>(sys_input));
+    zeroStruct(ctx.get<WorkloadParamsTableData>(sys_input));
     init_entity = sys_input;
     ctx.singleton<SystemStatus>() = SystemStatus {};
     zeroInferenceRuntime(ctx.singleton<InferenceRuntime>());
-    ctx.singleton<InferenceStatsData>() = InferenceStatsData {};
-    ctx.singleton<InferenceResetRoster>() = InferenceResetRoster {};
+    zeroStruct(ctx.singleton<InferenceStatsData>());
+    resetInferenceResetRoster(ctx.singleton<InferenceResetRoster>());
     // A9 per-request stats split: the per-request worker entities are
     // created lazily in initializeInference (one per request slot), so
     // worlds without inference (and requests beyond num_requests) never

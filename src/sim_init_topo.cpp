@@ -33,8 +33,9 @@ void Sim::loadTopo(Engine &ctx)
         NodeId min_node_id = node_defs[0].id;
         NodeId max_node_id = node_defs[0].id;
 
+#pragma unroll 1
         for (int32_t i = 0; i < numTopoNodes; i++) {
-            topoNodes[i] = TopoNodeState {};
+            resetTopoNodeState(topoNodes[i]);
             topoNodes[i].id = node_defs[i].id;
             topoNodes[i].type = node_defs[i].type;
             topoNodes[i].port_bw = node_defs[i].port_bw;

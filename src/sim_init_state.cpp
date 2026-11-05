@@ -39,7 +39,7 @@ void Sim::resetNetworkState()
 
 #pragma unroll 1
     for (int32_t i = 0; i < MAX_TOPO_NODES; i++) {
-        topoNodes[i] = TopoNodeState {};
+        resetTopoNodeState(topoNodes[i]);
         nodeSlotLookup[i] = -1;
     }
 
