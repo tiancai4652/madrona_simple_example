@@ -221,7 +221,7 @@ constexpr uint32_t MAX_FLOWS_PER_NPU = 256; // 048-llama: 256->2048（040-llama�
 // num_flow_completions()/flow_completion(idx) stay consistent for
 // dynamically injected flows (the static flow-file path keeps rebuilding
 // its records straight from flowMetaEntities[] as before).
-constexpr int32_t MAX_DYNAMIC_FLOW_COMPLETIONS = 16384;
+constexpr int32_t MAX_DYNAMIC_FLOW_COMPLETIONS = 65536; // 050-kv0: 16384->65536（128卡双批动态流~48K，3x余量；+2.5MB/世界可忽略；超限继续overflow_count响亮可查）
 
 // Matches the layout of the completion record snapshotted by
 // Sim::recordFlowCompletion(). Kept POD so it can be copied into the
